@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -39,7 +40,8 @@ type LogEntry struct {
 
 // NewLogger 创建日志管理器，打印 banner 到终端和 session 日志
 func NewLogger(runID, logDir, version, author, contact string) (*Logger, error) {
-	if err := os.MkdirAll(logDir, 0700); err != nil {
+	// 检查并创建日志目录
+	if err := ensureDirectory(logDir); err != nil {
 		return nil, fmt.Errorf("failed to create log directory: %w", err)
 	}
 
@@ -323,4 +325,40 @@ func redact(s string) string {
 		})
 	}
 	return result
+}
+
+// ensureDirectory 确保目录存在，如果存在则不创建，如果存在同名文件则删除并创建目录
+// 跨平台兼容：Windows 和 Unix/Linux
+// 递归检查父路径，确保父路径都是目录而不是文件
+func ensureDirectory(dir string) error {
+	// 首先尝试直接创建目录（如果已存在且是目录，会返回 nil）
+	var perm os.FileMode
+	if runtime.GOOS == "windows" {
+		perm = os.ModePerm
+	} else {
+		perm = 0700
+	}
+
+	// 尝试创建目录（包括所有必要的父目录）
+	if err := os.MkdirAll(dir, perm); err != nil {
+		// 如果创建失败，检查是否是因为同名文件存在
+		if info, statErr := os.Stat(dir); statErr == nil {
+			// 路径存在但创建失败，可能是因为是文件而不是目录
+			if !info.IsDir() {
+				// 存在同名文件，需要删除
+				if err := os.Remove(dir); err != nil {
+					if runtime.GOOS == "windows" {
+						return fmt.Errorf("path %s exists but is a file, not a directory. Please close any programs using this file and try again, or manually delete it: %w", dir, err)
+					}
+					return fmt.Errorf("path %s exists but is not a directory, failed to remove: %w", dir, err)
+				}
+				// 文件删除成功，再次尝试创建目录
+				return os.MkdirAll(dir, perm)
+			}
+			// 是目录，不应报错，返回原始错误
+		}
+		return fmt.Errorf("failed to create directory %s: %w", dir, err)
+	}
+
+	return nil
 }

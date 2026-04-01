@@ -45,6 +45,7 @@ func GetAllSteps() []*runner.Step {
 		// Installation
 		StepC015InstallSoftware(),
 		StepC016DeployDatabase(),
+		StepC016BConfigureTPCC(),
 		StepC016ACreateArchDG(),
 
 		// Post installation

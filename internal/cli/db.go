@@ -30,6 +30,7 @@ var (
 	dbRedoFileNum   int    // REDO 文件个数
 	dbRedoFileSize  string // REDO 文件大小
 	dbCustomSQLScript string // 自定义 SQL 脚本路径
+	dbTPCC          bool   // TPCC 参数优化
 
 	// OS user parameters for DB (needed for gen-config)
 	dbOSUser         string
@@ -110,16 +111,18 @@ func init() {
 	dbCmd.Flags().StringVar(&dbCharacterSet, "db-character-set", "utf8", "Character set (utf8/gbk)")
 	dbCmd.Flags().BoolVar(&dbUseNativeType, "db-use-native-type", true, "Use native type")
 	dbCmd.Flags().StringVar(&dbSysPassword, "db-sys-password", "Yashan1!", "Database SYS password")
-	dbCmd.Flags().StringVar(&dbInstallPath, "db-home-path", "/data/yashan/yasdb_home", "Software installation path")
-	dbCmd.Flags().StringVar(&dbDataPath, "db-data-path", "/data/yashan/yasdb_data", "Data directory path")
-	dbCmd.Flags().StringVar(&dbLogPath, "db-log-path", "/data/yashan/log", "Log directory path")
-	dbCmd.Flags().StringVar(&dbStageDir, "db-stage-dir", "/home/yashan/install", "Stage directory for extraction")
+	dbCmd.Flags().StringVar(&dbInstallPath, "db-home-path", "/data/yashan/yasdb_home", "Software installation path (auto-appends _<port> for non-default ports, e.g., yasdb_home_2688)")
+	dbCmd.Flags().StringVar(&dbDataPath, "db-data-path", "/data/yashan/yasdb_data", "Data directory path (auto-appends _<port> for non-default ports, e.g., yasdb_data_2688)")
+	dbCmd.Flags().StringVar(&dbLogPath, "db-log-path", "/data/yashan/log", "Log directory path (auto-appends _<port> for non-default ports, e.g., log_2688)")
+	dbCmd.Flags().StringVar(&dbStageDir, "db-stage-dir", "/home/yashan/install", "Stage directory for extraction (auto-appends _<port> for non-default ports, e.g., install_2688)")
 	dbCmd.Flags().StringVar(&dbPackage, "db-package", "", "DB installation package path")
 	dbCmd.Flags().StringVar(&dbDepsPackage, "db-deps-package", "", "SSL deps package path (optional)")
 	dbCmd.Flags().IntVar(&dbNodes, "db-nodes", 0, "Number of nodes (auto-detected from targets)")
-	dbCmd.Flags().IntVar(&dbRedoFileNum, "db-redo-file-num", 0, "REDO file number (0=auto: 6 if memory>128GB, else 4)")
-	dbCmd.Flags().StringVar(&dbRedoFileSize, "db-redo-file-size", "", "REDO file size (empty=auto: 4G if memory>128GB, else 128M)")
+	dbCmd.Flags().IntVar(&dbRedoFileNum, "db-redo-file-num", 6, "REDO file number (default: 6)")
+	dbCmd.Flags().StringVar(&dbRedoFileSize, "db-redo-file-size", "128", "REDO file size in MB (default: 128, unit: MB)")
 	dbCmd.Flags().StringVar(&dbCustomSQLScript, "db-custom-sql-script", "", "Custom SQL script to execute after installation (supports: remote:/path, local:/path, /absolute/path, relative/path)")
+	dbCmd.Flags().BoolVar(&dbTPCC, "db-tpcc", false, "Enable TPCC parameter optimization (default: false)")
+	dbCmd.Flags().MarkHidden("db-tpcc")
 
 	// YAC diskgroup parameters (shared with os command)
 	dbCmd.Flags().StringVar(&yacSystemDG, "yac-systemdg", "", "System diskgroup (format: dgname:/dev/sda,/dev/sdb, required for YAC)")
@@ -145,7 +148,7 @@ func init() {
 	// YAC YFS tuning parameters
 	dbCmd.Flags().BoolVar(&yacYFSTuneEnable, "yac-yfs-tune", false, "Enable YFS tuning")
 	dbCmd.Flags().StringVar(&yacYFSAuSize, "yac-yfs-au-size", "32M", "YFS allocation unit size")
-	dbCmd.Flags().StringVar(&yacRedoFileSize, "yac-redo-file-size", "1G", "Redo file size")
+	dbCmd.Flags().StringVar(&yacRedoFileSize, "yac-redo-file-size", "128", "Redo file size in MB (default: 128, unit: MB)")
 	dbCmd.Flags().IntVar(&yacRedoFileNum, "yac-redo-file-num", 6, "Number of redo files")
 	dbCmd.Flags().StringVar(&yacShmPoolSize, "yac-shm-pool-size", "2G", "Shared memory pool size")
 	dbCmd.Flags().IntVar(&yacMaxInstances, "yac-max-instances", 64, "Maximum instances")
@@ -581,6 +584,27 @@ func buildDBParams(isYACMode bool, targetCount int) map[string]interface{} {
 	// Start with OS params
 	params := buildOSParams(isYACMode, targetCount)
 
+	// Auto-adjust paths based on port number (if not default 1688)
+	// For non-default ports, add _<port> suffix to avoid conflicts
+	if dbBeginPort != 1688 {
+		portSuffix := fmt.Sprintf("_%d", dbBeginPort)
+
+		// Only auto-adjust if user hasn't explicitly set these paths
+		// Check by comparing with default values
+		if dbInstallPath == "/data/yashan/yasdb_home" {
+			dbInstallPath = dbInstallPath + portSuffix
+		}
+		if dbDataPath == "/data/yashan/yasdb_data" {
+			dbDataPath = dbDataPath + portSuffix
+		}
+		if dbLogPath == "/data/yashan/log" {
+			dbLogPath = dbLogPath + portSuffix
+		}
+		if dbStageDir == "/home/yashan/install" {
+			dbStageDir = dbStageDir + portSuffix
+		}
+	}
+
 	// Override OS user params with DB-specific values if provided
 	if dbOSUser != "" {
 		params["os_user"] = dbOSUser
@@ -637,6 +661,7 @@ func buildDBParams(isYACMode bool, targetCount int) map[string]interface{} {
 	params["db_redo_file_num"] = dbRedoFileNum
 	params["db_redo_file_size"] = dbRedoFileSize
 	params["db_custom_sql_script"] = dbCustomSQLScript
+	params["db_tpcc"] = dbTPCC
 
 	// YAC network params
 	params["yac_inter_cidr"] = yacInterCIDR

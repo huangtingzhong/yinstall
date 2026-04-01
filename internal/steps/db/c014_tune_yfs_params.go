@@ -36,10 +36,16 @@ func StepC014TuneYFSParams() *runner.Step {
 			configPath := filepath.Join(stageDir, clusterName+".toml")
 
 			auSize := ctx.GetParamString("yac_yfs_au_size", "32M")
-			redoFileSize := ctx.GetParamString("yac_redo_file_size", "1G")
+			redoFileSize := ctx.GetParamString("yac_redo_file_size", "128")
 			redoFileNum := ctx.GetParamInt("yac_redo_file_num", 6)
 			shmPoolSize := ctx.GetParamString("yac_shm_pool_size", "2G")
 			maxInstances := ctx.GetParamInt("yac_max_instances", 64)
+
+			// 如果 redoFileSize 没有单位后缀，自动添加 "M" (MB)
+			if redoFileSize != "" && !fmtUnitSuffix(redoFileSize) {
+				redoFileSize = redoFileSize + "M"
+				ctx.Logger.Info("Added 'M' suffix to redo file size: %s", redoFileSize)
+			}
 
 			ctx.Logger.Info("Tuning YFS parameters...")
 			ctx.Logger.Info("  au_size: %s", auSize)

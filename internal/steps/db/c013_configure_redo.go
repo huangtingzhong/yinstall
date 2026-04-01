@@ -3,10 +3,23 @@ package db
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
+
+// fmtUnitSuffix 检查字符串是否已经有单位后缀 (M, G, T, K等)
+func fmtUnitSuffix(s string) bool {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	suffixes := []string{"M", "G", "T", "K", "B"}
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(s, suffix) {
+			return true
+		}
+	}
+	return false
+}
 
 // StepC012AConfigureRedo Configure REDO file parameters in yashandb.toml
 func StepC012AConfigureRedo() *runner.Step {
@@ -29,6 +42,12 @@ func StepC012AConfigureRedo() *runner.Step {
 			// 获取用户指定的参数
 			redoFileNum := ctx.GetParamInt("db_redo_file_num", 0)
 			redoFileSize := ctx.GetParamString("db_redo_file_size", "")
+
+			// 如果 redoFileSize 没有单位后缀，自动添加 "M" (MB)
+			if redoFileSize != "" && !fmtUnitSuffix(redoFileSize) {
+				redoFileSize = redoFileSize + "M"
+				ctx.Logger.Info("Added 'M' suffix to redo file size: %s", redoFileSize)
+			}
 
 			// 如果参数未指定，根据内存大小自动设置
 			if redoFileNum == 0 || redoFileSize == "" {

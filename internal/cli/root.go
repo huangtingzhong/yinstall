@@ -102,8 +102,8 @@ func init() {
 }
 
 func defaultLogDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".yinstall", "logs")
+	// 直接在当前目录下创建 logs 目录
+	return "logs"
 }
 
 func defaultSSHKeyPath() string {
