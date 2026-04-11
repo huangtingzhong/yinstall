@@ -23,7 +23,17 @@ func StepH009SetupSQLPlus() *runner.Step {
 		PreCheck: func(ctx *runner.StepContext) error {
 			sqlplusPkg := ctx.GetParamString("ymp_instantclient_sqlplus", "")
 			if sqlplusPkg == "" {
-				return fmt.Errorf("--ymp-instantclient-sqlplus not provided, skipping sqlplus setup")
+				ctx.Logger.Info("ymp_instantclient_sqlplus not specified, searching for latest instantclient-sqlplus package...")
+				remoteDir := ctx.RemoteSoftwareDir
+				if remoteDir == "" {
+					remoteDir = "/data/yashan/soft"
+				}
+				latestPkg, err := commonfile.FindLatestInstantclientSQLPlusPackage(ctx, ctx.LocalSoftwareDirs, remoteDir)
+				if err != nil {
+					return fmt.Errorf("instantclient-sqlplus not specified and auto-search found nothing, skipping")
+				}
+				ctx.Logger.Info("Found latest instantclient-sqlplus package: %s", latestPkg)
+				ctx.Params["ymp_instantclient_sqlplus"] = latestPkg
 			}
 			return nil
 		},
@@ -37,7 +47,7 @@ func StepH009SetupSQLPlus() *runner.Step {
 			// 解压 sqlplus 包
 			ctx.Logger.Info("Looking for sqlplus package: %s", sqlplusPkg)
 			fullPath, err := commonfile.FindAndDistribute(
-				ctx.Executor,
+				ctx,
 				sqlplusPkg,
 				ctx.LocalSoftwareDirs,
 				ctx.RemoteSoftwareDir,

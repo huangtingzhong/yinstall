@@ -32,7 +32,7 @@ func StepC001PortCheck() *runner.Step {
 				// 使用精确匹配避免误匹配（如 1688 不会匹配到 16888）
 				hctx.Logger.Info("Checking if port %d is in use on %s...", beginPort, th.Host)
 				portCmd := fmt.Sprintf("ss -tuln 2>/dev/null | grep -E ':%d([^0-9]|$)' || netstat -tlnp 2>/dev/null | grep -E ':%d([^0-9]|$)'", beginPort, beginPort)
-				result, err := hctx.Executor.Execute(portCmd, false)
+				result, err := hctx.Execute(portCmd, false)
 				if err != nil {
 					return fmt.Errorf("failed to check port %d on %s: %w", beginPort, th.Host, err)
 				}
@@ -42,7 +42,7 @@ func StepC001PortCheck() *runner.Step {
 					hctx.Logger.Warn("Port %d is already in use on %s: %s", beginPort, th.Host, portInfo)
 					// 尝试检查是否是yasdb进程占用的
 					yasdbCheckCmd := fmt.Sprintf("netstat -tlnp 2>/dev/null | grep -E ':%d([^0-9]|$)' | grep -i yasdb", beginPort)
-					yasdbResult, _ := hctx.Executor.Execute(yasdbCheckCmd, false)
+					yasdbResult, _ := hctx.Execute(yasdbCheckCmd, false)
 					if yasdbResult != nil && yasdbResult.GetExitCode() == 0 {
 						// 是yasdb进程占用了端口
 						return fmt.Errorf("port %d is already in use by YashanDB process on %s; port info: %s; please stop the database first or use clean command to remove it", beginPort, th.Host, portInfo)
@@ -55,11 +55,11 @@ func StepC001PortCheck() *runner.Step {
 				// 2. 检查安装目录是否存在（如果存在，说明数据库可能已安装）
 				hctx.Logger.Info("Checking if installation directory exists on %s...", th.Host)
 				dirCmd := fmt.Sprintf("test -d %s", installPath)
-				dirResult, _ := hctx.Executor.Execute(dirCmd, false)
+				dirResult, _ := hctx.Execute(dirCmd, false)
 				if dirResult != nil && dirResult.GetExitCode() == 0 {
 					// 检查目录是否为空（可能只是创建了目录但未安装）
 					checkEmptyCmd := fmt.Sprintf("test -f %s/bin/yasboot || test -f %s/om/bin/monit", installPath, installPath)
-					emptyResult, _ := hctx.Executor.Execute(checkEmptyCmd, false)
+					emptyResult, _ := hctx.Execute(checkEmptyCmd, false)
 					if emptyResult != nil && emptyResult.GetExitCode() == 0 {
 						// 目录存在且包含数据库文件，给出警告但继续（因为端口检查已经通过）
 						hctx.Logger.Warn("Installation directory %s already exists on %s with database files, but target port %d is available; proceeding with installation", installPath, th.Host, beginPort)
@@ -82,7 +82,7 @@ func StepC001PortCheck() *runner.Step {
 				}
 				// 检查安装路径下是否有进程，且命令行参数中包含集群名（-c clusterName）
 				processCmd := fmt.Sprintf("ps -ef | grep -E '(yasdb|yasagent|yasom)' | grep -v grep | grep '%s' | grep -E '(-c %s|--cluster %s)'", installPathPattern, clusterName, clusterName)
-				processResult, _ := hctx.Executor.Execute(processCmd, false)
+				processResult, _ := hctx.Execute(processCmd, false)
 				if processResult != nil && processResult.GetExitCode() == 0 && strings.TrimSpace(processResult.GetStdout()) != "" {
 					processInfo := strings.TrimSpace(processResult.GetStdout())
 					// 找到了进程，但端口检查已通过，所以只给出警告

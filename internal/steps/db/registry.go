@@ -37,6 +37,7 @@ func GetAllSteps() []*runner.Step {
 		// Configuration
 		StepC011GenConfig(),
 		StepC012SetCharacterSet(),
+		StepC012BDisableArchivelog(),
 		StepC012AConfigureRedo(), // Configure REDO file parameters
 		StepC013SetNativeType(),
 		// YFS tuning (C-007-YFS runs after native type setting; configures YFS parameters for YAC)

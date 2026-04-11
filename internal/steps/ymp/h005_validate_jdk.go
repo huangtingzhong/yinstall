@@ -23,13 +23,14 @@ func StepH005ValidateJDK() *runner.Step {
 			// 检查是否存在 java 命令
 			result, _ := ctx.Execute("which java 2>/dev/null", false)
 			if result == nil || result.GetExitCode() != 0 {
-				return fmt.Errorf("java not found, install JDK first (H-005)")
+				return fmt.Errorf("java not found on target host; " +
+					"either pre-install JDK manually, or add --ymp-jdk-enable=true --ymp-jdk-package=<jdk.rpm> to let H-006 install it automatically")
 			}
 			return nil
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			expectedVersion := ctx.GetParamString("ymp_jdk_version", "11")
+			expectedVersion := ctx.GetParamString("ymp_jdk_version", "17")
 
 			// 检测 CPU 架构
 			result, _ := ctx.Execute("uname -m", false)

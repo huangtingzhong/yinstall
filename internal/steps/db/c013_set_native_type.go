@@ -2,7 +2,7 @@ package db
 
 import (
 	"fmt"
-	"path/filepath"
+	"path"
 
 	"github.com/yinstall/internal/runner"
 )
@@ -26,7 +26,7 @@ func StepC013SetNativeType() *runner.Step {
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
 
-			configPath := filepath.Join(stageDir, clusterName+".toml")
+			configPath := path.Join(stageDir, clusterName+".toml")
 
 			var value string
 			if useNativeType {

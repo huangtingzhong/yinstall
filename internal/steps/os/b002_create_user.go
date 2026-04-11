@@ -31,7 +31,7 @@ func StepB002CreateUser() *runner.Step {
 			group := ctx.GetParamString("os_group", "yashan")
 			dbaGroup := ctx.GetParamString("os_dba_group", "YASDBA")
 			shell := ctx.GetParamString("os_user_shell", "/bin/bash")
-			isForce := ctx.IsForceStep()
+			forceDelete := ctx.IsForceDeleteUser()
 
 			// 检查用户是否已存在
 			result, _ := ctx.Execute(fmt.Sprintf("id -u %s 2>/dev/null", user), false)
@@ -46,25 +46,23 @@ func StepB002CreateUser() *runner.Step {
 					existingGroup = strings.TrimSpace(result.GetStdout())
 				}
 
-				if existingUID == expectedUID && existingGroup == group && !isForce {
+				if existingUID == expectedUID && existingGroup == group {
 					ctx.Logger.Info("User '%s' already exists with correct UID %s and group '%s'", user, existingUID, existingGroup)
 					ctx.SetResult("user_existed", true)
 					return nil
 				}
 
-				if isForce {
-					// Force mode: delete existing user to recreate (regardless of UID/group match)
-					ctx.Logger.Warn("Force mode: deleting user '%s' to recreate", user)
+				if forceDelete {
+					ctx.Logger.Warn("Force mode (--force-delete-user): deleting user '%s' to recreate", user)
 					if err := commonos.ForceDeleteUser(ctx, user); err != nil {
 						return err
 					}
 				} else {
-					// Not force mode and UID or group mismatch — report error
 					if existingUID != expectedUID {
-						return fmt.Errorf("user '%s' already exists with UID %s, but expected UID %s (use --force B-002 to recreate)", user, existingUID, expectedUID)
+						return fmt.Errorf("user '%s' already exists with UID %s, but expected UID %s (use -f --force-delete-user to recreate)", user, existingUID, expectedUID)
 					}
 					if existingGroup != group {
-						return fmt.Errorf("user '%s' already exists with primary group '%s', but expected group '%s' (use --force B-002 to recreate)", user, existingGroup, group)
+						return fmt.Errorf("user '%s' already exists with primary group '%s', but expected group '%s' (use -f --force-delete-user to recreate)", user, existingGroup, group)
 					}
 				}
 			}
@@ -74,13 +72,13 @@ func StepB002CreateUser() *runner.Step {
 			if result != nil && result.GetExitCode() == 0 && strings.TrimSpace(result.GetStdout()) != "" {
 				existingUser := strings.TrimSpace(result.GetStdout())
 				if existingUser != user {
-					if isForce {
-						ctx.Logger.Warn("Force mode: deleting user '%s' to free UID %d", existingUser, uid)
+					if forceDelete {
+						ctx.Logger.Warn("Force mode (--force-delete-user): deleting user '%s' to free UID %d", existingUser, uid)
 						if err := commonos.ForceDeleteUser(ctx, existingUser); err != nil {
 							return err
 						}
 					} else {
-						return fmt.Errorf("UID %d is already used by user '%s', cannot create user '%s' (use --force B-002 to recreate)", uid, existingUser, user)
+						return fmt.Errorf("UID %d is already used by user '%s', cannot create user '%s' (use -f --force-delete-user to recreate)", uid, existingUser, user)
 					}
 				}
 			}

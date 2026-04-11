@@ -6,6 +6,7 @@ package ymp
 import (
 	"fmt"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -42,9 +43,9 @@ func StepH002CreateUser() *runner.Step {
 				return fmt.Errorf("failed to create user %s: %w", user, err)
 			}
 
-			// 设置密码
-			cmd = fmt.Sprintf("echo '%s' | passwd %s --stdin 2>/dev/null || echo '%s:%s' | chpasswd",
-				password, user, user, password)
+			quoted := commonos.ShellSingleQuote(password)
+			cmd = fmt.Sprintf("echo %s | passwd %s --stdin 2>/dev/null || echo %s:%s | chpasswd",
+				quoted, user, user, quoted)
 			if _, err := ctx.ExecuteWithCheck(cmd, true); err != nil {
 				return fmt.Errorf("failed to set password for %s: %w", user, err)
 			}

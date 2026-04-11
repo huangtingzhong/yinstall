@@ -44,6 +44,7 @@ func StepB027SetHostname() *runner.Step {
 			var nodes []nodeInfo
 
 			for i, th := range hosts {
+				hctx := ctx.ForHost(th)
 				var newHostname string
 				if len(hosts) > 1 {
 					if len(hostnames) == 0 {
@@ -64,7 +65,7 @@ func StepB027SetHostname() *runner.Step {
 				ctx.Logger.Info("[%s] Setting hostname to: %s", th.Host, newHostname)
 
 				cmd := fmt.Sprintf("hostnamectl set-hostname %s", newHostname)
-				result, err := th.Executor.Execute(cmd, true)
+				result, err := hctx.Execute(cmd, true)
 				if err != nil {
 					return fmt.Errorf("[%s] failed to set hostname: %w", th.Host, err)
 				}
@@ -72,8 +73,15 @@ func StepB027SetHostname() *runner.Step {
 					return fmt.Errorf("[%s] hostnamectl failed: %s", th.Host, result.GetStderr())
 				}
 
-				nodes = append(nodes, nodeInfo{ip: th.Host, hostname: newHostname})
-				ctx.Logger.Info("[%s] Hostname set to: %s", th.Host, newHostname)
+			// 本地模式下 th.Host = "localhost"，需取真实 IP 写入 /etc/hosts
+			ip := th.Host
+			if ip == "localhost" || ip == "127.0.0.1" {
+				if r, _ := hctx.Execute("hostname -I | awk '{print $1}'", false); r != nil && strings.TrimSpace(r.GetStdout()) != "" {
+					ip = strings.TrimSpace(r.GetStdout())
+				}
+			}
+			nodes = append(nodes, nodeInfo{ip: ip, hostname: newHostname})
+			ctx.Logger.Info("[%s] Hostname set to: %s (hosts entry IP: %s)", th.Host, newHostname, ip)
 			}
 
 			if len(nodes) > 0 {
@@ -83,7 +91,8 @@ func StepB027SetHostname() *runner.Step {
 				}
 				ctx.Logger.Info("Writing hostname entries to /etc/hosts on all nodes: %v", entries)
 				for _, th := range hosts {
-					if err := commonos.UpdateManagedHostsBlock(th.Executor, entries); err != nil {
+					hctx := ctx.ForHost(th)
+					if err := commonos.UpdateManagedHostsBlock(hctx, entries); err != nil {
 						return fmt.Errorf("[%s] failed to update /etc/hosts: %w", th.Host, err)
 					}
 				}
@@ -95,7 +104,8 @@ func StepB027SetHostname() *runner.Step {
 		PostCheck: func(ctx *runner.StepContext) error {
 			hosts := ctx.HostsToRun()
 			for _, th := range hosts {
-				result, err := th.Executor.Execute("hostname", false)
+				hctx := ctx.ForHost(th)
+				result, err := hctx.Execute("hostname", false)
 				if err != nil {
 					return fmt.Errorf("[%s] failed to verify hostname: %w", th.Host, err)
 				}

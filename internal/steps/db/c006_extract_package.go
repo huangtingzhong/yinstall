@@ -5,7 +5,7 @@ package db
 
 import (
 	"fmt"
-	"path/filepath"
+	"path"
 	"strings"
 
 	"github.com/yinstall/internal/common/file"
@@ -31,7 +31,7 @@ func StepC006ExtractPackage() *runner.Step {
 					remoteDir = "/data/yashan/soft"
 				}
 
-				latestPkg, err := file.FindLatestDBPackage(ctx.Executor, ctx.LocalSoftwareDirs, remoteDir)
+				latestPkg, err := file.FindLatestDBPackage(ctx, ctx.LocalSoftwareDirs, remoteDir)
 				if err != nil {
 					return fmt.Errorf("db_package not specified and auto-search failed: %w", err)
 				}
@@ -61,7 +61,7 @@ func StepC006ExtractPackage() *runner.Step {
 			ctx.Logger.Info("Local software dirs: %v", ctx.LocalSoftwareDirs)
 
 			fullPath, err := file.FindAndDistribute(
-				ctx.Executor,
+				ctx,
 				pkgPath,
 				ctx.LocalSoftwareDirs,
 				remoteDir,
@@ -104,7 +104,7 @@ func StepC006ExtractPackage() *runner.Step {
 
 		PostCheck: func(ctx *runner.StepContext) error {
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
-			yasbootPath := filepath.Join(stageDir, "bin/yasboot")
+			yasbootPath := path.Join(stageDir, "bin/yasboot")
 			result, _ := ctx.Execute(fmt.Sprintf("test -x %s", yasbootPath), false)
 			if result == nil || result.GetExitCode() != 0 {
 				return fmt.Errorf("yasboot not found at %s", yasbootPath)

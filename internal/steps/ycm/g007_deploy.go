@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -117,8 +118,8 @@ func StepG007Deploy() *runner.Step {
 			if driver == "yashandb" {
 				dbAdminUser := ctx.GetParamString("ycm_db_admin_user", "yasman")
 				dbAdminPassword := ctx.GetParamString("ycm_db_admin_password", "")
-				cmd = fmt.Sprintf("%s deploy --conf %s --username %s --password '%s'",
-					ycmInit, deployFile, dbAdminUser, dbAdminPassword)
+				cmd = fmt.Sprintf("%s deploy --conf %s --username %s --password %s",
+					ycmInit, deployFile, dbAdminUser, commonos.ShellSingleQuote(dbAdminPassword))
 			} else {
 				// sqlite3 模式
 				cmd = fmt.Sprintf("%s deploy --conf %s", ycmInit, deployFile)

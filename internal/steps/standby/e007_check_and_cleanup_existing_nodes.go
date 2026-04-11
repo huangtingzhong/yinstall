@@ -32,7 +32,7 @@ func StepE007CheckAndCleanupExistingNodes() *runner.Step {
 			}
 
 			// Get primary environment file path
-			envFile, err := GetPrimaryEnvFile(ctx, ctx.Executor)
+			envFile, err := GetPrimaryEnvFile(ctx)
 			if err != nil {
 				return fmt.Errorf("failed to get primary environment file: %w", err)
 			}
@@ -45,7 +45,7 @@ func StepE007CheckAndCleanupExistingNodes() *runner.Step {
 			specifiedEnvFile := ctx.GetParamString("primary_env_file", "")
 			if specifiedEnvFile != "" {
 				// primary_env_file is specified, extract cluster name from it
-				clusterName, err = ExtractClusterNameFromEnvFile(ctx.Executor, envFile)
+				clusterName, err = ExtractClusterNameFromEnvFile(ctx, envFile)
 				if err != nil {
 					return fmt.Errorf("failed to extract cluster name from specified environment file %s: %w", envFile, err)
 				}
@@ -172,7 +172,7 @@ func StepE007CheckAndCleanupExistingNodes() *runner.Step {
 			primaryUser := GetPrimaryOSUser(ctx)
 			targets := ctx.GetParamStringSlice("standby_targets")
 
-			envFile, err := GetPrimaryEnvFile(ctx, ctx.Executor)
+			envFile, err := GetPrimaryEnvFile(ctx)
 			if err != nil {
 				ctx.Logger.Warn("Failed to get primary environment file for post-check: %v", err)
 				return nil // PostCheck is optional
@@ -181,7 +181,7 @@ func StepE007CheckAndCleanupExistingNodes() *runner.Step {
 			var clusterName string
 			specifiedEnvFile := ctx.GetParamString("primary_env_file", "")
 			if specifiedEnvFile != "" {
-				clusterName, _ = ExtractClusterNameFromEnvFile(ctx.Executor, envFile)
+				clusterName, _ = ExtractClusterNameFromEnvFile(ctx, envFile)
 			}
 			if clusterName == "" {
 				clusterName = ctx.GetParamString("db_cluster_name", "yashandb")

@@ -2,7 +2,7 @@ package db
 
 import (
 	"fmt"
-	"path/filepath"
+	"path"
 	"strings"
 
 	commonos "github.com/yinstall/internal/common/os"
@@ -37,7 +37,7 @@ func StepC012AConfigureRedo() *runner.Step {
 		Action: func(ctx *runner.StepContext) error {
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
-			configPath := filepath.Join(stageDir, clusterName+".toml")
+			configPath := path.Join(stageDir, clusterName+".toml")
 
 			// 获取用户指定的参数
 			redoFileNum := ctx.GetParamInt("db_redo_file_num", 0)
@@ -105,7 +105,7 @@ func StepC012AConfigureRedo() *runner.Step {
 		PostCheck: func(ctx *runner.StepContext) error {
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
-			configPath := filepath.Join(stageDir, clusterName+".toml")
+			configPath := path.Join(stageDir, clusterName+".toml")
 
 			// 验证配置是否生效
 			result, _ := ctx.Execute(fmt.Sprintf("grep 'REDO_FILE_NUM' %s", configPath), false)

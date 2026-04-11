@@ -42,6 +42,11 @@ func StepH004InstallDeps() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			// local-iso 模式：确保 ISO 已挂载、repo 文件就绪
+			if err := commonos.EnsureLocalISORepo(ctx); err != nil {
+				return fmt.Errorf("failed to prepare local ISO repo: %w", err)
+			}
+
 			packages := ctx.GetParamString("ymp_deps_packages", "libaio lsof")
 			yumMode := ctx.GetParamString("os_yum_mode", "none")
 			pkgManager := commonos.GetPkgManager(ctx.OSInfo)

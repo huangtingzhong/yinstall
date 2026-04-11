@@ -30,7 +30,7 @@ func StepG002ExtractPackage() *runner.Step {
 					remoteDir = "/data/yashan/soft"
 				}
 
-				latestPkg, err := file.FindLatestYCMPackage(ctx.Executor, ctx.LocalSoftwareDirs, remoteDir)
+				latestPkg, err := file.FindLatestYCMPackage(ctx, ctx.LocalSoftwareDirs, remoteDir)
 				if err != nil {
 					return fmt.Errorf("ycm_package not specified and auto-search failed: %w", err)
 				}
@@ -57,7 +57,7 @@ func StepG002ExtractPackage() *runner.Step {
 
 			// 查找并分发安装包
 			fullPath, err := file.FindAndDistribute(
-				ctx.Executor,
+				ctx,
 				pkgPath,
 				ctx.LocalSoftwareDirs,
 				remoteDir,

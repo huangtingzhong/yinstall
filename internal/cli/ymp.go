@@ -18,8 +18,12 @@ import (
 
 var (
 	// YMP OS 控制
-	ympSkipOS              bool // 是否跳过 OS 基线配置，默认 true
-	ympIgnoreInstallErrors bool // 忽略软件包安装错误
+	ympSkipOS              bool   // 是否跳过 OS 基线配置，默认 true
+	ympIgnoreInstallErrors bool   // 忽略软件包安装错误
+	ympOSYumMode           string // YUM 模式：online/local-iso/none
+	ympOSISODevice         string // ISO 文件路径、文件名或块设备（local-iso 模式使用）
+	ympOSISOMountpoint     string // ISO 挂载目录
+	ympOSYumRepoFile       string // YUM repo 文件路径
 
 	// YMP 用户参数
 	ympUser         string
@@ -74,6 +78,10 @@ func init() {
 	// OS 控制
 	ympCmd.Flags().BoolVar(&ympSkipOS, "skip-os", true, "Skip OS baseline preparation (default: true)")
 	ympCmd.Flags().BoolVar(&ympIgnoreInstallErrors, "os-ignore-install-errors", false, "Ignore package installation errors and continue (only show warnings)")
+	ympCmd.Flags().StringVar(&ympOSYumMode, "os-yum-mode", "none", "YUM/DNF mode: none (use system repos), local-iso (use mounted ISO repo only), online (internet repos)")
+	ympCmd.Flags().StringVar(&ympOSISODevice, "os-iso-device", "/dev/cdrom", "ISO file path/name or block device used when --os-yum-mode=local-iso (auto-searched if filename only)")
+	ympCmd.Flags().StringVar(&ympOSISOMountpoint, "os-iso-mountpoint", "/media", "Mount point for ISO when --os-yum-mode=local-iso")
+	ympCmd.Flags().StringVar(&ympOSYumRepoFile, "os-yum-repo-file", "/etc/yum.repos.d/local.repo", "YUM repo file path for local-iso mode")
 
 	// 用户参数
 	ympCmd.Flags().StringVar(&ympUser, "ymp-user", "ymp", "YMP user name")
@@ -86,13 +94,13 @@ func init() {
 
 	// JDK 参数
 	ympCmd.Flags().BoolVar(&ympJDKEnable, "ymp-jdk-enable", false, "Install JDK (false = validate only)")
-	ympCmd.Flags().StringVar(&ympJDKVersion, "ymp-jdk-version", "11", "Expected JDK version (8/11/17)")
+	ympCmd.Flags().StringVar(&ympJDKVersion, "ymp-jdk-version", "17", "Expected JDK version (8/11/17)")
 	ympCmd.Flags().StringVar(&ympJDKPackage, "ymp-jdk-package", "", "JDK package path (required when --ymp-jdk-enable)")
 
 	// 软件包参数
-	ympCmd.Flags().StringVar(&ympInstantclientBasic, "ymp-instantclient-basic", "", "Oracle instantclient basic zip (required)")
+	ympCmd.Flags().StringVar(&ympInstantclientBasic, "ymp-instantclient-basic", "", "Oracle instantclient basic zip (optional, auto-searched if not specified; e.g. instantclient-basic-linux.arm64-19.10.0.0.0dbru-2.zip)")
 	ympCmd.Flags().StringVar(&ympInstantclientSQLPlus, "ymp-instantclient-sqlplus", "", "Oracle instantclient sqlplus zip (optional)")
-	ympCmd.Flags().StringVar(&ympDBPackage, "ymp-db-package", "", "YashanDB package for embedded database (required)")
+	ympCmd.Flags().StringVar(&ympDBPackage, "ymp-db-package", "", "YashanDB package for embedded database (optional, auto-searched if not specified)")
 
 	// 环境变量
 	ympCmd.Flags().StringVar(&ympOracleEnvFile, "ymp-oracle-env-file", "", "Oracle env file path (default: /home/<ymp-user>/.oracle)")
@@ -109,6 +117,10 @@ func init() {
 
 // runYMP 执行 YMP 安装流程
 func runYMP(cmd *cobra.Command, args []string) error {
+	if err := validatePort("--ymp-port", ympPort); err != nil {
+		return err
+	}
+
 	flags := GetGlobalFlags()
 
 	// If --targets is not specified, default to local execution.
@@ -124,15 +136,7 @@ func runYMP(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid --ymp-db-mode: '%s' (case-sensitive). Valid values are: 'yashandb' (default) or 'mysql'", ympDBMode)
 	}
 
-	// ymp_package 可以为空，会在 H-007 PreCheck 阶段自动查找最新版本
-	if !flags.DryRun && !flags.Precheck {
-		if ympInstantclientBasic == "" {
-			return fmt.Errorf("--ymp-instantclient-basic is required")
-		}
-		if ympDBPackage == "" {
-			return fmt.Errorf("--ymp-db-package is required")
-		}
-	}
+	// ymp_package、ymp_instantclient_basic、ymp_db_package 均可为空，会在步骤 PreCheck 阶段自动查找最新版本
 
 	// 初始化日志
 	rid := flags.RunID
@@ -146,11 +150,15 @@ func runYMP(cmd *cobra.Command, args []string) error {
 	}
 	defer logger.Close()
 
+	// 构建参数
+	params := buildYMPParams(cmd, flags)
+
 	logger.Info("Starting YMP installation (RunID: %s)", rid)
 	logger.Info("Targets: %v", flags.Targets)
 	logger.Info("YMP user: %s", ympUser)
 	logger.Info("YMP package: %s", ympPackage)
-	logger.Info("Install directory: %s", ympInstallDir)
+	logger.Info("Install directory: %s", params["ymp_install_dir"])
+	logger.Info("YMP port: %d", ympPort)
 	logger.Info("JDK install: %v (version: %s)", ympJDKEnable, ympJDKVersion)
 
 	if ympSkipOS {
@@ -158,9 +166,6 @@ func runYMP(cmd *cobra.Command, args []string) error {
 	} else {
 		logger.Info("OS baseline preparation: ENABLED")
 	}
-
-	// 构建参数
-	params := buildYMPParams(flags)
 
 	// 收集所有步骤
 	var allSteps []*runner.Step
@@ -232,7 +237,9 @@ func runYMP(cmd *cobra.Command, args []string) error {
 				Results:           make(map[string]interface{}),
 				LocalSoftwareDirs: flags.LocalSoftwareDirs,
 				RemoteSoftwareDir: flags.RemoteSoftwareDir,
+				ForceAll:          flags.ForceAll,
 				ForceSteps:        flags.ForceSteps,
+				ForceDeleteUser:   flags.ForceDeleteUser,
 				StepIndex:         stepIndex,
 				TotalSteps:        totalSteps,
 			}
@@ -306,7 +313,9 @@ func runYMP(cmd *cobra.Command, args []string) error {
 					OSInfo:            info.OSInfo,
 					LocalSoftwareDirs: flags.LocalSoftwareDirs,
 					RemoteSoftwareDir: flags.RemoteSoftwareDir,
-					ForceSteps:        flags.ForceSteps,
+					ForceAll:          flags.ForceAll,
+				ForceSteps:        flags.ForceSteps,
+				ForceDeleteUser:   flags.ForceDeleteUser,
 					StepIndex:         stepIndex + i,
 					TotalSteps:        totalSteps,
 				}
@@ -343,7 +352,9 @@ func runYMP(cmd *cobra.Command, args []string) error {
 					OSInfo:            info.OSInfo,
 					LocalSoftwareDirs: flags.LocalSoftwareDirs,
 					RemoteSoftwareDir: flags.RemoteSoftwareDir,
-					ForceSteps:        flags.ForceSteps,
+					ForceAll:          flags.ForceAll,
+				ForceSteps:        flags.ForceSteps,
+				ForceDeleteUser:   flags.ForceDeleteUser,
 					StepIndex:         stepIndex + i,
 					TotalSteps:        totalSteps,
 				}
@@ -379,19 +390,29 @@ func runYMP(cmd *cobra.Command, args []string) error {
 }
 
 // buildYMPParams 构建 YMP 安装参数
-func buildYMPParams(flags GlobalFlags) map[string]interface{} {
+func buildYMPParams(cmd *cobra.Command, flags GlobalFlags) map[string]interface{} {
 	params := buildOSParams(false, len(flags.Targets))
 
 	// Override OS ignore install errors if specified
 	params["os_ignore_install_errors"] = ympIgnoreInstallErrors
+	// YUM 模式及 ISO 参数覆盖（与 db --os-yum-mode 对齐）
+	params["os_yum_mode"] = ympOSYumMode
+	params["os_iso_device"] = ympOSISODevice
+	params["os_iso_mountpoint"] = ympOSISOMountpoint
+	params["os_yum_repo_file"] = ympOSYumRepoFile
 
 	// YMP 用户参数
 	params["ymp_user"] = ympUser
 	params["ymp_user_password"] = ympUserPassword
 
-	// YMP 安装参数
+	// YMP 安装参数：非默认端口且未显式指定安装目录时，自动拼接端口号
+	installDir := ympInstallDir
+	if !cmd.Flags().Changed("ymp-install-dir") && ympPort != 8090 {
+		installDir = fmt.Sprintf("/opt/ymp%d", ympPort)
+	}
+
 	params["ymp_package"] = ympPackage
-	params["ymp_install_dir"] = ympInstallDir
+	params["ymp_install_dir"] = installDir
 	params["ymp_port"] = ympPort
 	// 其他端口根据 YMP 端口自动计算
 	params["ymp_db_port"] = ympPort + 1       // 数据库端口 = YMP端口 + 1
@@ -433,19 +454,15 @@ func getYMPRequiredOSSteps() []*runner.Step {
 	allOSSteps := ossteps.GetAllSteps()
 	requiredStepIDs := []string{
 		"B-000", // 连通性检查（必须）
-		// B-001, B-002, B-003, B-004 已移除：用户和组的创建在YMP步骤H-001中完成
+		// B-001~B-004 已移除：用户和组的创建在 YMP 步骤 H-001 中完成
 		"B-005", // 时区配置（建议，确保时间正确）
-		// B-008 已移除：用户资源限制配置在YMP步骤H-002中完成
-		"B-010", // 挂载ISO（如果需要通过YUM安装依赖包）
-		"B-011", // 配置YUM源（如果需要通过YUM安装依赖包）
-		"B-012", // 安装依赖包（基础配置，虽然安装的是数据库依赖，但这是基础OS配置）
-		"B-013", // chrony配置（建议，时间同步）
+		// B-008 已移除：用户资源限制配置在 YMP 步骤 H-002 中完成
+		// B-010, B-011, B-012 已移除：H-004/H-006 内部通过 EnsureLocalISORepo 自行处理 ISO 挂载和 repo 配置，
+		//   B-012 安装的是数据库依赖包（libzstd, lz4 等），YMP 不需要；YMP 自身依赖由 H-004（libaio, lsof）和 H-006（JDK）处理
+		"B-013", // chrony 配置（建议，时间同步）
 		"B-014", // 禁用防火墙（如果客户无特殊要求）
 		"B-027", // 主机名配置（基础配置）
-		// 注意：B-015（开放防火墙端口）可以通过--include-steps单独添加
-		// 注意：YMP用户（ymp）的创建在YMP步骤H-001中完成
-		// 注意：YMP用户资源限制配置在YMP步骤H-002中完成
-		// 注意：YMP依赖包（libaio lsof）的安装在YMP步骤H-003中完成
+		// 注意：B-015（开放防火墙端口）可以通过 --include-steps 单独添加
 	}
 
 	var ympOSSteps []*runner.Step

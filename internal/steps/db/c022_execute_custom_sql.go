@@ -2,11 +2,13 @@ package db
 
 import (
 	"fmt"
-	"path/filepath"
+	"path"         // remote (Linux) path
+	"path/filepath" // local (OS-native) path — for filepath.IsAbs on Windows
 	"regexp"
 	"strings"
 
 	"github.com/yinstall/internal/common/file"
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -46,11 +48,11 @@ func StepC022ExecuteCustomSQL() *runner.Step {
 
 			ctx.Logger.Info("Executing custom SQL script: %s", remotePath)
 
-			// 构建 yasql 命令
-			yasqlPath := filepath.Join(installPath, "bin/yasql")
+			// 构建 yasql 命令（installPath 是远端 Linux 路径，使用 path.Join）
+			yasqlPath := path.Join(installPath, "bin/yasql")
 
 			// yasql 连接命令：yasql sys/password@localhost:port/yasdb -f script.sql
-			connectStr := fmt.Sprintf("sys/%s@localhost:%d/%s", sysPassword, beginPort, clusterName)
+			connectStr := fmt.Sprintf("sys/%s@localhost:%d/%s", commonos.YasqlQuotePassword(sysPassword), beginPort, clusterName)
 			cmd := fmt.Sprintf("%s %s -f %s", yasqlPath, connectStr, remotePath)
 
 			ctx.Logger.Info("Running yasql command...")
@@ -87,41 +89,43 @@ func StepC022ExecuteCustomSQL() *runner.Step {
 }
 
 // resolveScriptPath 解析脚本路径，支持多种格式
-// 格式：
-//   - remote:/path/to/script.sql 或 r:/path/to/script.sql - 远程路径
-//   - local:/path/to/script.sql 或 l:/path/to/script.sql - 本地路径
-//   - /absolute/path/script.sql - 绝对路径（优先远程，不存在则上传）
-//   - relative/path/script.sql - 相对路径（从本地软件目录查找）
+//
+// 工具支持在 Windows/Linux/macOS 控制端运行，目标端始终为 Linux。
+// 路径语义：
+//   - remote:/path 或 r:/path   — 明确指定远端 Linux 路径，直接使用
+//   - local:/path 或 l:/path    — 明确指定本地文件，上传后使用
+//   - /absolute/path            — 以 '/' 开头，视为远端 Linux 绝对路径，先检查远端，
+//                                  不存在则尝试从本地上传
+//   - C:\...（Windows 本地绝对）  — filepath.IsAbs 为 true 但不以 '/' 开头，
+//                                  直接从本地上传
+//   - relative/path             — 相对路径，从本地软件目录查找并上传
 func resolveScriptPath(ctx *runner.StepContext, scriptPath string) (string, error) {
 	scriptPath = strings.TrimSpace(scriptPath)
 	if scriptPath == "" {
 		return "", fmt.Errorf("empty script path")
 	}
 
-	// 处理前缀方式
+	// 明确指定远程路径
 	if strings.HasPrefix(scriptPath, "remote:") || strings.HasPrefix(scriptPath, "r:") {
-		// 明确指定远程路径
 		remotePath := strings.TrimPrefix(scriptPath, "remote:")
 		remotePath = strings.TrimPrefix(remotePath, "r:")
 		remotePath = strings.TrimSpace(remotePath)
 
-		// 验证远程文件是否存在
-		if !file.FileExists(ctx.Executor, remotePath) {
+		if !file.FileExists(ctx, remotePath) {
 			return "", fmt.Errorf("remote file not found: %s", remotePath)
 		}
 		ctx.Logger.Info("Using remote SQL script: %s", remotePath)
 		return remotePath, nil
 	}
 
+	// 明确指定本地路径
 	if strings.HasPrefix(scriptPath, "local:") || strings.HasPrefix(scriptPath, "l:") {
-		// 明确指定本地路径
 		localPath := strings.TrimPrefix(scriptPath, "local:")
 		localPath = strings.TrimPrefix(localPath, "l:")
 		localPath = strings.TrimSpace(localPath)
 
-		// 使用 FindAndDistribute 上传文件
 		remotePath, err := file.FindAndDistribute(
-			ctx.Executor,
+			ctx,
 			localPath,
 			ctx.LocalSoftwareDirs,
 			ctx.RemoteSoftwareDir,
@@ -133,18 +137,16 @@ func resolveScriptPath(ctx *runner.StepContext, scriptPath string) (string, erro
 		return remotePath, nil
 	}
 
-	// 处理绝对路径
-	if filepath.IsAbs(scriptPath) {
-		// 先检查远程是否存在
-		if file.FileExists(ctx.Executor, scriptPath) {
+	// 以 '/' 开头 → 远端 Linux 绝对路径，先检查远端，不存在则尝试本地上传
+	// 注意：Windows 控制端下 filepath.IsAbs("/foo") == false，因此这里不用 filepath.IsAbs
+	if strings.HasPrefix(scriptPath, "/") {
+		if file.FileExists(ctx, scriptPath) {
 			ctx.Logger.Info("Using existing remote SQL script: %s", scriptPath)
 			return scriptPath, nil
 		}
-
-		// 远程不存在，尝试从本地上传
-		ctx.Logger.Info("Remote file not found, trying to upload from local...")
+		ctx.Logger.Info("Remote file not found at %s, trying to upload from local...", scriptPath)
 		remotePath, err := file.FindAndDistribute(
-			ctx.Executor,
+			ctx,
 			scriptPath,
 			ctx.LocalSoftwareDirs,
 			ctx.RemoteSoftwareDir,
@@ -156,10 +158,26 @@ func resolveScriptPath(ctx *runner.StepContext, scriptPath string) (string, erro
 		return remotePath, nil
 	}
 
-	// 处理相对路径 - 从本地软件目录查找
+	// 本地平台绝对路径（如 Windows C:\...）→ 直接上传
+	if filepath.IsAbs(scriptPath) {
+		ctx.Logger.Info("Local absolute path detected, uploading: %s", scriptPath)
+		remotePath, err := file.FindAndDistribute(
+			ctx,
+			scriptPath,
+			ctx.LocalSoftwareDirs,
+			ctx.RemoteSoftwareDir,
+		)
+		if err != nil {
+			return "", fmt.Errorf("failed to upload local file: %w", err)
+		}
+		ctx.Logger.Info("Uploaded SQL script to: %s", remotePath)
+		return remotePath, nil
+	}
+
+	// 相对路径 → 从本地软件目录查找并上传
 	ctx.Logger.Info("Relative path detected, searching in local software directories...")
 	remotePath, err := file.FindAndDistribute(
-		ctx.Executor,
+		ctx,
 		scriptPath,
 		ctx.LocalSoftwareDirs,
 		ctx.RemoteSoftwareDir,

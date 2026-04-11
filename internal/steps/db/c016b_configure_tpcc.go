@@ -2,8 +2,10 @@ package db
 
 import (
 	"fmt"
-	"path/filepath"
+	"path"
+	"strings"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -18,17 +20,13 @@ func StepC016BConfigureTPCC() *runner.Step {
 		Optional:    true,
 
 		PreCheck: func(ctx *runner.StepContext) error {
-			// Check if TPCC optimization is enabled
 			tpccEnabled := ctx.GetParamBool("db_tpcc", false)
 			if !tpccEnabled {
 				return fmt.Errorf("TPCC optimization not enabled (--db-tpcc=false), skipping")
 			}
 
-			// Check if database is deployed
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
-
-			// Check if yasboot exists
-			yasbootPath := filepath.Join(stageDir, "bin", "yasboot")
+			yasbootPath := path.Join(stageDir, "bin", "yasboot")
 			result, err := ctx.Execute(fmt.Sprintf("test -f %s", yasbootPath), false)
 			if err != nil || result == nil || result.GetExitCode() != 0 {
 				return fmt.Errorf("yasboot not found at %s, database may not be deployed yet", yasbootPath)
@@ -45,7 +43,6 @@ func StepC016BConfigureTPCC() *runner.Step {
 
 			ctx.Logger.Info("Configuring TPCC optimization parameters...")
 
-			// TPCC optimization SQL statements
 			tpccSQLs := []string{
 				"ALTER SYSTEM SET UNDO_RETENTION = 30 SCOPE=SPFILE",
 				"ALTER SYSTEM SET UNDO_SHRINK_ENABLED = FALSE SCOPE=SPFILE",
@@ -70,26 +67,19 @@ func StepC016BConfigureTPCC() *runner.Step {
 				"ALTER SYSTEM SET DBWR_COUNT = 8 SCOPE=SPFILE",
 			}
 
-			// Build SQL command to execute via yasql
-			for _, sql := range tpccSQLs {
-				ctx.Logger.Info("Executing: %s", sql)
+			allSQL := strings.Join(tpccSQLs, ";\n") + ";"
+			yasqlPath := path.Join(stageDir, "bin", "yasql")
+			quotedPwd := commonos.YasqlQuotePassword(sysPassword)
+			yasqlCmd := fmt.Sprintf("%s sys/%s -c %s <<'TPCC_EOF'\n%s\nTPCC_EOF", yasqlPath, quotedPwd, clusterName, allSQL)
 
-				// Build yasql command with credentials
-				yasqlCmd := fmt.Sprintf("cd %s && su - %s -c 'echo \"%s\" | bin/yasql sys/%s -c %s'",
-					stageDir, user, sql, sysPassword, clusterName)
-
-				result, err := ctx.Execute(yasqlCmd, false)
-				if err != nil {
-					ctx.Logger.Warn("Failed to execute SQL (continuing): %s, error: %v", sql, err)
-					continue
-				}
-
-				if result.GetExitCode() != 0 {
-					ctx.Logger.Warn("SQL execution failed (continuing): %s, stderr: %s", sql, result.GetStderr())
-					continue
-				}
-
-				ctx.Logger.Info("✓ Successfully executed: %s", sql)
+			ctx.Logger.Info("Executing %d TPCC optimization SQLs via yasql...", len(tpccSQLs))
+			result, err := commonos.ExecuteAsUser(ctx, user, yasqlCmd, false)
+			if err != nil {
+				ctx.Logger.Warn("TPCC SQL execution error: %v", err)
+			} else if result.GetExitCode() != 0 {
+				ctx.Logger.Warn("TPCC SQL execution returned exit code %d: %s", result.GetExitCode(), result.GetStderr())
+			} else {
+				ctx.Logger.Info("All TPCC optimization SQLs executed successfully")
 			}
 
 			ctx.Logger.Info("TPCC parameter optimization completed")

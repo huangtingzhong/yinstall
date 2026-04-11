@@ -5,7 +5,7 @@ package ymp
 
 import (
 	"fmt"
-	"path/filepath"
+	"path"
 
 	commonfile "github.com/yinstall/internal/common/file"
 	"github.com/yinstall/internal/runner"
@@ -29,7 +29,7 @@ func StepH007ExtractYMP() *runner.Step {
 				if remoteDir == "" {
 					remoteDir = "/data/yashan/soft"
 				}
-				latestPkg, err := commonfile.FindLatestYMPPackage(ctx.Executor, ctx.LocalSoftwareDirs, remoteDir)
+				latestPkg, err := commonfile.FindLatestYMPPackage(ctx, ctx.LocalSoftwareDirs, remoteDir)
 				if err != nil {
 					return fmt.Errorf("ymp_package not specified and auto-search failed: %w", err)
 				}
@@ -47,7 +47,7 @@ func StepH007ExtractYMP() *runner.Step {
 			ctx.Logger.Info("Looking for YMP package: %s", ympPackage)
 
 			fullPath, err := commonfile.FindAndDistribute(
-				ctx.Executor,
+				ctx,
 				ympPackage,
 				ctx.LocalSoftwareDirs,
 				ctx.RemoteSoftwareDir,
@@ -78,7 +78,7 @@ func StepH007ExtractYMP() *runner.Step {
 
 		PostCheck: func(ctx *runner.StepContext) error {
 			installDir := ctx.GetParamString("ymp_install_dir", "/opt/ymp")
-			ympSh := filepath.Join(installDir, "yashan-migrate-platform", "bin", "ymp.sh")
+			ympSh := path.Join(installDir, "yashan-migrate-platform", "bin", "ymp.sh")
 
 			result, _ := ctx.Execute(fmt.Sprintf("test -f %s", ympSh), false)
 			if result == nil || result.GetExitCode() != 0 {

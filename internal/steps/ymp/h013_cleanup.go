@@ -5,7 +5,7 @@ package ymp
 
 import (
 	"fmt"
-	"path/filepath"
+	"path"
 
 	"github.com/yinstall/internal/runner"
 )
@@ -35,15 +35,15 @@ func StepH013Cleanup() *runner.Step {
 			ympUser := ctx.GetParamString("ymp_user", "ymp")
 
 			// 先停止 YMP 进程
-			ympSh := filepath.Join(installDir, "yashan-migrate-platform", "bin", "ymp.sh")
+			ympSh := path.Join(installDir, "yashan-migrate-platform", "bin", "ymp.sh")
 			ctx.Logger.Info("Stopping YMP service...")
 			ctx.Execute(fmt.Sprintf("su - %s -c 'sh %s stop' 2>/dev/null", ympUser, ympSh), true)
 
 			// 清理安装产物
 			cleanupPaths := []string{
-				filepath.Join(installDir, "yashan-migrate-platform", "db", "*"),
+				path.Join(installDir, "yashan-migrate-platform", "db", "*"),
 				fmt.Sprintf("/home/%s/.yasboot/ymp.env", ympUser),
-				filepath.Join(installDir, "yashan-migrate-platform"),
+				path.Join(installDir, "yashan-migrate-platform"),
 				fmt.Sprintf("%s/instantclient_*", installDir),
 			}
 
@@ -58,7 +58,7 @@ func StepH013Cleanup() *runner.Step {
 
 		PostCheck: func(ctx *runner.StepContext) error {
 			installDir := ctx.GetParamString("ymp_install_dir", "/opt/ymp")
-			ympDir := filepath.Join(installDir, "yashan-migrate-platform")
+			ympDir := path.Join(installDir, "yashan-migrate-platform")
 
 			result, _ := ctx.Execute(fmt.Sprintf("test -d %s", ympDir), false)
 			if result != nil && result.GetExitCode() == 0 {

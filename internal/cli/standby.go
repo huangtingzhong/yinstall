@@ -286,8 +286,9 @@ func validateStandbyParams(flags GlobalFlags) error {
 		return fmt.Errorf("--targets is required (standby node IP addresses)")
 	}
 
-	// db-admin-password is not required for standby creation
-	// All SQL queries use / as sysdba connection which doesn't require password
+	if err := validatePort("--db-begin-port", standbyBeginPort); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -433,7 +434,9 @@ func prepareStandbyNodes(flags GlobalFlags, logger *logging.Logger, params map[s
 			Results:           make(map[string]interface{}),
 			LocalSoftwareDirs: flags.LocalSoftwareDirs,
 			RemoteSoftwareDir: flags.RemoteSoftwareDir,
+			ForceAll:          flags.ForceAll,
 			ForceSteps:        flags.ForceSteps,
+			ForceDeleteUser:   flags.ForceDeleteUser,
 		}
 
 		for _, step := range osSteps {
@@ -585,11 +588,13 @@ func executeExpansionSteps(executor ssh.Executor, logger *logging.Logger, params
 	logger.Info("Executing expansion steps on primary: %s", host)
 
 	ctx := &runner.StepContext{
-		Executor:   &runnerExecAdapter{e: executor},
-		Logger:     logger,
-		Params:     params,
-		Results:    make(map[string]interface{}),
-		ForceSteps: flags.ForceSteps,
+		Executor:        &runnerExecAdapter{e: executor},
+		Logger:          logger,
+		Params:          params,
+		Results:         make(map[string]interface{}),
+		ForceAll:        flags.ForceAll,
+		ForceSteps:      flags.ForceSteps,
+		ForceDeleteUser: flags.ForceDeleteUser,
 	}
 
 	// 执行扩容步骤（E-008, E-009, E-010, E-011）
@@ -641,11 +646,13 @@ func configureStandbyPostSteps(standbyHosts []*HostInfo, logger *logging.Logger,
 
 		ctx := &runner.StepContext{
 			Executor:   &runnerExecAdapter{e: host.Executor},
-			Logger:     logger,
-			Params:     params,
-			Results:    make(map[string]interface{}),
-			OSInfo:     host.OSInfo,
-			ForceSteps: flags.ForceSteps,
+			Logger:          logger,
+			Params:          params,
+			Results:         make(map[string]interface{}),
+			OSInfo:          host.OSInfo,
+			ForceAll:        flags.ForceAll,
+			ForceSteps:      flags.ForceSteps,
+			ForceDeleteUser: flags.ForceDeleteUser,
 		}
 
 		for _, step := range postSteps {

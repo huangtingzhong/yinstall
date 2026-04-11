@@ -36,7 +36,7 @@ func StepE005CheckArchiveDest() *runner.Step {
 			ctx.Logger.Info("  Primary user: %s", primaryUser)
 
 			// Get primary environment file path
-			envFile, err := GetPrimaryEnvFile(ctx, ctx.Executor)
+			envFile, err := GetPrimaryEnvFile(ctx)
 			if err != nil {
 				return fmt.Errorf("failed to get primary environment file: %w", err)
 			}
@@ -49,7 +49,7 @@ func StepE005CheckArchiveDest() *runner.Step {
 			specifiedEnvFile := ctx.GetParamString("primary_env_file", "")
 			if specifiedEnvFile != "" {
 				// primary_env_file is specified, extract cluster name from it
-				clusterName, err = ExtractClusterNameFromEnvFile(ctx.Executor, envFile)
+				clusterName, err = ExtractClusterNameFromEnvFile(ctx, envFile)
 				if err != nil {
 					return fmt.Errorf("failed to extract cluster name from specified environment file %s: %w", envFile, err)
 				}

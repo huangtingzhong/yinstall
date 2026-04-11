@@ -30,7 +30,7 @@ func StepC007AWriteHosts() *runner.Step {
 			hosts := ctx.HostsToRun()
 			accessMode := ctx.GetParamString("yac_access_mode", "vip")
 
-			existingEntries := commonos.ReadManagedHostsEntries(hosts[0].Executor)
+			existingEntries := commonos.ReadManagedHostsEntries(ctx.ForHost(hosts[0]))
 			ctx.Logger.Info("Existing managed /etc/hosts entries: %v", existingEntries)
 
 			var newEntries []string
@@ -39,7 +39,7 @@ func StepC007AWriteHosts() *runner.Step {
 			vips := ctx.GetParamStringSlice("yac_vips")
 			if len(vips) > 0 {
 				for i, th := range hosts {
-					hostname := getHostname(th.Executor)
+					hostname := getHostname(ctx.ForHost(th))
 					if hostname == "" {
 						hostname = fmt.Sprintf("node%d", i+1)
 					}
@@ -71,7 +71,7 @@ func StepC007AWriteHosts() *runner.Step {
 
 			ctx.Logger.Info("Writing %d entries to /etc/hosts on all nodes", len(newEntries))
 			for _, th := range hosts {
-				if err := commonos.UpdateManagedHostsBlock(th.Executor, newEntries); err != nil {
+				if err := commonos.UpdateManagedHostsBlock(ctx.ForHost(th), newEntries); err != nil {
 					return fmt.Errorf("[%s] failed to update /etc/hosts: %w", th.Host, err)
 				}
 				ctx.Logger.Info("[%s] /etc/hosts updated", th.Host)
@@ -85,11 +85,12 @@ func StepC007AWriteHosts() *runner.Step {
 			accessMode := ctx.GetParamString("yac_access_mode", "vip")
 
 			for _, th := range hosts {
-				hostname := getHostname(th.Executor)
+				hctx := ctx.ForHost(th)
+				hostname := getHostname(hctx)
 				if hostname == "" {
 					continue
 				}
-				result, _ := th.Executor.Execute(fmt.Sprintf("getent hosts %s", hostname), false)
+				result, _ := hctx.Execute(fmt.Sprintf("getent hosts %s", hostname), false)
 				if result != nil && result.GetStdout() != "" {
 					ctx.Logger.Info("[%s] getent hosts %s: %s", th.Host, hostname, strings.TrimSpace(result.GetStdout()))
 				}
@@ -100,8 +101,8 @@ func StepC007AWriteHosts() *runner.Step {
 				if scanMode == "local" {
 					scanName := ctx.GetParamString("yac_scanname", "")
 					if scanName != "" {
-						firstHost := hosts[0]
-						result, _ := firstHost.Executor.Execute(fmt.Sprintf("getent hosts %s", scanName), false)
+						hctx := ctx.ForHost(hosts[0])
+						result, _ := hctx.Execute(fmt.Sprintf("getent hosts %s", scanName), false)
 						if result != nil && result.GetStdout() != "" {
 							ctx.Logger.Info("getent hosts %s: %s", scanName, strings.TrimSpace(result.GetStdout()))
 						}
@@ -113,8 +114,8 @@ func StepC007AWriteHosts() *runner.Step {
 	}
 }
 
-func getHostname(executor runner.Executor) string {
-	result, _ := executor.Execute("hostname", false)
+func getHostname(ctx *runner.StepContext) string {
+	result, _ := ctx.Execute("hostname", false)
 	if result != nil {
 		return strings.TrimSpace(result.GetStdout())
 	}

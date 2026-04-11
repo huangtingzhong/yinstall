@@ -47,7 +47,7 @@ func StepE009InstallSoftware() *runner.Step {
 			ctx.Logger.Info("  Primary user: %s", primaryUser)
 
 			// Get primary environment file path
-			envFile, err := GetPrimaryEnvFile(ctx, ctx.Executor)
+			envFile, err := GetPrimaryEnvFile(ctx)
 			if err != nil {
 				return fmt.Errorf("failed to get primary environment file: %w", err)
 			}
@@ -109,7 +109,7 @@ func StepE009InstallSoftware() *runner.Step {
 			primaryUser := GetPrimaryOSUser(ctx)
 
 			// Get primary environment file path
-			envFile, err := GetPrimaryEnvFile(ctx, ctx.Executor)
+			envFile, err := GetPrimaryEnvFile(ctx)
 			if err != nil {
 				ctx.Logger.Warn("Failed to get primary environment file: %v", err)
 				return nil // PostCheck 允许失败

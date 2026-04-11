@@ -23,7 +23,7 @@ func StepC006ACleanStaleBashrc() *runner.Step {
 			user := ctx.GetParamString("os_user", "yashan")
 			for _, th := range ctx.HostsToRun() {
 				hctx := ctx.ForHost(th)
-				_, err := commonos.GetUserHomeDir(hctx.Executor, user)
+				_, err := commonos.GetUserHomeDir(hctx, user)
 				if err != nil {
 					return err
 				}
@@ -36,7 +36,7 @@ func StepC006ACleanStaleBashrc() *runner.Step {
 
 			for _, th := range ctx.HostsToRun() {
 				hctx := ctx.ForHost(th)
-				homeDir, err := commonos.GetUserHomeDir(hctx.Executor, user)
+				homeDir, err := commonos.GetUserHomeDir(hctx, user)
 				if err != nil {
 					continue
 				}
@@ -122,7 +122,7 @@ func cleanStaleEntriesFromFile(hctx *runner.StepContext, host, envFile string) i
 		checkResult, _ := hctx.Execute(fmt.Sprintf("test -d %s", yascsPath), false)
 		if checkResult == nil || checkResult.GetExitCode() != 0 {
 			hctx.Logger.Info("Removing stale YASCS_HOME on %s from %s: %s (dir not found)", host, envFile, yascsPath)
-			commonos.BashrcRemoveLine(hctx.Executor, envFile, "export YASCS_HOME=")
+			commonos.BashrcRemoveLine(hctx, envFile, "export YASCS_HOME=")
 			cleaned++
 		}
 	}

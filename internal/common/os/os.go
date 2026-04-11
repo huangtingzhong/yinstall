@@ -9,32 +9,26 @@ import (
 )
 
 // DetectOSInfo 检测并填充操作系统信息
-func DetectOSInfo(executor runner.Executor) *runner.OSInfo {
+func DetectOSInfo(ctx *runner.StepContext) *runner.OSInfo {
 	osInfo := &runner.OSInfo{}
 
-	// 获取 /etc/os-release 内容
-	result, _ := executor.Execute("cat /etc/os-release 2>/dev/null", false)
+	result, _ := ctx.Execute("cat /etc/os-release 2>/dev/null", false)
 	if result != nil && result.GetExitCode() == 0 {
 		ParseOSRelease(result.GetStdout(), osInfo)
 	}
 
-	// 获取内核版本
-	result, _ = executor.Execute("uname -r", false)
+	result, _ = ctx.Execute("uname -r", false)
 	if result != nil {
 		osInfo.Kernel = strings.TrimSpace(result.GetStdout())
 	}
 
-	// 获取 CPU 架构
-	result, _ = executor.Execute("uname -m", false)
+	result, _ = ctx.Execute("uname -m", false)
 	if result != nil {
 		osInfo.Arch = strings.TrimSpace(result.GetStdout())
 	}
 
-	// 判断操作系统类型
 	DetectOSType(osInfo)
-
-	// 确定包管理器
-	detectPkgManager(executor, osInfo)
+	detectPkgManager(ctx, osInfo)
 
 	return osInfo
 }
@@ -86,23 +80,20 @@ func DetectOSType(osInfo *runner.OSInfo) {
 }
 
 // detectPkgManager 检测包管理器
-func detectPkgManager(executor runner.Executor, osInfo *runner.OSInfo) {
-	// 优先检测 dnf (RHEL8+)
-	result, _ := executor.Execute("which dnf 2>/dev/null", false)
+func detectPkgManager(ctx *runner.StepContext, osInfo *runner.OSInfo) {
+	result, _ := ctx.Execute("which dnf 2>/dev/null", false)
 	if result != nil && result.GetExitCode() == 0 {
 		osInfo.PkgManager = "dnf"
 		return
 	}
 
-	// 检测 yum (RHEL7)
-	result, _ = executor.Execute("which yum 2>/dev/null", false)
+	result, _ = ctx.Execute("which yum 2>/dev/null", false)
 	if result != nil && result.GetExitCode() == 0 {
 		osInfo.PkgManager = "yum"
 		return
 	}
 
-	// 检测 apt (Debian/Ubuntu/UOS)
-	result, _ = executor.Execute("which apt 2>/dev/null", false)
+	result, _ = ctx.Execute("which apt 2>/dev/null", false)
 	if result != nil && result.GetExitCode() == 0 {
 		osInfo.PkgManager = "apt"
 		return

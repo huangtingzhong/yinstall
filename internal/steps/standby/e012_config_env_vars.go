@@ -24,7 +24,7 @@ func StepE012ConfigEnvVars() *runner.Step {
 			user := ctx.GetParamString("os_user", "yashan")
 
 			// Check user home directory
-			_, err := commonos.GetUserHomeDir(ctx.Executor, user)
+			_, err := commonos.GetUserHomeDir(ctx, user)
 			if err != nil {
 				return err
 			}
@@ -50,7 +50,7 @@ func StepE012ConfigEnvVars() *runner.Step {
 				IsYACMode:   isYACMode,
 			}
 
-			result, err := commonos.ConfigureEnvVars(ctx.Executor, cfg)
+			result, err := commonos.ConfigureEnvVars(ctx, cfg)
 			if err != nil {
 				// 如果是 bashrc 未找到的警告，只记录不返回错误
 				if strings.Contains(err.Error(), "bashrc not found") {
@@ -81,7 +81,7 @@ func StepE012ConfigEnvVars() *runner.Step {
 			user := ctx.GetParamString("os_user", "yashan")
 
 			// 验证 yasboot 是否可用
-			path, found := commonos.VerifyYasboot(ctx.Executor, user)
+			path, found := commonos.VerifyYasboot(ctx, user)
 			if found {
 				ctx.Logger.Info("yasboot found at: %s", path)
 			} else {

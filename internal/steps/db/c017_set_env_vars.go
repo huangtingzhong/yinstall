@@ -20,7 +20,7 @@ func StepC017SetEnvVars() *runner.Step {
 			user := ctx.GetParamString("os_user", "yashan")
 			for _, th := range ctx.HostsToRun() {
 				hctx := ctx.ForHost(th)
-				_, err := commonos.GetUserHomeDir(hctx.Executor, user)
+				_, err := commonos.GetUserHomeDir(hctx, user)
 				if err != nil {
 					return err
 				}
@@ -46,7 +46,7 @@ func StepC017SetEnvVars() *runner.Step {
 					IsYACMode:   isYACMode,
 				}
 
-				result, err := commonos.ConfigureEnvVars(hctx.Executor, cfg)
+				result, err := commonos.ConfigureEnvVars(hctx, cfg)
 				if err != nil {
 					if strings.Contains(err.Error(), "bashrc not found") {
 						hctx.Logger.Warn("%s", err.Error())
@@ -77,7 +77,7 @@ func StepC017SetEnvVars() *runner.Step {
 			user := ctx.GetParamString("os_user", "yashan")
 			for _, th := range ctx.HostsToRun() {
 				hctx := ctx.ForHost(th)
-				path, found := commonos.VerifyYasboot(hctx.Executor, user)
+				path, found := commonos.VerifyYasboot(hctx, user)
 				if found {
 					hctx.Logger.Info("yasboot found at: %s", path)
 				} else {

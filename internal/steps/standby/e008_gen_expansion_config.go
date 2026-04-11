@@ -46,7 +46,7 @@ func StepE008GenExpansionConfig() *runner.Step {
 			targetsStr := ctx.GetParamString("standby_targets_str", "")
 
 			// Get primary environment file path
-			envFile, err := GetPrimaryEnvFile(ctx, ctx.Executor)
+			envFile, err := GetPrimaryEnvFile(ctx)
 			if err != nil {
 				return fmt.Errorf("failed to get primary environment file: %w", err)
 			}
@@ -59,7 +59,7 @@ func StepE008GenExpansionConfig() *runner.Step {
 			specifiedEnvFile := ctx.GetParamString("primary_env_file", "")
 			if specifiedEnvFile != "" {
 				// primary_env_file is specified, extract cluster name from it
-				clusterName, err = ExtractClusterNameFromEnvFile(ctx.Executor, envFile)
+				clusterName, err = ExtractClusterNameFromEnvFile(ctx, envFile)
 				if err != nil {
 					return fmt.Errorf("failed to extract cluster name from specified environment file %s: %w", envFile, err)
 				}
@@ -91,33 +91,32 @@ func StepE008GenExpansionConfig() *runner.Step {
 
 			// Build yasboot config node gen command
 			var genCmd string
+			escapedPwd := commonos.ShellEscapeForSuC(password)
 			if hostID != "" {
-				// Use --host-ids if provided
 				ctx.Logger.Info("Using provided host-id: %s", hostID)
 				genCmd = fmt.Sprintf(`cd %s && yasboot config node gen \
--c %s -u %s -p '%s' \
+-c %s -u %s -p %s \
 --host-ids %s --port 22 \
 --install-path %s \
 --data-path %s \
 --log-path %s \
 --begin-port %d \
 --node %d`,
-					stageDir, clusterName, primaryUser, password,
+					stageDir, clusterName, primaryUser, escapedPwd,
 					hostID,
 					installPath, dataPath, logPath,
 					beginPort,
 					nodeCount)
 			} else {
-				// Try with --ip first
 				genCmd = fmt.Sprintf(`cd %s && yasboot config node gen \
--c %s -u %s -p '%s' \
+-c %s -u %s -p %s \
 --ip %s --port 22 \
 --install-path %s \
 --data-path %s \
 --log-path %s \
 --begin-port %d \
 --node %d`,
-					stageDir, clusterName, primaryUser, password,
+					stageDir, clusterName, primaryUser, escapedPwd,
 					targetsStr,
 					installPath, dataPath, logPath,
 					beginPort,
@@ -157,16 +156,15 @@ func StepE008GenExpansionConfig() *runner.Step {
 											for _, target := range targets {
 												if ip == strings.TrimSpace(target) && hostIDFromStatus != "" {
 													ctx.Logger.Info("Found host-id %s for IP %s, retrying with --host-ids", hostIDFromStatus, ip)
-													// Retry with host-id
-													genCmd = fmt.Sprintf(`cd %s && yasboot config node gen \
--c %s -u %s -p '%s' \
+												genCmd = fmt.Sprintf(`cd %s && yasboot config node gen \
+-c %s -u %s -p %s \
 --host-ids %s --port 22 \
 --install-path %s \
 --data-path %s \
 --log-path %s \
 --begin-port %d \
 --node %d`,
-														stageDir, clusterName, primaryUser, password,
+														stageDir, clusterName, primaryUser, escapedPwd,
 														hostIDFromStatus,
 														installPath, dataPath, logPath,
 														beginPort,
@@ -217,9 +215,9 @@ func StepE008GenExpansionConfig() *runner.Step {
 				// Fallback: use same logic as Action
 				specifiedEnvFile := ctx.GetParamString("primary_env_file", "")
 				if specifiedEnvFile != "" {
-					envFile, err := GetPrimaryEnvFile(ctx, ctx.Executor)
+					envFile, err := GetPrimaryEnvFile(ctx)
 					if err == nil {
-						clusterName, _ = ExtractClusterNameFromEnvFile(ctx.Executor, envFile)
+						clusterName, _ = ExtractClusterNameFromEnvFile(ctx, envFile)
 					}
 				}
 				if clusterName == "" {

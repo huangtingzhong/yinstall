@@ -30,15 +30,15 @@ func StepB001CreateGroup() *runner.Step {
 			gid := ctx.GetParamInt("os_group_gid", 701)
 			dbaGroup := ctx.GetParamString("os_dba_group", "YASDBA")
 			dbaGid := ctx.GetParamInt("os_dba_group_gid", 702)
-			isForce := ctx.IsForceStep()
+			forceDelete := ctx.IsForceDeleteUser()
 
 			// 处理主组
-			if err := createOrForceGroup(ctx, group, gid, isForce); err != nil {
+			if err := createOrForceGroup(ctx, group, gid, forceDelete); err != nil {
 				return err
 			}
 
 			// 处理 DBA 组
-			if err := createOrForceGroup(ctx, dbaGroup, dbaGid, isForce); err != nil {
+			if err := createOrForceGroup(ctx, dbaGroup, dbaGid, forceDelete); err != nil {
 				return err
 			}
 
@@ -75,9 +75,9 @@ func createOrForceGroup(ctx *runner.StepContext, group string, gid int, force bo
 			return nil
 		}
 
-		// 需要删除重建（force 模式或 GID 不匹配）
+		// 需要删除重建（--force-delete-user 模式或 GID 不匹配）
 		if force {
-			ctx.Logger.Warn("Force mode: deleting group '%s' (GID %s) to recreate with GID %d", group, existingGID, gid)
+			ctx.Logger.Warn("Force mode (--force-delete-user): deleting group '%s' (GID %s) to recreate with GID %d", group, existingGID, gid)
 
 			// 先检查并删除以该组为主组的用户
 			result, _ := ctx.Execute(fmt.Sprintf("getent passwd | awk -F: '$4==%s {print $1}'", existingGID), false)
@@ -103,7 +103,7 @@ func createOrForceGroup(ctx *runner.StepContext, group string, gid int, force bo
 				}
 			}
 		} else {
-			return fmt.Errorf("group '%s' already exists with GID %s, but expected GID %s (use --force B-001 to recreate)", group, existingGID, expectedGID)
+			return fmt.Errorf("group '%s' already exists with GID %s, but expected GID %s (use -f --force-delete-user to recreate)", group, existingGID, expectedGID)
 		}
 	}
 
@@ -113,12 +113,12 @@ func createOrForceGroup(ctx *runner.StepContext, group string, gid int, force bo
 		existingGroup := strings.TrimSpace(result.GetStdout())
 		if existingGroup != group {
 			if force {
-				ctx.Logger.Warn("Force mode: deleting group '%s' to free GID %d", existingGroup, gid)
+				ctx.Logger.Warn("Force mode (--force-delete-user): deleting group '%s' to free GID %d", existingGroup, gid)
 				if _, err := ctx.ExecuteWithCheck(fmt.Sprintf("/usr/sbin/groupdel %s", existingGroup), true); err != nil {
 					return fmt.Errorf("failed to delete group %s: %w", existingGroup, err)
 				}
 			} else {
-				return fmt.Errorf("GID %d is already used by group '%s', cannot create group '%s' (use --force B-001 to recreate)", gid, existingGroup, group)
+				return fmt.Errorf("GID %d is already used by group '%s', cannot create group '%s' (use -f --force-delete-user to recreate)", gid, existingGroup, group)
 			}
 		}
 	}

@@ -2,7 +2,7 @@ package db
 
 import (
 	"fmt"
-	"path/filepath"
+	"path"
 
 	"github.com/yinstall/internal/runner"
 )
@@ -33,7 +33,7 @@ func StepC014TuneYFSParams() *runner.Step {
 		Action: func(ctx *runner.StepContext) error {
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
-			configPath := filepath.Join(stageDir, clusterName+".toml")
+			configPath := path.Join(stageDir, clusterName+".toml")
 
 			auSize := ctx.GetParamString("yac_yfs_au_size", "32M")
 			redoFileSize := ctx.GetParamString("yac_redo_file_size", "128")

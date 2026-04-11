@@ -72,7 +72,9 @@ type StepContext struct {
 	OSInfo            *OSInfo                // 操作系统信息（由 B-000 填充）
 	LocalSoftwareDirs []string               // 本地软件目录
 	RemoteSoftwareDir string                 // 远程软件目录
-	ForceSteps        []string               // 强制执行的步骤
+	ForceAll          bool                   // 强制执行所有步骤（-f 无参数）
+	ForceSteps        []string               // 强制执行的步骤（--force-steps）
+	ForceDeleteUser   bool                   // 允许强制模式删除/重建用户和组
 	CurrentStepID     string                 // 当前步骤 ID
 	StepIndex         int                    // 当前步骤序号（从 0 开始）
 	TotalSteps        int                    // 总步骤数
@@ -98,14 +100,23 @@ func (ctx *StepContext) HostsToRun() []TargetHost {
 	return nil
 }
 
-// IsForceStep 判断当前步骤是否为强制执行
+// IsForceStep 判断当前步骤是否为强制执行（-f 全局强制 或 --force-steps 指定了当前步骤）
 func (ctx *StepContext) IsForceStep() bool {
+	if ctx.ForceAll {
+		return true
+	}
 	for _, id := range ctx.ForceSteps {
 		if id == ctx.CurrentStepID {
 			return true
 		}
 	}
 	return false
+}
+
+// IsForceDeleteUser 判断是否允许强制删除/重建用户和组
+// 即使 IsForceStep() 为 true，用户/组删除也需要显式 --force-delete-user 才执行
+func (ctx *StepContext) IsForceDeleteUser() bool {
+	return ctx.IsForceStep() && ctx.ForceDeleteUser
 }
 
 // StepResult 步骤执行结果
@@ -247,17 +258,18 @@ func RunStep(step *Step, ctx *StepContext) *StepResult {
 
 // Execute 在上下文中执行命令并记录日志
 func (ctx *StepContext) Execute(cmd string, sudo bool) (ExecResult, error) {
+	host := ctx.Executor.Host()
+	stepID := ctx.CurrentStepID
+
+	ctx.Logger.LogCommandStart(host, stepID, cmd)
+
 	result, err := ctx.Executor.Execute(cmd, sudo)
 	if result != nil {
-		ctx.Logger.LogCommand(
-			ctx.Executor.Host(),
-			ctx.CurrentStepID, // 使用当前步骤 ID
-			cmd,
-			result.GetStdout(),
-			result.GetStderr(),
-			result.GetExitCode(),
-			result.GetDuration(),
-		)
+		ctx.Logger.LogCommandResult(host, stepID,
+			result.GetStdout(), result.GetStderr(),
+			result.GetExitCode(), result.GetDuration())
+	} else if err != nil {
+		ctx.Logger.LogCommandResult(host, stepID, "", err.Error(), -1, 0)
 	}
 	return result, err
 }

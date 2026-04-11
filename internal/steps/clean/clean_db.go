@@ -214,7 +214,7 @@ func StepCleanDB() *runner.Step {
 			// 5. Remove .yasboot files (use dynamic home directory lookup)
 			ctx.Logger.Info("Step 5: Removing .yasboot configuration files")
 
-			userHome, err := commonos.GetUserHomeDir(ctx.Executor, osUser)
+			userHome, err := commonos.GetUserHomeDir(ctx, osUser)
 			if err != nil {
 				ctx.Logger.Warn("Cannot determine home directory for user %s, falling back to /home/%s", osUser, osUser)
 				userHome = fmt.Sprintf("/home/%s", osUser)
@@ -242,7 +242,7 @@ func StepCleanDB() *runner.Step {
 			// 6. 清理 .bashrc 中该集群的环境变量条目
 			ctx.Logger.Info("Step 6: Cleaning up .bashrc environment entries for cluster '%s'", clusterName)
 			beginPort := ctx.GetParamInt("db_begin_port", 1688)
-			if cleanErr := commonos.CleanEnvVars(ctx.Executor, osUser, clusterName, yasdbData, beginPort); cleanErr != nil {
+			if cleanErr := commonos.CleanEnvVars(ctx, osUser, clusterName, yasdbData, beginPort); cleanErr != nil {
 				ctx.Logger.Warn("Failed to clean .bashrc entries: %v", cleanErr)
 			} else {
 				ctx.Logger.Info(".bashrc entries for cluster '%s' cleaned successfully", clusterName)
@@ -319,7 +319,7 @@ func StepCleanDB() *runner.Step {
 			verifyDirRemoved(ctx, yasdbLog, "YASDB_LOG")
 
 			// 3. Check if .yasboot files still exist (use dynamic home directory)
-			userHome, err := commonos.GetUserHomeDir(ctx.Executor, osUser)
+			userHome, err := commonos.GetUserHomeDir(ctx, osUser)
 			if err != nil {
 				userHome = fmt.Sprintf("/home/%s", osUser)
 			}

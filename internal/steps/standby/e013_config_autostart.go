@@ -22,7 +22,7 @@ func StepE013ConfigAutostart() *runner.Step {
 
 		PreCheck: func(ctx *runner.StepContext) error {
 			// Check if systemd is available
-			if !commonos.CheckSystemdAvailable(ctx.Executor) {
+			if !commonos.CheckSystemdAvailable(ctx) {
 				return fmt.Errorf("systemctl not found, systemd may not be available")
 			}
 			// Check if script exists (will be created in Action)
@@ -54,7 +54,7 @@ func StepE013ConfigAutostart() *runner.Step {
 
 			// 如果没有存储的进程数，重新检测
 			if yasdbCount == 0 {
-				yasdbCount = commonos.GetYasdbProcessCount(ctx.Executor)
+				yasdbCount = commonos.GetYasdbProcessCount(ctx)
 			}
 
 			ctx.Logger.Info("  Running yasdb processes: %d", yasdbCount)
@@ -67,14 +67,14 @@ func StepE013ConfigAutostart() *runner.Step {
 				IsYACMode:   isYACMode,
 			}
 
-			if err := commonos.CreateAutostartScript(ctx.Executor, cfg); err != nil {
+			if err := commonos.CreateAutostartScript(ctx, cfg); err != nil {
 				return err
 			}
 
 			ctx.Logger.Info("Created yashan_monit.sh at %s", commonos.ScriptPath)
 
 			// 步骤 2: 创建并启动 systemd 服务
-			result, err := commonos.CreateAutostartService(ctx.Executor, cfg)
+			result, err := commonos.CreateAutostartService(ctx, cfg)
 			if err != nil {
 				return err
 			}
@@ -101,11 +101,11 @@ func StepE013ConfigAutostart() *runner.Step {
 			ctx.Logger.Info("yashan_monit.sh verified: exists and executable")
 
 			// 获取 yasdb 进程数
-			yasdbCount := commonos.GetYasdbProcessCount(ctx.Executor)
+			yasdbCount := commonos.GetYasdbProcessCount(ctx)
 			serviceName, _ := commonos.DetermineServiceName(yasdbCount, beginPort)
 
 			// 验证服务状态
-			if commonos.VerifyAutostartService(ctx.Executor, serviceName) {
+			if commonos.VerifyAutostartService(ctx, serviceName) {
 				ctx.Logger.Info("Service %s is enabled for autostart", serviceName)
 			} else {
 				ctx.Logger.Warn("Service %s may not be enabled", serviceName)

@@ -16,9 +16,9 @@ func GetAllSteps() []*runner.Step {
 		StepH003WriteLimits(),
 		StepH004InstallDeps(),
 
-		// JDK
-		StepH005ValidateJDK(),
+		// JDK：先安装（可选），再校验（必须）
 		StepH006InstallJDK(),
+		StepH005ValidateJDK(),
 
 		// Software extraction
 		StepH007ExtractYMP(),

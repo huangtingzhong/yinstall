@@ -18,8 +18,12 @@ import (
 
 var (
 	// YCM OS 控制
-	ycmSkipOS              bool // 是否跳过 OS 基线配置，默认 true
-	ycmIgnoreInstallErrors bool // 忽略软件包安装错误
+	ycmSkipOS              bool   // 是否跳过 OS 基线配置，默认 true
+	ycmIgnoreInstallErrors bool   // 忽略软件包安装错误
+	ycmOSYumMode           string // YUM 模式：online/local-iso/none
+	ycmOSISODevice         string // ISO 文件路径、文件名或块设备
+	ycmOSISOMountpoint     string // ISO 挂载目录
+	ycmOSYumRepoFile       string // YUM repo 文件路径
 
 	// YCM OS 用户参数
 	ycmOSUser         string
@@ -75,6 +79,10 @@ func init() {
 	// OS 控制
 	ycmCmd.Flags().BoolVar(&ycmSkipOS, "skip-os", true, "Skip OS baseline preparation (default: true)")
 	ycmCmd.Flags().BoolVar(&ycmIgnoreInstallErrors, "os-ignore-install-errors", false, "Ignore package installation errors and continue (only show warnings)")
+	ycmCmd.Flags().StringVar(&ycmOSYumMode, "os-yum-mode", "none", "YUM/DNF mode: none (use system repos), local-iso (use mounted ISO repo only), online (internet repos)")
+	ycmCmd.Flags().StringVar(&ycmOSISODevice, "os-iso-device", "/dev/cdrom", "ISO file path/name or block device used when --os-yum-mode=local-iso (auto-searched if filename only)")
+	ycmCmd.Flags().StringVar(&ycmOSISOMountpoint, "os-iso-mountpoint", "/media", "Mount point for ISO when --os-yum-mode=local-iso")
+	ycmCmd.Flags().StringVar(&ycmOSYumRepoFile, "os-yum-repo-file", "/etc/yum.repos.d/local.repo", "YUM repo file path for local-iso mode")
 
 	// OS 用户参数
 	ycmCmd.Flags().StringVar(&ycmOSUser, "os-user", "yashan", "Product user name")
@@ -106,6 +114,16 @@ func init() {
 
 // runYCM 执行 YCM 安装流程
 func runYCM(cmd *cobra.Command, args []string) error {
+	if err := validatePorts(map[string]int{
+		"--ycm-port":                ycmPort,
+		"--ycm-prometheus-port":     ycmPrometheusPort,
+		"--ycm-loki-http-port":      ycmLokiHTTPPort,
+		"--ycm-loki-grpc-port":      ycmLokiGRPCPort,
+		"--ycm-yasdb-exporter-port": ycmYasdbExporterPort,
+	}); err != nil {
+		return err
+	}
+
 	flags := GetGlobalFlags()
 
 	// If --targets is not specified, default to local execution.
@@ -230,7 +248,9 @@ func runYCM(cmd *cobra.Command, args []string) error {
 				Results:           make(map[string]interface{}),
 				LocalSoftwareDirs: flags.LocalSoftwareDirs,
 				RemoteSoftwareDir: flags.RemoteSoftwareDir,
+				ForceAll:          flags.ForceAll,
 				ForceSteps:        flags.ForceSteps,
+				ForceDeleteUser:   flags.ForceDeleteUser,
 				StepIndex:         stepIndex,
 				TotalSteps:        totalSteps,
 			}
@@ -298,7 +318,9 @@ func runYCM(cmd *cobra.Command, args []string) error {
 					OSInfo:            info.OSInfo,
 					LocalSoftwareDirs: flags.LocalSoftwareDirs,
 					RemoteSoftwareDir: flags.RemoteSoftwareDir,
-					ForceSteps:        flags.ForceSteps,
+					ForceAll:          flags.ForceAll,
+				ForceSteps:        flags.ForceSteps,
+				ForceDeleteUser:   flags.ForceDeleteUser,
 					StepIndex:         stepIndex + i,
 					TotalSteps:        totalSteps,
 				}
@@ -335,7 +357,9 @@ func runYCM(cmd *cobra.Command, args []string) error {
 					OSInfo:            info.OSInfo,
 					LocalSoftwareDirs: flags.LocalSoftwareDirs,
 					RemoteSoftwareDir: flags.RemoteSoftwareDir,
-					ForceSteps:        flags.ForceSteps,
+					ForceAll:          flags.ForceAll,
+				ForceSteps:        flags.ForceSteps,
+				ForceDeleteUser:   flags.ForceDeleteUser,
 					StepIndex:         stepIndex + i,
 					TotalSteps:        totalSteps,
 				}
@@ -388,6 +412,11 @@ func buildYCMParams(flags GlobalFlags) map[string]interface{} {
 
 	// Override OS ignore install errors if specified
 	params["os_ignore_install_errors"] = ycmIgnoreInstallErrors
+	// YUM 模式及 ISO 参数覆盖（与 db --os-yum-mode 对齐）
+	params["os_yum_mode"] = ycmOSYumMode
+	params["os_iso_device"] = ycmOSISODevice
+	params["os_iso_mountpoint"] = ycmOSISOMountpoint
+	params["os_yum_repo_file"] = ycmOSYumRepoFile
 
 	// YCM 安装参数
 	params["ycm_package"] = ycmPackage

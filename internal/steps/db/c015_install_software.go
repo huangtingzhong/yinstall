@@ -2,7 +2,7 @@ package db
 
 import (
 	"fmt"
-	"path/filepath"
+	"path"
 	"strings"
 
 	"github.com/yinstall/internal/runner"
@@ -21,7 +21,7 @@ func StepC015InstallSoftware() *runner.Step {
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
 			user := ctx.GetParamString("os_user", "yashan")
-			hostsPath := filepath.Join(stageDir, "hosts.toml")
+			hostsPath := path.Join(stageDir, "hosts.toml")
 
 			// Check hosts.toml exists (on first node)
 			result, _ := ctx.Execute(fmt.Sprintf("test -f %s", hostsPath), false)
@@ -31,9 +31,9 @@ func StepC015InstallSoftware() *runner.Step {
 
 			// 清理环境：需要在所有节点执行（YAC 模式下确保每个节点都干净）
 			homeDir := fmt.Sprintf("/home/%s", user)
-			yasbootDir := filepath.Join(homeDir, ".yasboot")
-			envFile := filepath.Join(yasbootDir, clusterName+".env")
-			homeLink := filepath.Join(yasbootDir, clusterName+"_yasdb_home")
+			yasbootDir := path.Join(homeDir, ".yasboot")
+			envFile := path.Join(yasbootDir, clusterName+".env")
+			homeLink := path.Join(yasbootDir, clusterName+"_yasdb_home")
 			killYasomCmd := fmt.Sprintf("pgrep -f 'yasom.*-c %s' | xargs -r kill -9 2>/dev/null || true", clusterName)
 			killYasagentCmd := fmt.Sprintf("pgrep -f 'yasagent.*-c %s' | xargs -r kill -9 2>/dev/null || true", clusterName)
 
@@ -52,10 +52,11 @@ func StepC015InstallSoftware() *runner.Step {
 
 			// 遍历所有节点进行清理
 			for _, th := range hostsToClean {
+				hctx := ctx.ForHost(th)
 				// 单机模式：先检查是否存在旧安装，不存在则跳过清理
 				if !isYACMode {
-					resEnv, _ := th.Executor.Execute(fmt.Sprintf("test -f %s", envFile), false)
-					resLink, _ := th.Executor.Execute(fmt.Sprintf("test -e %s", homeLink), false)
+					resEnv, _ := hctx.Execute(fmt.Sprintf("test -f %s", envFile), false)
+					resLink, _ := hctx.Execute(fmt.Sprintf("test -e %s", homeLink), false)
 					if (resEnv == nil || resEnv.GetExitCode() != 0) && (resLink == nil || resLink.GetExitCode() != 0) {
 						ctx.Logger.Info("No previous installation found on %s, skipping cleanup", th.Host)
 						continue
@@ -64,13 +65,13 @@ func StepC015InstallSoftware() *runner.Step {
 
 				ctx.Logger.Info("Cleaning up previous installation on %s", th.Host)
 				ctx.Logger.Info("  - Killing yasom/yasagent processes for cluster: %s", clusterName)
-				th.Executor.Execute(killYasomCmd, true)
-				th.Executor.Execute(killYasagentCmd, true)
-				th.Executor.Execute("sleep 2", false)
+				hctx.Execute(killYasomCmd, true)
+				hctx.Execute(killYasagentCmd, true)
+				hctx.Execute("sleep 2", false)
 
 				ctx.Logger.Info("  - Removing .yasboot artifacts: %s, %s", envFile, homeLink)
-				th.Executor.Execute(fmt.Sprintf("rm -f %s", envFile), true)
-				th.Executor.Execute(fmt.Sprintf("rm -rf %s", homeLink), true)
+				hctx.Execute(fmt.Sprintf("rm -f %s", envFile), true)
+				hctx.Execute(fmt.Sprintf("rm -rf %s", homeLink), true)
 
 				ctx.Logger.Info("Cleanup completed on %s", th.Host)
 			}
@@ -86,8 +87,8 @@ func StepC015InstallSoftware() *runner.Step {
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			depsPackage := ctx.GetParamString("db_deps_package", "")
 			user := ctx.GetParamString("os_user", "yashan")
-			yasbootPath := filepath.Join(stageDir, "bin/yasboot")
-			hostsPath := filepath.Join(stageDir, "hosts.toml")
+			yasbootPath := path.Join(stageDir, "bin/yasboot")
+			hostsPath := path.Join(stageDir, "hosts.toml")
 
 			// C-008 仅在首节点执行（yasboot package install 会自动在所有节点安装软件）
 			ctx.Logger.Info("Installing YashanDB software on first node: %s", ctx.Executor.Host())

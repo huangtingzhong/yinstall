@@ -19,7 +19,7 @@ func StepC020ConfigAutostartService() *runner.Step {
 		PreCheck: func(ctx *runner.StepContext) error {
 			for _, th := range ctx.HostsToRun() {
 				hctx := ctx.ForHost(th)
-				if !commonos.CheckSystemdAvailable(hctx.Executor) {
+				if !commonos.CheckSystemdAvailable(hctx) {
 					return fmt.Errorf("systemctl not found on %s, systemd may not be available", th.Host)
 				}
 				result, _ := hctx.Execute(fmt.Sprintf("test -x %s", commonos.ScriptPath), false)
@@ -47,7 +47,7 @@ func StepC020ConfigAutostartService() *runner.Step {
 
 				// 如果没有存储的进程数，重新检测
 				if yasdbCount == 0 {
-					yasdbCount = commonos.GetYasdbProcessCount(hctx.Executor)
+					yasdbCount = commonos.GetYasdbProcessCount(hctx)
 				}
 
 				cfg := &commonos.AutostartConfig{
@@ -56,7 +56,7 @@ func StepC020ConfigAutostartService() *runner.Step {
 					IsYACMode:   isYACMode,
 				}
 
-				result, err := commonos.CreateAutostartService(hctx.Executor, cfg)
+				result, err := commonos.CreateAutostartService(hctx, cfg)
 				if err != nil {
 					return err
 				}
@@ -76,10 +76,10 @@ func StepC020ConfigAutostartService() *runner.Step {
 			for _, th := range ctx.HostsToRun() {
 				hctx := ctx.ForHost(th)
 				beginPort := hctx.GetParamInt("db_begin_port", 1688)
-				yasdbCount := commonos.GetYasdbProcessCount(hctx.Executor)
+				yasdbCount := commonos.GetYasdbProcessCount(hctx)
 				serviceName, _ := commonos.DetermineServiceName(yasdbCount, beginPort)
 
-				if commonos.VerifyAutostartService(hctx.Executor, serviceName) {
+				if commonos.VerifyAutostartService(hctx, serviceName) {
 					hctx.Logger.Info("Service %s is enabled for autostart", serviceName)
 				} else {
 					hctx.Logger.Warn("Service %s may not be enabled", serviceName)

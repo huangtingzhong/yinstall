@@ -29,6 +29,7 @@ var (
 	dbNodes         int
 	dbRedoFileNum   int    // REDO 文件个数
 	dbRedoFileSize  string // REDO 文件大小
+	dbDisableArchivelog bool // 关闭归档：将 yashandb.toml 中 ISARCHIVELOG 设为 false
 	dbCustomSQLScript string // 自定义 SQL 脚本路径
 	dbTPCC          bool   // TPCC 参数优化
 
@@ -42,13 +43,16 @@ var (
 	dbIgnoreInstallErrors bool
 
 	// OS baseline parameters (only effective when --skip-os=false)
-	dbOSTimezone       string
-	dbOSNTPServer      string
-	dbOSYumMode        string
-	dbOSDepsPkgs       string
-	dbOSToolsPkgs      string
-	dbOSFirewallMode   string
-	dbOSFirewallPorts  string
+	dbOSTimezone        string
+	dbOSNTPServer       string
+	dbOSYumMode         string
+	dbOSISODevice       string
+	dbOSISOMountpoint   string
+	dbOSYumRepoFile     string
+	dbOSDepsPkgs        string
+	dbOSToolsPkgs       string
+	dbOSFirewallMode    string
+	dbOSFirewallPorts   string
 	dbOSHugepagesEnable bool
 
 	// YAC network parameters
@@ -98,6 +102,9 @@ func init() {
 	dbCmd.Flags().StringVar(&dbOSTimezone, "os-timezone", "Asia/Shanghai", "[OS] System timezone (only effective when --skip-os=false)")
 	dbCmd.Flags().StringVar(&dbOSNTPServer, "os-ntp-server", "ntp.aliyun.com", "[OS] NTP server address (only effective when --skip-os=false)")
 	dbCmd.Flags().StringVar(&dbOSYumMode, "os-yum-mode", "none", "[OS] YUM mode: online/local-iso/none (only effective when --skip-os=false)")
+	dbCmd.Flags().StringVar(&dbOSISODevice, "os-iso-device", "/dev/cdrom", "[OS] ISO file path/name or block device used when --os-yum-mode=local-iso (auto-searched if filename only)")
+	dbCmd.Flags().StringVar(&dbOSISOMountpoint, "os-iso-mountpoint", "/media", "[OS] Mount point for ISO when --os-yum-mode=local-iso")
+	dbCmd.Flags().StringVar(&dbOSYumRepoFile, "os-yum-repo-file", "/etc/yum.repos.d/local.repo", "[OS] YUM repo file path for local-iso mode")
 	dbCmd.Flags().StringVar(&dbOSDepsPkgs, "os-deps-db-packages", "libzstd zlib lz4 openssl openssl-devel libnsl libaio", "[OS] DB dependency packages (only effective when --skip-os=false)")
 	dbCmd.Flags().StringVar(&dbOSToolsPkgs, "os-deps-tools-packages", "", "[OS] Common tools packages (only effective when --skip-os=false)")
 	dbCmd.Flags().StringVar(&dbOSFirewallMode, "os-firewall-mode", "disable", "[OS] Firewall mode: keep/disable/open-ports (only effective when --skip-os=false)")
@@ -108,7 +115,7 @@ func init() {
 	dbCmd.Flags().StringVar(&dbClusterName, "db-cluster-name", "yashandb", "Cluster name")
 	dbCmd.Flags().IntVar(&dbBeginPort, "db-begin-port", 1688, "Begin port number")
 	dbCmd.Flags().IntVar(&dbMemoryPercent, "db-memory-percent", 50, "Memory percentage (0-100)")
-	dbCmd.Flags().StringVar(&dbCharacterSet, "db-character-set", "utf8", "Character set (utf8/gbk)")
+	dbCmd.Flags().StringVar(&dbCharacterSet, "db-character-set", "utf8", "Character set: UTF8, GBK, ASCII, GB18030, BINARY, LATIN1, UTF8MB3, UTF8MB4 (case-insensitive)")
 	dbCmd.Flags().BoolVar(&dbUseNativeType, "db-use-native-type", true, "Use native type")
 	dbCmd.Flags().StringVar(&dbSysPassword, "db-sys-password", "Yashan1!", "Database SYS password")
 	dbCmd.Flags().StringVar(&dbInstallPath, "db-home-path", "/data/yashan/yasdb_home", "Software installation path (auto-appends _<port> for non-default ports, e.g., yasdb_home_2688)")
@@ -120,6 +127,7 @@ func init() {
 	dbCmd.Flags().IntVar(&dbNodes, "db-nodes", 0, "Number of nodes (auto-detected from targets)")
 	dbCmd.Flags().IntVar(&dbRedoFileNum, "db-redo-file-num", 6, "REDO file number (default: 6)")
 	dbCmd.Flags().StringVar(&dbRedoFileSize, "db-redo-file-size", "128", "REDO file size in MB (default: 128, unit: MB)")
+	dbCmd.Flags().BoolVar(&dbDisableArchivelog, "db-disable-archivelog", false, "Disable archive log: set ISARCHIVELOG = false in yashandb.toml (default yasboot keeps archive log on)")
 	dbCmd.Flags().StringVar(&dbCustomSQLScript, "db-custom-sql-script", "", "Custom SQL script to execute after installation (supports: remote:/path, local:/path, /absolute/path, relative/path)")
 	dbCmd.Flags().BoolVar(&dbTPCC, "db-tpcc", false, "Enable TPCC parameter optimization (default: false)")
 	dbCmd.Flags().MarkHidden("db-tpcc")
@@ -157,9 +165,17 @@ func init() {
 const defaultOSUserPassword = "aaBB11@@33$$"
 
 func runDB(cmd *cobra.Command, args []string) error {
+	if err := validatePorts(map[string]int{
+		"--db-begin-port": dbBeginPort,
+	}); err != nil {
+		return err
+	}
+	if err := validateMemoryPercent("--db-memory-percent", dbMemoryPercent); err != nil {
+		return err
+	}
+
 	flags := GetGlobalFlags()
 
-	// Apply default product user password when not set (matches flag default)
 	if dbOSUserPassword == "" {
 		dbOSUserPassword = defaultOSUserPassword
 	}
@@ -329,7 +345,9 @@ func runDB(cmd *cobra.Command, args []string) error {
 				Results:           make(map[string]interface{}),
 				LocalSoftwareDirs: flags.LocalSoftwareDirs,
 				RemoteSoftwareDir: flags.RemoteSoftwareDir,
+				ForceAll:          flags.ForceAll,
 				ForceSteps:        flags.ForceSteps,
+				ForceDeleteUser:   flags.ForceDeleteUser,
 				StepIndex:         stepIndex,
 				TotalSteps:        totalSteps,
 			}
@@ -477,7 +495,9 @@ func runDB(cmd *cobra.Command, args []string) error {
 					OSInfo:            hostInfos[0].OSInfo,
 					LocalSoftwareDirs: flags.LocalSoftwareDirs,
 					RemoteSoftwareDir: flags.RemoteSoftwareDir,
-					ForceSteps:        flags.ForceSteps,
+					ForceAll:          flags.ForceAll,
+				ForceSteps:        flags.ForceSteps,
+				ForceDeleteUser:   flags.ForceDeleteUser,
 					StepIndex:         stepIndex + i,
 					TotalSteps:        totalSteps,
 					TargetHosts:       targetHosts,
@@ -511,7 +531,9 @@ func runDB(cmd *cobra.Command, args []string) error {
 						OSInfo:            info.OSInfo,
 						LocalSoftwareDirs: flags.LocalSoftwareDirs,
 						RemoteSoftwareDir: flags.RemoteSoftwareDir,
-						ForceSteps:        flags.ForceSteps,
+						ForceAll:          flags.ForceAll,
+				ForceSteps:        flags.ForceSteps,
+				ForceDeleteUser:   flags.ForceDeleteUser,
 						StepIndex:         stepIndex + i,
 						TotalSteps:        totalSteps,
 					}
@@ -553,7 +575,9 @@ func runDB(cmd *cobra.Command, args []string) error {
 			OSInfo:            firstInfo.OSInfo,
 			LocalSoftwareDirs: flags.LocalSoftwareDirs,
 			RemoteSoftwareDir: flags.RemoteSoftwareDir,
-			ForceSteps:        flags.ForceSteps,
+			ForceAll:          flags.ForceAll,
+				ForceSteps:        flags.ForceSteps,
+				ForceDeleteUser:   flags.ForceDeleteUser,
 			TargetHosts:       targetHosts,
 		}
 
@@ -629,6 +653,15 @@ func buildDBParams(isYACMode bool, targetCount int) map[string]interface{} {
 	if dbOSYumMode != "" {
 		params["os_yum_mode"] = dbOSYumMode
 	}
+	if dbOSISODevice != "" {
+		params["os_iso_device"] = dbOSISODevice
+	}
+	if dbOSISOMountpoint != "" {
+		params["os_iso_mountpoint"] = dbOSISOMountpoint
+	}
+	if dbOSYumRepoFile != "" {
+		params["os_yum_repo_file"] = dbOSYumRepoFile
+	}
 	if dbOSDepsPkgs != "" {
 		params["os_deps_db_packages"] = dbOSDepsPkgs
 	}
@@ -660,6 +693,7 @@ func buildDBParams(isYACMode bool, targetCount int) map[string]interface{} {
 	params["db_skip_os"] = dbSkipOS
 	params["db_redo_file_num"] = dbRedoFileNum
 	params["db_redo_file_size"] = dbRedoFileSize
+	params["db_disable_archivelog"] = dbDisableArchivelog
 	params["db_custom_sql_script"] = dbCustomSQLScript
 	params["db_tpcc"] = dbTPCC
 

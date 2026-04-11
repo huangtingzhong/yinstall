@@ -19,7 +19,9 @@ var (
 	excludeSteps []string
 	includeTags  []string
 	excludeTags  []string
+	forceAll     bool     // -f 无参数时为 true，强制执行所有步骤
 	forceSteps   []string // 强制执行的步骤（会删除已存在的资源）
+	forceDeleteUser bool  // --force-delete-user: 允许 -f 时删除并重建已存在的用户/组
 	logDir       string
 
 	// SSH 参数
@@ -54,6 +56,9 @@ A CLI tool for automating YashanDB installation, including:
   - Standby database setup
   - YCM/YMP installation`,
 	Version: AppVersion,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		return validatePort("--ssh-port", sshPort)
+	},
 }
 
 func Execute() error {
@@ -76,7 +81,9 @@ func init() {
 	rootCmd.PersistentFlags().StringSliceVar(&excludeSteps, "exclude-steps", nil, "Skip these steps")
 	rootCmd.PersistentFlags().StringSliceVar(&includeTags, "include-tags", nil, "Only execute steps with these tags")
 	rootCmd.PersistentFlags().StringSliceVar(&excludeTags, "exclude-tags", nil, "Skip steps with these tags")
-	rootCmd.PersistentFlags().StringSliceVarP(&forceSteps, "force", "f", nil, "Force execute steps (delete existing resources, e.g., -f B-001,B-002)")
+	rootCmd.PersistentFlags().BoolVarP(&forceAll, "force", "f", false, "Force execute all steps (skip pre-check guards); or use --force-steps to specify individual steps")
+	rootCmd.PersistentFlags().StringSliceVar(&forceSteps, "force-steps", nil, "Force execute specific steps (e.g. --force-steps B-001,B-002)")
+	rootCmd.PersistentFlags().BoolVar(&forceDeleteUser, "force-delete-user", false, "Allow -f / --force-steps to delete and recreate existing users and groups (dangerous)")
 	rootCmd.PersistentFlags().StringVar(&logDir, "log-dir", defaultLogDir(), "Log directory")
 
 	// SSH 参数
@@ -145,7 +152,9 @@ type GlobalFlags struct {
 	ExcludeSteps      []string
 	IncludeTags       []string
 	ExcludeTags       []string
+	ForceAll          bool
 	ForceSteps        []string
+	ForceDeleteUser   bool
 	LogDir            string
 	Targets           []string
 	SSHPort           int
@@ -171,7 +180,9 @@ func GetGlobalFlags() GlobalFlags {
 		ExcludeSteps:      excludeSteps,
 		IncludeTags:       includeTags,
 		ExcludeTags:       excludeTags,
+		ForceAll:          forceAll,
 		ForceSteps:        forceSteps,
+		ForceDeleteUser:   forceDeleteUser,
 		LogDir:            logDir,
 		Targets:           targets,
 		SSHPort:           sshPort,

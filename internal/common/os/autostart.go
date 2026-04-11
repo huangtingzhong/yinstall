@@ -154,24 +154,20 @@ func DetermineServiceName(yasdbCount int, beginPort int) (serviceName string, se
 }
 
 // CreateAutostartScript 创建或更新 yashan_monit.sh 脚本
-func CreateAutostartScript(executor runner.Executor, cfg *AutostartConfig) error {
-	// 确定 YCSROOTAGENT_AUTOSTART 值
+func CreateAutostartScript(ctx *runner.StepContext, cfg *AutostartConfig) error {
 	ycsrootagentAutostart := "false"
 	if cfg.IsYACMode {
 		ycsrootagentAutostart = "true"
 	}
 
-	// 生成脚本内容
 	scriptContent := GenerateMonitScript(cfg.User, ycsrootagentAutostart)
 
-	// 写入脚本文件
 	cmd := fmt.Sprintf("cat > %s << 'EOFSCRIPT'\n%s\nEOFSCRIPT", ScriptPath, scriptContent)
-	if _, err := executor.Execute(cmd, true); err != nil {
+	if _, err := ctx.Execute(cmd, true); err != nil {
 		return fmt.Errorf("failed to create yashan_monit.sh: %w", err)
 	}
 
-	// 设置可执行权限
-	if _, err := executor.Execute(fmt.Sprintf("chmod +x %s", ScriptPath), true); err != nil {
+	if _, err := ctx.Execute(fmt.Sprintf("chmod +x %s", ScriptPath), true); err != nil {
 		return fmt.Errorf("failed to make script executable: %w", err)
 	}
 
@@ -179,11 +175,9 @@ func CreateAutostartScript(executor runner.Executor, cfg *AutostartConfig) error
 }
 
 // CreateAutostartService 创建并启动 systemd 服务
-func CreateAutostartService(executor runner.Executor, cfg *AutostartConfig) (*AutostartResult, error) {
-	// 获取 yasdb 进程数
-	yasdbCount := GetYasdbProcessCount(executor)
+func CreateAutostartService(ctx *runner.StepContext, cfg *AutostartConfig) (*AutostartResult, error) {
+	yasdbCount := GetYasdbProcessCount(ctx)
 
-	// 确定服务名称和参数
 	serviceName, serviceArg := DetermineServiceName(yasdbCount, cfg.BeginPort)
 
 	result := &AutostartResult{
@@ -193,43 +187,32 @@ func CreateAutostartService(executor runner.Executor, cfg *AutostartConfig) (*Au
 		YasdbCount:  yasdbCount,
 	}
 
-	// 生成服务文件内容
 	serviceContent := GenerateServiceContent(cfg.ClusterName, serviceArg, serviceName)
 	serviceFile := fmt.Sprintf("/etc/systemd/system/%s.service", serviceName)
 
-	// 写入服务文件
 	cmd := fmt.Sprintf("cat > %s << 'EOFSERVICE'\n%s\nEOFSERVICE", serviceFile, serviceContent)
-	if _, err := executor.Execute(cmd, true); err != nil {
+	if _, err := ctx.Execute(cmd, true); err != nil {
 		return result, fmt.Errorf("failed to create service file: %w", err)
 	}
 
-	// 重新加载 systemd 配置
-	executor.Execute("systemctl daemon-reload", true)
-
-	// 启用服务
-	executor.Execute(fmt.Sprintf("systemctl enable %s", serviceName), true)
-
-	// 启动服务
-	executor.Execute(fmt.Sprintf("systemctl start %s", serviceName), true)
+	ctx.Execute("systemctl daemon-reload", true)
+	ctx.Execute(fmt.Sprintf("systemctl enable %s", serviceName), true)
+	ctx.Execute(fmt.Sprintf("systemctl start %s", serviceName), true)
 
 	return result, nil
 }
 
 // ConfigureAutostart 配置自启动（脚本 + 服务）
-// 整合了脚本创建和服务配置的完整流程
-func ConfigureAutostart(executor runner.Executor, cfg *AutostartConfig) (*AutostartResult, error) {
-	// 创建脚本
-	if err := CreateAutostartScript(executor, cfg); err != nil {
+func ConfigureAutostart(ctx *runner.StepContext, cfg *AutostartConfig) (*AutostartResult, error) {
+	if err := CreateAutostartScript(ctx, cfg); err != nil {
 		return nil, err
 	}
-
-	// 创建并启动服务
-	return CreateAutostartService(executor, cfg)
+	return CreateAutostartService(ctx, cfg)
 }
 
 // VerifyAutostartService 验证服务是否已启用
-func VerifyAutostartService(executor runner.Executor, serviceName string) bool {
-	result, _ := executor.Execute(fmt.Sprintf("systemctl is-enabled %s 2>/dev/null", serviceName), false)
+func VerifyAutostartService(ctx *runner.StepContext, serviceName string) bool {
+	result, _ := ctx.Execute(fmt.Sprintf("systemctl is-enabled %s 2>/dev/null", serviceName), false)
 	if result != nil && strings.TrimSpace(result.GetStdout()) == "enabled" {
 		return true
 	}
@@ -237,7 +220,7 @@ func VerifyAutostartService(executor runner.Executor, serviceName string) bool {
 }
 
 // CheckSystemdAvailable 检查 systemd 是否可用
-func CheckSystemdAvailable(executor runner.Executor) bool {
-	result, _ := executor.Execute("which systemctl", false)
+func CheckSystemdAvailable(ctx *runner.StepContext) bool {
+	result, _ := ctx.Execute("which systemctl", false)
 	return result != nil && result.GetExitCode() == 0
 }

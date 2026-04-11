@@ -3,6 +3,7 @@ package os
 import (
 	"fmt"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -27,7 +28,8 @@ func StepB003SetUserPassword() *runner.Step {
 			user := ctx.GetParamString("os_user", "yashan")
 			password := ctx.GetParamString("os_user_password", "")
 
-			cmd := fmt.Sprintf("echo '%s' | passwd %s --stdin", password, user)
+			quoted := commonos.ShellSingleQuote(password)
+			cmd := fmt.Sprintf("echo %s | passwd %s --stdin 2>/dev/null || { echo %s:%s | chpasswd; }", quoted, user, user, quoted)
 			if _, err := ctx.ExecuteWithCheck(cmd, true); err != nil {
 				return fmt.Errorf("failed to set password for %s: %w", user, err)
 			}

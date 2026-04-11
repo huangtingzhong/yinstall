@@ -2,7 +2,7 @@ package db
 
 import (
 	"fmt"
-	"path/filepath"
+	"path"
 	"strings"
 
 	"github.com/yinstall/internal/runner"
@@ -25,7 +25,7 @@ func StepC016DeployDatabase() *runner.Step {
 
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
-			configPath := filepath.Join(stageDir, clusterName+".toml")
+			configPath := path.Join(stageDir, clusterName+".toml")
 
 			// Check cluster config exists
 			result, _ := ctx.Execute(fmt.Sprintf("test -f %s", configPath), false)
@@ -39,7 +39,7 @@ func StepC016DeployDatabase() *runner.Step {
 				isYACMode := ctx.GetParamBool("yac_mode", false)
 				user := ctx.GetParamString("os_user", "yashan")
 				dataPath := ctx.GetParamString("db_data_path", "/data/yashan/yasdb_data")
-				yasbootPath := filepath.Join(stageDir, "bin/yasboot")
+				yasbootPath := path.Join(stageDir, "bin/yasboot")
 
 				ctx.Logger.Info("Force mode: cleaning up existing cluster, disk headers and password files")
 
@@ -91,10 +91,11 @@ func StepC016DeployDatabase() *runner.Step {
 
 					if len(uniqueDisks) > 0 {
 						firstHost := ctx.TargetHosts[0]
+						firstHctx := ctx.ForHost(firstHost)
 						ctx.Logger.Info("Wiping YFS metadata on %d shared disks from node %s (shared disks only need one node)...", len(uniqueDisks), firstHost.Host)
 						for _, disk := range uniqueDisks {
 							ddCmd := fmt.Sprintf("dd if=/dev/zero of=%s bs=1M count=10 conv=notrunc 2>/dev/null", disk)
-							ddResult, _ := firstHost.Executor.Execute(ddCmd, true)
+							ddResult, _ := firstHctx.Execute(ddCmd, true)
 							if ddResult != nil && ddResult.GetExitCode() == 0 {
 								ctx.Logger.Info("  [%s] Wiped header: %s", firstHost.Host, disk)
 							} else {
@@ -108,15 +109,16 @@ func StepC016DeployDatabase() *runner.Step {
 				if isYACMode {
 					ctx.Logger.Info("YAC mode: cleaning password files on all nodes")
 					for _, th := range ctx.TargetHosts {
+						hctx := ctx.ForHost(th)
 						findCmd := fmt.Sprintf("find %s -type f -name 'yasdb.pwd' 2>/dev/null", dataPath)
-						result, _ := th.Executor.Execute(findCmd, false)
+						result, _ := hctx.Execute(findCmd, false)
 						if result != nil && result.GetStdout() != "" {
 							pwdFiles := strings.Split(strings.TrimSpace(result.GetStdout()), "\n")
 							for _, pwdFile := range pwdFiles {
 								pwdFile = strings.TrimSpace(pwdFile)
 								if pwdFile != "" {
 									ctx.Logger.Info("Removing password file on %s: %s", th.Host, pwdFile)
-									th.Executor.Execute(fmt.Sprintf("rm -f %s", pwdFile), true)
+									hctx.Execute(fmt.Sprintf("rm -f %s", pwdFile), true)
 								}
 							}
 						}
@@ -154,8 +156,8 @@ func StepC016DeployDatabase() *runner.Step {
 			user := ctx.GetParamString("os_user", "yashan")
 			isYACMode := ctx.GetParamBool("yac_mode", false)
 
-			yasbootPath := filepath.Join(stageDir, "bin/yasboot")
-			configPath := filepath.Join(stageDir, clusterName+".toml")
+			yasbootPath := path.Join(stageDir, "bin/yasboot")
+			configPath := path.Join(stageDir, clusterName+".toml")
 
 			ctx.Logger.Info("Deploying database cluster: %s", clusterName)
 
@@ -204,7 +206,7 @@ func StepC016DeployDatabase() *runner.Step {
 			user := ctx.GetParamString("os_user", "yashan")
 			isYACMode := ctx.GetParamBool("yac_mode", false)
 
-			yasbootPath := filepath.Join(stageDir, "bin/yasboot")
+			yasbootPath := path.Join(stageDir, "bin/yasboot")
 
 			// Check cluster status
 			cmd := fmt.Sprintf("su - %s -c '%s cluster status -c %s -d'", user, yasbootPath, clusterName)

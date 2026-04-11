@@ -32,7 +32,7 @@ func StepE011CheckSyncStatus() *runner.Step {
 			ctx.Logger.Info("  Primary user: %s", primaryUser)
 
 			// Get primary environment file path
-			envFile, err := GetPrimaryEnvFile(ctx, ctx.Executor)
+			envFile, err := GetPrimaryEnvFile(ctx)
 			if err != nil {
 				return fmt.Errorf("failed to get primary environment file: %w", err)
 			}

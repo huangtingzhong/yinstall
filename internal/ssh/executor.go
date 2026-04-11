@@ -18,6 +18,10 @@ import (
 const (
 	// sshKeepAliveInterval TCP keepalive 间隔，防止长时间安装时 SSH 连接被网络设备断开
 	sshKeepAliveInterval = 30 * time.Second
+	// sshConnectRetries SSH 连接建立最大重试次数
+	sshConnectRetries = 3
+	// sshRetryBaseDelay 重试基础延迟（指数退避）
+	sshRetryBaseDelay = 2 * time.Second
 )
 
 // Executor 命令执行器接口
@@ -94,9 +98,7 @@ func NewExecutor(cfg Config) (Executor, error) {
 	// 判断是否本机执行
 	if cfg.AuthMethod == "local" || isLocalHost(cfg.Host) {
 		return &LocalExecutor{
-			host:   cfg.Host,
-			logger: cfg.Logger,
-			stepID: cfg.StepID,
+			host: cfg.Host,
 		}, nil
 	}
 
@@ -110,9 +112,7 @@ func NewExecutorWithFallback(cfg Config, defaultPassword string) (Executor, erro
 	// 判断是否本机执行
 	if cfg.AuthMethod == "local" || isLocalHost(cfg.Host) {
 		return &LocalExecutor{
-			host:   cfg.Host,
-			logger: cfg.Logger,
-			stepID: cfg.StepID,
+			host: cfg.Host,
 		}, nil
 	}
 
@@ -123,6 +123,7 @@ func NewExecutorWithFallback(cfg Config, defaultPassword string) (Executor, erro
 
 	// 自动降级逻辑：先尝试免密，再尝试默认密码
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+	var authErrors []string
 
 	// 1. 尝试免密登陆（使用 ssh-agent 或 ~/.ssh/id_rsa）
 	keyPath := cfg.KeyPath
@@ -131,16 +132,26 @@ func NewExecutorWithFallback(cfg Config, defaultPassword string) (Executor, erro
 		keyPath = filepath.Join(home, ".ssh", "id_rsa")
 	}
 
-	if _, err := os.Stat(keyPath); err == nil {
-		// 密钥文件存在，尝试免密登陆
-		cfgKey := cfg
-		cfgKey.AuthMethod = "key"
-		cfgKey.KeyPath = keyPath
+	if info, err := os.Stat(keyPath); err != nil {
+		authErrors = append(authErrors, fmt.Sprintf("SSH key: file not found (%s)", keyPath))
+	} else if info.IsDir() {
+		authErrors = append(authErrors, fmt.Sprintf("SSH key: path is a directory, not a file (%s)", keyPath))
+	} else {
+		f, readErr := os.Open(keyPath)
+		if readErr != nil {
+			authErrors = append(authErrors, fmt.Sprintf("SSH key: file not readable (%s): %v", keyPath, readErr))
+		} else {
+			f.Close()
+			cfgKey := cfg
+			cfgKey.AuthMethod = "key"
+			cfgKey.KeyPath = keyPath
 
-		if executor, err := newSSHExecutor(cfgKey); err == nil {
-			return executor, nil
+			if executor, keyErr := newSSHExecutor(cfgKey); keyErr == nil {
+				return executor, nil
+			} else {
+				authErrors = append(authErrors, fmt.Sprintf("SSH key (%s): %v", keyPath, keyErr))
+			}
 		}
-		// 免密失败，继续尝试默认密码
 	}
 
 	// 2. 尝试默认密码
@@ -149,18 +160,21 @@ func NewExecutorWithFallback(cfg Config, defaultPassword string) (Executor, erro
 		cfgPwd.AuthMethod = "password"
 		cfgPwd.Password = defaultPassword
 
-		if executor, err := newSSHExecutor(cfgPwd); err == nil {
+		if executor, pwdErr := newSSHExecutor(cfgPwd); pwdErr == nil {
 			return executor, nil
+		} else {
+			authErrors = append(authErrors, fmt.Sprintf("default password: %v", pwdErr))
 		}
+	} else {
+		authErrors = append(authErrors, "default password: not provided")
 	}
 
-	// 3. 所有方式都失败，返回详细错误信息
+	// 3. 所有方式都失败，返回每种方式的具体失败原因
+	errDetail := strings.Join(authErrors, "\n  - ")
 	return nil, fmt.Errorf(
-		"failed to connect to %s: all authentication methods failed\n"+
-			"  - Tried: SSH key-based authentication (if key exists at %s)\n"+
-			"  - Tried: default password authentication\n"+
+		"failed to connect to %s: all authentication methods failed\n  - %s\n"+
 			"  Please provide valid credentials using --ssh-password or --ssh-key-path",
-		addr, keyPath,
+		addr, errDetail,
 	)
 }
 
@@ -186,9 +200,7 @@ func isLocalHost(host string) bool {
 
 // LocalExecutor 本机执行器
 type LocalExecutor struct {
-	host   string
-	logger *logging.Logger
-	stepID string
+	host string
 }
 
 func (e *LocalExecutor) Host() string {
@@ -206,12 +218,6 @@ func (e *LocalExecutor) Execute(command string, sudo bool) (*ExecResult, error) 
 	result := &ExecResult{
 		Command:   command,
 		StartTime: time.Now(),
-	}
-
-	// 构建实际执行的命令（用于日志记录）
-	actualCmd := command
-	if sudo && os.Getuid() != 0 {
-		actualCmd = fmt.Sprintf("sudo bash -c '%s'", command)
 	}
 
 	var cmd *exec.Cmd
@@ -237,19 +243,6 @@ func (e *LocalExecutor) Execute(command string, sudo bool) (*ExecResult, error) 
 		} else {
 			result.ExitCode = -1
 		}
-	}
-
-	// 记录命令执行结果到 debug 日志（无论成功失败）
-	if e.logger != nil {
-		e.logger.LogCommand(
-			e.host,
-			e.stepID,
-			actualCmd,
-			result.Stdout,
-			result.Stderr,
-			result.ExitCode,
-			result.Duration,
-		)
 	}
 
 	return result, nil
@@ -283,8 +276,6 @@ func (e *LocalExecutor) Close() error {
 type SSHExecutor struct {
 	client *ssh.Client
 	config Config
-	logger *logging.Logger
-	stepID string
 }
 
 func newSSHExecutor(cfg Config) (*SSHExecutor, error) {
@@ -326,29 +317,40 @@ func newSSHExecutor(cfg Config) (*SSHExecutor, error) {
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 
-	// 使用 net.DialTimeout 建立 TCP 连接并开启 keepalive，防止长时间安装时连接被中间设备断开
-	rawConn, err := net.DialTimeout("tcp", addr, timeout)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to %s: %w", addr, err)
-	}
-	if tc, ok := rawConn.(*net.TCPConn); ok {
-		_ = tc.SetKeepAlive(true)
-		_ = tc.SetKeepAlivePeriod(sshKeepAliveInterval)
-	}
+	var client *ssh.Client
+	var lastErr error
+	for attempt := 0; attempt < sshConnectRetries; attempt++ {
+		if attempt > 0 {
+			delay := sshRetryBaseDelay * time.Duration(1<<uint(attempt-1))
+			time.Sleep(delay)
+		}
 
-	// 在 TCP 连接上建立 SSH 握手
-	c, chans, reqs, err := ssh.NewClientConn(rawConn, addr, sshConfig)
-	if err != nil {
-		rawConn.Close()
-		return nil, fmt.Errorf("failed to establish SSH connection to %s: %w", addr, err)
+		rawConn, err := net.DialTimeout("tcp", addr, timeout)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to connect to %s: %w", addr, err)
+			continue
+		}
+		if tc, ok := rawConn.(*net.TCPConn); ok {
+			_ = tc.SetKeepAlive(true)
+			_ = tc.SetKeepAlivePeriod(sshKeepAliveInterval)
+		}
+
+		c, chans, reqs, err := ssh.NewClientConn(rawConn, addr, sshConfig)
+		if err != nil {
+			rawConn.Close()
+			lastErr = fmt.Errorf("failed to establish SSH connection to %s: %w", addr, err)
+			continue
+		}
+		client = ssh.NewClient(c, chans, reqs)
+		break
 	}
-	client := ssh.NewClient(c, chans, reqs)
+	if client == nil {
+		return nil, lastErr
+	}
 
 	return &SSHExecutor{
 		client: client,
 		config: cfg,
-		logger: cfg.Logger,
-		stepID: cfg.StepID,
 	}, nil
 }
 
@@ -382,20 +384,6 @@ func (e *SSHExecutor) Execute(command string, sudo bool) (*ExecResult, error) {
 		result.Duration = result.EndTime.Sub(result.StartTime)
 		result.ExitCode = -1
 		result.Stderr = fmt.Sprintf("failed to create session: %v", err)
-
-		// 记录错误到 debug 日志
-		if e.logger != nil {
-			e.logger.LogCommand(
-				e.config.Host,
-				e.stepID,
-				actualCmd,
-				"",
-				result.Stderr,
-				result.ExitCode,
-				result.Duration,
-			)
-		}
-
 		return result, fmt.Errorf("failed to create session: %w", err)
 	}
 	defer session.Close()
@@ -416,19 +404,6 @@ func (e *SSHExecutor) Execute(command string, sudo bool) (*ExecResult, error) {
 		} else {
 			result.ExitCode = -1
 		}
-	}
-
-	// 记录命令执行结果到 debug 日志（无论成功失败）
-	if e.logger != nil {
-		e.logger.LogCommand(
-			e.config.Host,
-			e.stepID,
-			actualCmd,
-			result.Stdout,
-			result.Stderr,
-			result.ExitCode,
-			result.Duration,
-		)
 	}
 
 	return result, nil

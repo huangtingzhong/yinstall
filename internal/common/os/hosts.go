@@ -15,7 +15,7 @@ const (
 // UpdateManagedHostsBlock replaces the yinstall managed block in /etc/hosts
 // with the given entries. If no block exists, it appends one.
 // entries example: ["10.10.10.125  yashandb01", "10.10.10.126  yashandb02"]
-func UpdateManagedHostsBlock(executor runner.Executor, entries []string) error {
+func UpdateManagedHostsBlock(ctx *runner.StepContext, entries []string) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -35,7 +35,7 @@ func UpdateManagedHostsBlock(executor runner.Executor, entries []string) error {
 	appendCmd := fmt.Sprintf(`printf '%s\n' >> /etc/hosts`, block)
 
 	fullCmd := removeCmd + " && " + appendCmd
-	result, err := executor.Execute(fullCmd, true)
+	result, err := ctx.Execute(fullCmd, true)
 	if err != nil {
 		return fmt.Errorf("failed to update /etc/hosts managed block: %w", err)
 	}
@@ -47,7 +47,7 @@ func UpdateManagedHostsBlock(executor runner.Executor, entries []string) error {
 
 // ReadManagedHostsEntries reads the current entries from the yinstall managed
 // block in /etc/hosts. Returns empty slice if no block exists.
-func ReadManagedHostsEntries(executor runner.Executor) []string {
+func ReadManagedHostsEntries(ctx *runner.StepContext) []string {
 	cmd := fmt.Sprintf(
 		`sed -n '/%s/,/%s/{/%s/d;/%s/d;p}' /etc/hosts`,
 		escapeForSed(hostsBeginMarker),
@@ -55,7 +55,7 @@ func ReadManagedHostsEntries(executor runner.Executor) []string {
 		escapeForSed(hostsBeginMarker),
 		escapeForSed(hostsEndMarker),
 	)
-	result, _ := executor.Execute(cmd, true)
+	result, _ := ctx.Execute(cmd, true)
 	if result == nil || result.GetStdout() == "" {
 		return nil
 	}

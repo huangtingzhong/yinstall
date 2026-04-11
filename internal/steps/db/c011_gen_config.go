@@ -2,20 +2,12 @@ package db
 
 import (
 	"fmt"
-	"path/filepath"
+	"path"
 	"strings"
 
 	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
-
-// escapeForSuC escapes s for safe use inside su - user -c '...'.
-// Inside single quotes, a literal single quote is written as '\”.
-// This prevents the password from breaking the outer quoting and avoids
-// shell expansion (e.g. $$). Returns a fragment to embed: '\”s'\”.
-func escapeForSuC(s string) string {
-	return "'\\''" + strings.ReplaceAll(s, "'", "'\\''") + "'\\''"
-}
 
 // StepC005GenConfig Generate DB configuration files
 func StepC011GenConfig() *runner.Step {
@@ -30,7 +22,7 @@ func StepC011GenConfig() *runner.Step {
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 
 			// Check yasboot exists
-			yasbootPath := filepath.Join(stageDir, "bin/yasboot")
+			yasbootPath := path.Join(stageDir, "bin/yasboot")
 			result, _ := ctx.Execute(fmt.Sprintf("test -x %s", yasbootPath), false)
 			if result == nil || result.GetExitCode() != 0 {
 				return fmt.Errorf("yasboot not found at %s", yasbootPath)
@@ -50,7 +42,7 @@ func StepC011GenConfig() *runner.Step {
 			logPath := ctx.GetParamString("db_log_path", "/data/yashan/log")
 			beginPort := ctx.GetParamInt("db_begin_port", 1688)
 
-			yasbootPath := filepath.Join(stageDir, "bin/yasboot")
+			yasbootPath := path.Join(stageDir, "bin/yasboot")
 
 			if isYACMode {
 				return genYACConfig(ctx, yasbootPath, clusterName, user, password, installPath, dataPath, logPath, beginPort)
@@ -63,14 +55,14 @@ func StepC011GenConfig() *runner.Step {
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
 
 			// Check hosts.toml exists
-			hostsPath := filepath.Join(stageDir, "hosts.toml")
+			hostsPath := path.Join(stageDir, "hosts.toml")
 			result, _ := ctx.Execute(fmt.Sprintf("test -f %s", hostsPath), false)
 			if result == nil || result.GetExitCode() != 0 {
 				return fmt.Errorf("hosts.toml not found at %s", hostsPath)
 			}
 
 			// Check cluster config exists
-			clusterPath := filepath.Join(stageDir, clusterName+".toml")
+			clusterPath := path.Join(stageDir, clusterName+".toml")
 			result, _ = ctx.Execute(fmt.Sprintf("test -f %s", clusterPath), false)
 			if result == nil || result.GetExitCode() != 0 {
 				return fmt.Errorf("cluster config not found at %s", clusterPath)
@@ -113,7 +105,7 @@ func genStandaloneConfig(ctx *runner.StepContext, yasbootPath, clusterName, user
 --memory-limit %d \
 --node 1`,
 		stageDir, yasbootPath, clusterName,
-		user, escapeForSuC(password), ip, ctx.GetParamInt("ssh_port", 22),
+		user, commonos.ShellEscapeForSuC(password), ip, ctx.GetParamInt("ssh_port", 22),
 		installPath, dataPath, logPath,
 		beginPort, memoryPercent)
 
@@ -186,7 +178,7 @@ func genYACConfig(ctx *runner.StepContext, yasbootPath, clusterName, user, passw
 --system-data %s \
 --data %s`,
 			stageDir, yasbootPath, clusterName,
-			user, escapeForSuC(password), ips, ctx.GetParamInt("ssh_port", 22),
+			user, commonos.ShellEscapeForSuC(password), ips, ctx.GetParamInt("ssh_port", 22),
 			installPath, dataPath, logPath,
 			beginPort, nodeCount,
 			interCIDR, publicNetwork, scanName,
@@ -227,7 +219,7 @@ func genYACConfig(ctx *runner.StepContext, yasbootPath, clusterName, user, passw
 --system-data %s \
 --data %s`,
 			stageDir, yasbootPath, clusterName,
-			user, escapeForSuC(password), ips, ctx.GetParamInt("ssh_port", 22),
+			user, commonos.ShellEscapeForSuC(password), ips, ctx.GetParamInt("ssh_port", 22),
 			installPath, dataPath, logPath,
 			beginPort, nodeCount,
 			interCIDR, publicNetwork, vipStr,

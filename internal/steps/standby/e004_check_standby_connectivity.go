@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -62,7 +63,7 @@ func StepE004CheckStandbyConnectivity() *runner.Step {
 
 			// 尝试使用提供的密码 SSH 登录
 			// 注意：这里是在备库本机上执行，测试 localhost 的 yashan 用户
-			testCmd := fmt.Sprintf("sshpass -p '%s' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 %s@localhost 'echo SSH_OK' 2>&1", password, user)
+			testCmd := fmt.Sprintf("sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 %s@localhost 'echo SSH_OK' 2>&1", commonos.ShellSingleQuote(password), user)
 			result, _ = ctx.Execute(testCmd, false)
 
 			if result == nil || !strings.Contains(result.GetStdout(), "SSH_OK") {

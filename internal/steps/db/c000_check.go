@@ -66,7 +66,7 @@ func RunConnectivityAndYACPrecheck(hosts []HostExec, params map[string]interface
 
 	// 1. Network: quick connectivity check on each host
 	for _, h := range hosts {
-		result, err := h.Executor.Execute("echo 'connection_ok'", false)
+		result, err := c000Exec(h, logger, "echo 'connection_ok'", false)
 		if err != nil {
 			return fmt.Errorf("network check failed for %s: %w", h.Host, err)
 		}
@@ -81,7 +81,7 @@ func RunConnectivityAndYACPrecheck(hosts []HostExec, params map[string]interface
 	if !isYACMode {
 		// Standalone: check product user exists on the single host
 		h := hosts[0]
-		ru, _ := h.Executor.Execute(fmt.Sprintf("id -u %s 2>/dev/null", user), false)
+		ru, _ := c000Exec(h, logger, fmt.Sprintf("id -u %s 2>/dev/null", user), false)
 		uid := strings.TrimSpace(execStdout(ru))
 		if uid == "" {
 			return fmt.Errorf("user %s does not exist on node %s; please create the user first or run OS preparation", user, h.Host)
@@ -104,10 +104,10 @@ func RunConnectivityAndYACPrecheck(hosts []HostExec, params map[string]interface
 
 	var identities []nodeIdentity
 	for _, h := range hosts {
-		ru, _ := h.Executor.Execute(fmt.Sprintf("id -u %s 2>/dev/null", user), false)
-		rg, _ := h.Executor.Execute(fmt.Sprintf("id -g %s 2>/dev/null", user), false)
-		rgn, _ := h.Executor.Execute(fmt.Sprintf("id -gn %s 2>/dev/null", user), false)
-		rgg, _ := h.Executor.Execute(fmt.Sprintf("getent group %s 2>/dev/null | cut -d: -f3", group), false)
+		ru, _ := c000Exec(h, logger, fmt.Sprintf("id -u %s 2>/dev/null", user), false)
+		rg, _ := c000Exec(h, logger, fmt.Sprintf("id -g %s 2>/dev/null", user), false)
+		rgn, _ := c000Exec(h, logger, fmt.Sprintf("id -gn %s 2>/dev/null", user), false)
+		rgg, _ := c000Exec(h, logger, fmt.Sprintf("getent group %s 2>/dev/null | cut -d: -f3", group), false)
 
 		uid := strings.TrimSpace(execStdout(ru))
 		gid := strings.TrimSpace(execStdout(rg))
@@ -165,7 +165,7 @@ func RunConnectivityAndYACPrecheck(hosts []HostExec, params map[string]interface
 	if len(allDisks) > 0 {
 		for _, h := range hosts {
 			for _, disk := range allDisks {
-				result, _ := h.Executor.Execute(fmt.Sprintf("test -b %s && echo ok", disk), false)
+				result, _ := c000Exec(h, logger, fmt.Sprintf("test -b %s && echo ok", disk), false)
 				if result == nil || result.GetExitCode() != 0 || !strings.Contains(result.GetStdout(), "ok") {
 					return fmt.Errorf("shared disk %s is not available on node %s", disk, h.Host)
 				}
@@ -198,4 +198,24 @@ func execStdout(result ExecResultForC000) string {
 		return ""
 	}
 	return result.GetStdout()
+}
+
+// c000Exec 在 C-000 独立函数中执行命令并记录 debug 日志
+func c000Exec(h HostExec, logger *logging.Logger, cmd string, sudo bool) (ExecResultForC000, error) {
+	logger.LogCommandStart(h.Host, "C-000", cmd)
+	start := time.Now()
+	result, err := h.Executor.Execute(cmd, sudo)
+	dur := time.Since(start)
+	stdout := ""
+	exitCode := -1
+	if result != nil {
+		stdout = result.GetStdout()
+		exitCode = result.GetExitCode()
+	}
+	if err != nil {
+		logger.LogCommandResult(h.Host, "C-000", stdout, err.Error(), exitCode, dur)
+	} else {
+		logger.LogCommandResult(h.Host, "C-000", stdout, "", exitCode, dur)
+	}
+	return result, err
 }

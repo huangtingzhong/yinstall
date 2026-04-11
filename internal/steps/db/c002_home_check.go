@@ -38,7 +38,7 @@ func StepC002HomeCheck() *runner.Step {
 				// 检查进程的启动路径是否在 YASDB_HOME 目录下
 				// 使用 ps 命令查找进程，检查进程的命令行参数是否包含 YASDB_HOME 路径
 				homeProcessCmd := fmt.Sprintf("ps -ef | grep -E '(yasdb|yasagent)' | grep -v grep | grep '%s'", installPathPattern)
-				homeProcessResult, _ := hctx.Executor.Execute(homeProcessCmd, false)
+				homeProcessResult, _ := hctx.Execute(homeProcessCmd, false)
 				if homeProcessResult != nil && homeProcessResult.GetExitCode() == 0 && strings.TrimSpace(homeProcessResult.GetStdout()) != "" {
 					// 提取进程 PID 和详细信息
 					processLines := strings.Split(strings.TrimSpace(homeProcessResult.GetStdout()), "\n")

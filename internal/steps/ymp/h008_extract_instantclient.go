@@ -22,7 +22,17 @@ func StepH008ExtractInstantclient() *runner.Step {
 		PreCheck: func(ctx *runner.StepContext) error {
 			pkg := ctx.GetParamString("ymp_instantclient_basic", "")
 			if pkg == "" {
-				return fmt.Errorf("--ymp-instantclient-basic is required")
+				ctx.Logger.Info("ymp_instantclient_basic not specified, searching for latest instantclient-basic package...")
+				remoteDir := ctx.RemoteSoftwareDir
+				if remoteDir == "" {
+					remoteDir = "/data/yashan/soft"
+				}
+				latestPkg, err := commonfile.FindLatestInstantclientBasicPackage(ctx, ctx.LocalSoftwareDirs, remoteDir)
+				if err != nil {
+					return fmt.Errorf("ymp_instantclient_basic not specified and auto-search failed: %w", err)
+				}
+				ctx.Logger.Info("Found latest instantclient-basic package: %s", latestPkg)
+				ctx.Params["ymp_instantclient_basic"] = latestPkg
 			}
 			return nil
 		},
@@ -35,7 +45,7 @@ func StepH008ExtractInstantclient() *runner.Step {
 			ctx.Logger.Info("Looking for instantclient basic package: %s", pkg)
 
 			fullPath, err := commonfile.FindAndDistribute(
-				ctx.Executor,
+				ctx,
 				pkg,
 				ctx.LocalSoftwareDirs,
 				ctx.RemoteSoftwareDir,

@@ -50,7 +50,7 @@ func StepC019ConfigAutostartScript() *runner.Step {
 
 				// 如果没有存储的进程数，重新检测
 				if yasdbCount == 0 {
-					yasdbCount = commonos.GetYasdbProcessCount(hctx.Executor)
+					yasdbCount = commonos.GetYasdbProcessCount(hctx)
 				}
 
 				hctx.Logger.Info("  Running yasdb processes: %d", yasdbCount)
@@ -62,7 +62,7 @@ func StepC019ConfigAutostartScript() *runner.Step {
 					IsYACMode:   isYACMode,
 				}
 
-				if err := commonos.CreateAutostartScript(hctx.Executor, cfg); err != nil {
+				if err := commonos.CreateAutostartScript(hctx, cfg); err != nil {
 					return err
 				}
 

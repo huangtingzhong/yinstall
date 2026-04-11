@@ -45,9 +45,15 @@ func NewLogger(runID, logDir, version, author, contact string) (*Logger, error) 
 		return nil, fmt.Errorf("failed to create log directory: %w", err)
 	}
 
+	// 转换为绝对路径，确保 banner 中展示全路径（兼容 Windows/macOS/Linux）
+	absLogDir, err := filepath.Abs(logDir)
+	if err != nil {
+		absLogDir = logDir // 转换失败时回退原值
+	}
+
 	timestamp := time.Now().Format("2006-01-02_15-04-05")
-	sessionPath := filepath.Join(logDir, fmt.Sprintf("yinstall_%s_%s.log", timestamp, runID))
-	debugPath := filepath.Join(logDir, fmt.Sprintf("yinstall_%s_%s_debug.log", timestamp, runID))
+	sessionPath := filepath.Join(absLogDir, fmt.Sprintf("yinstall_%s_%s.log", timestamp, runID))
+	debugPath := filepath.Join(absLogDir, fmt.Sprintf("yinstall_%s_%s_debug.log", timestamp, runID))
 
 	sessionFile, err := os.Create(sessionPath)
 	if err != nil {
@@ -122,10 +128,11 @@ func (l *Logger) ConsoleStep(stepID, stepName string, stepIndex, totalSteps int,
 
 	l.mu.Lock()
 	fmt.Print(line)
-	l.sessionFile.WriteString(line)
+	if l.sessionFile != nil {
+		l.sessionFile.WriteString(line)
+	}
 	l.mu.Unlock()
 
-	// Also write to debug log
 	l.debugWrite("STEP", line)
 }
 
@@ -144,13 +151,16 @@ func (l *Logger) Warn(format string, args ...interface{}) {
 	l.debugWrite("WARN", fmt.Sprintf(format, args...))
 }
 
-// debugWrite 写入 debug 日志文件
+// debugWrite 写入 debug 日志文件；time.Now() 在锁内取值保证时间戳有序
 func (l *Logger) debugWrite(level, msg string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.debugFile == nil {
+		return
+	}
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 	line := fmt.Sprintf("%s [%s] %s\n", timestamp, level, strings.TrimRight(msg, "\n"))
-	l.mu.Lock()
 	l.debugFile.WriteString(line)
-	l.mu.Unlock()
 }
 
 // LogErrorExit 统一报错退出：将执行的命令、stdout、stderr、退出码、错误信息输出到终端和日志
@@ -179,10 +189,11 @@ func (l *Logger) LogErrorExit(host, stepID, stepName, command, stdout, stderr st
 	block := strings.Join(lines, "\n")
 	l.mu.Lock()
 	fmt.Print(block)
-	l.sessionFile.WriteString(block)
+	if l.sessionFile != nil {
+		l.sessionFile.WriteString(block)
+	}
 	l.mu.Unlock()
 
-	// Also write to debug log
 	l.debugWrite("ERROR", block)
 }
 
@@ -232,18 +243,35 @@ func (l *Logger) Debug(entry LogEntry) {
 	l.debugWrite(strings.ToUpper(entry.Level), strings.Join(parts, " "))
 }
 
-// LogCommand 记录命令执行到 debug 日志
+// LogCommandStart 在命令执行前记录到 debug 日志
+func (l *Logger) LogCommandStart(host, stepID, command string) {
+	command = redact(command)
+	l.debugWrite("DEBUG", fmt.Sprintf("host=%s step=%s >>> %s", host, stepID, command))
+}
+
+// LogCommandResult 在命令执行后记录结果到 debug 日志（每个字段独立一行）
+func (l *Logger) LogCommandResult(host, stepID string, stdout, stderr string, exitCode int, duration time.Duration) {
+	stdout = redact(strings.TrimRight(stdout, "\n"))
+	stderr = redact(strings.TrimRight(stderr, "\n"))
+	prefix := fmt.Sprintf("host=%s step=%s", host, stepID)
+
+	l.debugWrite("DEBUG", fmt.Sprintf("%s exit_code=%d duration=%s", prefix, exitCode, duration))
+	if stdout != "" {
+		for _, line := range strings.Split(stdout, "\n") {
+			l.debugWrite("DEBUG", fmt.Sprintf("%s stdout| %s", prefix, line))
+		}
+	}
+	if stderr != "" {
+		for _, line := range strings.Split(stderr, "\n") {
+			l.debugWrite("DEBUG", fmt.Sprintf("%s stderr| %s", prefix, line))
+		}
+	}
+}
+
+// LogCommand 兼容旧接口（合并 start + result）
 func (l *Logger) LogCommand(host, stepID, command string, stdout, stderr string, exitCode int, duration time.Duration) {
-	l.Debug(LogEntry{
-		Host:     host,
-		StepID:   stepID,
-		Level:    "debug",
-		Command:  command,
-		Stdout:   stdout,
-		Stderr:   stderr,
-		ExitCode: exitCode,
-		Duration: duration.String(),
-	})
+	l.LogCommandStart(host, stepID, command)
+	l.LogCommandResult(host, stepID, stdout, stderr, exitCode, duration)
 }
 
 // LogStepStart 记录步骤开始到 debug 日志
@@ -273,16 +301,20 @@ func (l *Logger) LogStepEnd(host, stepID, stepName string, success bool, duratio
 	})
 }
 
-// Close 关闭所有日志文件
+// Close 关闭所有日志文件；先 Sync 刷盘再关闭，关闭后置 nil 防止后续写入 panic
 func (l *Logger) Close() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	if l.sessionFile != nil {
-		l.sessionFile.Close()
+		_ = l.sessionFile.Sync()
+		_ = l.sessionFile.Close()
+		l.sessionFile = nil
 	}
 	if l.debugFile != nil {
-		l.debugFile.Close()
+		_ = l.debugFile.Sync()
+		_ = l.debugFile.Close()
+		l.debugFile = nil
 	}
 }
 
@@ -300,26 +332,32 @@ func (l *Logger) ConsoleWithType(stepID, stepName, host, phase, execType string,
 	l.debugWrite("CONSOLE", fmt.Sprintf("[%s] %s host=%s phase=%s type=%s msg=%s duration=%s", stepID, stepName, host, phase, execType, msg, duration))
 }
 
-// 敏感信息脱敏
+// 敏感信息脱敏正则
+// 1. key=value / key:value 格式（password、passwd、pwd、secret、token、api_key 等）
+// 2. echo ... | passwd 格式
+// 3. --password value / --passwd value 命令行参数格式
 var sensitivePatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)(password|passwd|pwd|secret|token|key)[\s]*[=:]\s*['"]?([^'";\s]+)`),
+	regexp.MustCompile(`(?i)(password|passwd|pwd|secret|token|api[_-]?key|secret[_-]?key|private[_-]?key)[\s]*[=:]\s*['"]?([^'";\s]+)`),
 	regexp.MustCompile(`(?i)echo\s+['"]?[^'"]+['"]?\s*\|\s*passwd`),
+	regexp.MustCompile(`(?i)--(?:password|passwd|pwd|secret|token)\s+['"]?([^'";\s]+)['"]?`),
 }
 
 func redact(s string) string {
 	result := s
-	for _, pattern := range sensitivePatterns {
+	for i, pattern := range sensitivePatterns {
 		result = pattern.ReplaceAllStringFunc(result, func(match string) string {
-			parts := strings.SplitN(match, "=", 2)
-			if len(parts) == 2 {
-				return parts[0] + "=***REDACTED***"
-			}
-			parts = strings.SplitN(match, ":", 2)
-			if len(parts) == 2 {
-				return parts[0] + ":***REDACTED***"
-			}
-			if strings.Contains(strings.ToLower(match), "passwd") {
+			switch i {
+			case 0:
+				if idx := strings.IndexAny(match, "=:"); idx >= 0 {
+					return match[:idx+1] + "***REDACTED***"
+				}
+			case 1:
 				return "echo '***REDACTED***'|passwd"
+			case 2:
+				parts := strings.Fields(match)
+				if len(parts) >= 2 {
+					return parts[0] + " ***REDACTED***"
+				}
 			}
 			return "***REDACTED***"
 		})

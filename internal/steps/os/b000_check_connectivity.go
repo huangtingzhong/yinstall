@@ -42,7 +42,7 @@ func StepB000CheckConnectivity() *runner.Step {
 			ctx.SetResult("hostname", hostname)
 
 			// 3. 检测操作系统信息（使用公共函数）
-			osInfo := commonos.DetectOSInfo(ctx.Executor)
+			osInfo := commonos.DetectOSInfo(ctx)
 			ctx.OSInfo = osInfo
 
 			// 4. 检查是否有 root 权限或 sudo 权限

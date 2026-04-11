@@ -2,7 +2,7 @@ package clean
 
 import (
 	"fmt"
-	"path/filepath"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -62,7 +62,7 @@ func StepCleanDB001QueryYACDisks() *runner.Step {
 			ctx.Logger.Info("Querying YAC disk information using ycsctl...")
 
 			// 检查 ycsctl 命令是否存在
-			ycsctlPath := filepath.Join(yasdbHome, "bin/ycsctl")
+			ycsctlPath := path.Join(yasdbHome, "bin/ycsctl")
 			result, _ := ctx.Execute(fmt.Sprintf("test -f %s", ycsctlPath), false)
 			if result == nil || result.GetExitCode() != 0 {
 				ctx.Logger.Warn("ycsctl command not found at %s, cannot query disks", ycsctlPath)
@@ -336,14 +336,13 @@ func StepCleanDB004RemoveConfig() *runner.Step {
 
 			ctx.Logger.Info("Removing .yasboot configuration files...")
 
-			userHome, err := commonos.GetUserHomeDir(ctx.Executor, osUser)
+			userHome, err := commonos.GetUserHomeDir(ctx, osUser)
 			if err != nil {
 				ctx.Logger.Warn("Cannot determine home directory for user %s, falling back to /home/%s", osUser, osUser)
 				userHome = fmt.Sprintf("/home/%s", osUser)
 			}
 			yasbootDir := fmt.Sprintf("%s/.yasboot", userHome)
 
-			// 删除集群环境变量文件
 			envFile := fmt.Sprintf("%s/%s.env", yasbootDir, clusterName)
 			ctx.Logger.Info("Removing yasboot env file: %s", envFile)
 			result, err := ctx.Execute(fmt.Sprintf("rm -f %s", envFile), true)
@@ -369,7 +368,7 @@ func StepCleanDB004RemoveConfig() *runner.Step {
 			yasdbData := ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data")
 			beginPort := ctx.GetParamInt("db_begin_port", 1688)
 			ctx.Logger.Info("Cleaning up env var entries for cluster '%s' (port %d)...", clusterName, beginPort)
-			if cleanErr := commonos.CleanEnvVars(ctx.Executor, osUser, clusterName, yasdbData, beginPort); cleanErr != nil {
+			if cleanErr := commonos.CleanEnvVars(ctx, osUser, clusterName, yasdbData, beginPort); cleanErr != nil {
 				ctx.Logger.Warn("Failed to clean env var entries: %v", cleanErr)
 			} else {
 				ctx.Logger.Info("Env var entries for cluster '%s' cleaned successfully", clusterName)
@@ -382,7 +381,7 @@ func StepCleanDB004RemoveConfig() *runner.Step {
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
 			osUser := ctx.GetParamString("os_user", "yashan")
 
-			userHome, err := commonos.GetUserHomeDir(ctx.Executor, osUser)
+			userHome, err := commonos.GetUserHomeDir(ctx, osUser)
 			if err != nil {
 				userHome = fmt.Sprintf("/home/%s", osUser)
 			}
@@ -548,12 +547,12 @@ func isYACEnvironment(ctx *runner.StepContext) bool {
 	yasdbData := ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data")
 
 	// 检查 ycsctl 命令
-	ycsctlPath := filepath.Join(yasdbHome, "bin/ycsctl")
+	ycsctlPath := path.Join(yasdbHome, "bin/ycsctl")
 	result, _ := ctx.Execute(fmt.Sprintf("test -f %s", ycsctlPath), false)
 	hasYcsctl := result != nil && result.GetExitCode() == 0
 
 	// 检查 ycs 数据目录
-	ycsDataPath := filepath.Join(yasdbData, "ycs")
+	ycsDataPath := path.Join(yasdbData, "ycs")
 	result, _ = ctx.Execute(fmt.Sprintf("test -d %s", ycsDataPath), false)
 	hasYcsData := result != nil && result.GetExitCode() == 0
 

@@ -5,7 +5,7 @@ package standby
 
 import (
 	"fmt"
-	"path/filepath"
+	"path" // remote (Linux) path
 	"strings"
 
 	"github.com/yinstall/internal/runner"
@@ -16,71 +16,58 @@ import (
 // 1. 如果指定了 primary_env_file 参数，使用指定的路径（绝对路径或相对用户家目录）
 // 2. 自动检测：优先使用 ~/.yasboot/<cluster>_yasdb_home/conf/<cluster>.bashrc
 // 3. 如果不存在，使用 ~/.bashrc（单实例）或 ~/.<port>（多实例）
-func GetPrimaryEnvFile(ctx *runner.StepContext, executor runner.Executor) (string, error) {
-	// 1. 如果指定了 primary_env_file 参数，使用指定的路径
+func GetPrimaryEnvFile(ctx *runner.StepContext) (string, error) {
 	specifiedEnvFile := ctx.GetParamString("primary_env_file", "")
 	if specifiedEnvFile != "" {
-		// 如果是绝对路径，直接使用
 		if strings.HasPrefix(specifiedEnvFile, "/") {
-			// 检查文件是否存在
-			result, _ := executor.Execute(fmt.Sprintf("test -f %s", specifiedEnvFile), false)
+			result, _ := ctx.Execute(fmt.Sprintf("test -f %s", specifiedEnvFile), false)
 			if result != nil && result.GetExitCode() == 0 {
 				return specifiedEnvFile, nil
 			}
 			return "", fmt.Errorf("specified primary environment file %s not found", specifiedEnvFile)
 		}
-		// 如果是相对路径（如 .bashrc 或 .1688），需要拼接用户家目录
 		primaryUser := ctx.GetParamString("primary_os_user", "yashan")
-		homeDir, err := getUserHomeDir(executor, primaryUser)
+		homeDir, err := getUserHomeDir(ctx, primaryUser)
 		if err != nil {
 			return "", fmt.Errorf("failed to get home directory for primary user %s: %w", primaryUser, err)
 		}
-		envFile := filepath.Join(homeDir, specifiedEnvFile)
-		// 检查文件是否存在
-		result, _ := executor.Execute(fmt.Sprintf("test -f %s", envFile), false)
+		envFile := path.Join(homeDir, specifiedEnvFile)
+		result, _ := ctx.Execute(fmt.Sprintf("test -f %s", envFile), false)
 		if result != nil && result.GetExitCode() == 0 {
 			return envFile, nil
 		}
 		return "", fmt.Errorf("specified primary environment file %s not found", envFile)
 	}
 
-	// 2. 自动检测：优先使用 ~/.yasboot/<cluster>_yasdb_home/conf/<cluster>.bashrc
 	clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
 	primaryUser := ctx.GetParamString("primary_os_user", "yashan")
-	homeDir, err := getUserHomeDir(executor, primaryUser)
+	homeDir, err := getUserHomeDir(ctx, primaryUser)
 	if err != nil {
 		return "", fmt.Errorf("failed to get home directory for primary user %s: %w", primaryUser, err)
 	}
 
-	// 优先使用 .yasboot 目录下的环境变量文件
 	yasbootEnvFile := fmt.Sprintf("%s/.yasboot/%s_yasdb_home/conf/%s.bashrc", homeDir, clusterName, clusterName)
-	result, _ := executor.Execute(fmt.Sprintf("test -f %s", yasbootEnvFile), false)
+	result, _ := ctx.Execute(fmt.Sprintf("test -f %s", yasbootEnvFile), false)
 	if result != nil && result.GetExitCode() == 0 {
 		return yasbootEnvFile, nil
 	}
 
-	// 3. 如果不存在，使用 ~/.bashrc（默认端口 1688）或 ~/.port<port>（非默认端口）
 	beginPort := ctx.GetParamInt("db_begin_port", 1688)
 
-	// 优先检查 ~/.port<port> 文件是否存在（非默认端口场景）
 	portEnvFile := fmt.Sprintf("%s/.port%d", homeDir, beginPort)
-	result, _ = executor.Execute(fmt.Sprintf("test -f %s", portEnvFile), false)
+	result, _ = ctx.Execute(fmt.Sprintf("test -f %s", portEnvFile), false)
 	if result != nil && result.GetExitCode() == 0 {
 		return portEnvFile, nil
 	}
 
-	// 如果端口号文件不存在，根据端口号选择
 	var envFile string
 	if beginPort != 1688 {
-		// 非默认端口：使用 ~/.port<port>（文件可能尚未创建）
 		envFile = fmt.Sprintf("%s/.port%d", homeDir, beginPort)
 	} else {
-		// 默认端口：使用 ~/.bashrc
 		envFile = fmt.Sprintf("%s/.bashrc", homeDir)
 	}
 
-	// 检查文件是否存在
-	result, _ = executor.Execute(fmt.Sprintf("test -f %s", envFile), false)
+	result, _ = ctx.Execute(fmt.Sprintf("test -f %s", envFile), false)
 	if result != nil && result.GetExitCode() == 0 {
 		return envFile, nil
 	}
@@ -94,8 +81,8 @@ func GetPrimaryOSUser(ctx *runner.StepContext) string {
 }
 
 // getUserHomeDir 获取用户主目录（内部辅助函数）
-func getUserHomeDir(executor runner.Executor, user string) (string, error) {
-	result, _ := executor.Execute(fmt.Sprintf("getent passwd %s | cut -d: -f6", user), false)
+func getUserHomeDir(ctx *runner.StepContext, user string) (string, error) {
+	result, _ := ctx.Execute(fmt.Sprintf("getent passwd %s | cut -d: -f6", user), false)
 	if result == nil || result.GetStdout() == "" {
 		return "", fmt.Errorf("cannot determine home directory for user %s", user)
 	}
@@ -112,9 +99,8 @@ func getUserHomeDir(executor runner.Executor, user string) (string, error) {
 //	source /home/yashan/.yasboot/huang_yasdb_home/conf/huang.bashrc
 //
 // 从路径中提取集群名（如 huang）
-func ExtractClusterNameFromEnvFile(executor runner.Executor, envFile string) (string, error) {
-	// 读取环境文件内容
-	result, err := executor.Execute(fmt.Sprintf("cat %s", envFile), false)
+func ExtractClusterNameFromEnvFile(ctx *runner.StepContext, envFile string) (string, error) {
+	result, err := ctx.Execute(fmt.Sprintf("cat %s", envFile), false)
 	if err != nil {
 		return "", fmt.Errorf("failed to read environment file %s: %w", envFile, err)
 	}

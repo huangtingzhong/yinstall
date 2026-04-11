@@ -61,7 +61,7 @@ func StepB010MountISO() *runner.Step {
 
 				// 查找并分发 ISO 文件
 				isoPath, err = commonfile.FindAndDistribute(
-					ctx.Executor,
+					ctx,
 					device,
 					ctx.LocalSoftwareDirs,
 					ctx.RemoteSoftwareDir,

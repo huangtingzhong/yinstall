@@ -5,7 +5,7 @@ package ymp
 
 import (
 	"fmt"
-	"path/filepath"
+	"path"
 	"strings"
 
 	commonfile "github.com/yinstall/internal/common/file"
@@ -24,7 +24,7 @@ func StepH010InstallYMP() *runner.Step {
 
 		PreCheck: func(ctx *runner.StepContext) error {
 			installDir := ctx.GetParamString("ymp_install_dir", "/opt/ymp")
-			ympSh := filepath.Join(installDir, "yashan-migrate-platform", "bin", "ymp.sh")
+			ympSh := path.Join(installDir, "yashan-migrate-platform", "bin", "ymp.sh")
 
 			result, _ := ctx.Execute(fmt.Sprintf("test -f %s", ympSh), false)
 			if result == nil || result.GetExitCode() != 0 {
@@ -33,26 +33,40 @@ func StepH010InstallYMP() *runner.Step {
 
 			dbPackage := ctx.GetParamString("ymp_db_package", "")
 			if dbPackage == "" {
-				return fmt.Errorf("--ymp-db-package is required for ymp.sh install")
+				ctx.Logger.Info("ymp_db_package not specified, searching for latest YashanDB package...")
+				remoteDir := ctx.RemoteSoftwareDir
+				if remoteDir == "" {
+					remoteDir = "/data/yashan/soft"
+				}
+				latestPkg, err := commonfile.FindLatestDBPackage(ctx, ctx.LocalSoftwareDirs, remoteDir)
+				if err != nil {
+					return fmt.Errorf("ymp_db_package not specified and auto-search failed: %w", err)
+				}
+				ctx.Logger.Info("Found latest YashanDB package for YMP: %s", latestPkg)
+				ctx.Params["ymp_db_package"] = latestPkg
 			}
 
-			// Check if ymp.env already exists
-			ympUser := ctx.GetParamString("ymp_user", "ymp")
-			ympEnvFile := fmt.Sprintf("/home/%s/.yasboot/ymp.env", ympUser)
-			result, _ = ctx.Execute(fmt.Sprintf("test -f %s", ympEnvFile), false)
+			// 判断当前安装目录是否已完成安装（以 db 子目录存在为标志）
+			// 注意：ymp.env 是用户级文件，多实例（不同端口）共用同一用户时不能仅靠它判断
+			dbDir := path.Join(installDir, "yashan-migrate-platform", "db")
+			result, _ = ctx.Execute(fmt.Sprintf("test -d %s", dbDir), false)
 			if result != nil && result.GetExitCode() == 0 {
-				// ymp.env exists, check if this step is forced
 				if !ctx.IsForceStep() {
-					ctx.Logger.Warn("YMP environment file already exists: %s", ympEnvFile)
-					ctx.Logger.Warn("To reinstall YMP and overwrite existing configuration, use: --force H-010")
-					return fmt.Errorf("skip: YMP already installed, use --force H-010 to reinstall")
+					ctx.Logger.Warn("YMP already installed in %s (db directory exists)", installDir)
+					ctx.Logger.Warn("To reinstall, use: --force H-010")
+					return fmt.Errorf("skip: YMP already installed in %s, use --force H-010 to reinstall", installDir)
 				}
-				// Force step: delete existing ymp.env
-				ctx.Logger.Info("Force reinstall detected, removing existing ymp.env: %s", ympEnvFile)
-				if _, err := ctx.ExecuteWithCheck(fmt.Sprintf("rm -f %s", ympEnvFile), true); err != nil {
-					return fmt.Errorf("failed to remove existing ymp.env: %w", err)
+				// Force 模式：清理旧安装留下的 env 文件
+				ympUser := ctx.GetParamString("ymp_user", "ymp")
+				ympEnvFile := fmt.Sprintf("/home/%s/.yasboot/ymp.env", ympUser)
+				result, _ = ctx.Execute(fmt.Sprintf("test -f %s", ympEnvFile), false)
+				if result != nil && result.GetExitCode() == 0 {
+					ctx.Logger.Info("Force reinstall detected, removing existing ymp.env: %s", ympEnvFile)
+					if _, err := ctx.ExecuteWithCheck(fmt.Sprintf("rm -f %s", ympEnvFile), true); err != nil {
+						return fmt.Errorf("failed to remove existing ymp.env: %w", err)
+					}
+					ctx.Logger.Info("✓ Existing ymp.env removed")
 				}
-				ctx.Logger.Info("✓ Existing ymp.env removed")
 			}
 
 			return nil
@@ -72,7 +86,7 @@ func StepH010InstallYMP() *runner.Step {
 			// 查找 DB 安装包
 			ctx.Logger.Info("Looking for DB package: %s", dbPackage)
 			dbPath, err := commonfile.FindAndDistribute(
-				ctx.Executor,
+				ctx,
 				dbPackage,
 				ctx.LocalSoftwareDirs,
 				ctx.RemoteSoftwareDir,
@@ -85,7 +99,7 @@ func StepH010InstallYMP() *runner.Step {
 			// 如果文件在 /root 目录下，需要先复制到可访问的位置
 			if strings.HasPrefix(dbPath, "/root/") {
 				// 将文件复制到 /tmp 目录，ymp 用户可以访问
-				tmpPath := fmt.Sprintf("/tmp/%s", filepath.Base(dbPath))
+				tmpPath := fmt.Sprintf("/tmp/%s", path.Base(dbPath))
 				ctx.Logger.Info("DB package is in /root, copying to %s for ymp user access", tmpPath)
 				if _, err := ctx.ExecuteWithCheck(fmt.Sprintf("cp %s %s", dbPath, tmpPath), true); err != nil {
 					return fmt.Errorf("failed to copy DB package to /tmp: %w", err)
@@ -114,59 +128,76 @@ func StepH010InstallYMP() *runner.Step {
 			yasomPort := port + 3    // yasom端口 = YMP端口 + 3
 			yasagentPort := port + 4 // yasagent端口 = YMP端口 + 4
 
-			appPropsFile := filepath.Join(installDir, "yashan-migrate-platform", "conf", "application.properties")
-			dbPropsFile := filepath.Join(installDir, "yashan-migrate-platform", "conf", "db.properties")
+			appPropsFile := path.Join(installDir, "yashan-migrate-platform", "conf", "application.properties")
+			dbPropsFile := path.Join(installDir, "yashan-migrate-platform", "conf", "db.properties")
 			// profile.toml 可能在 db 目录下，安装后会在 db/conf/profile.toml
-			profileTomlFile := filepath.Join(installDir, "yashan-migrate-platform", "db", "conf", "profile.toml")
+			profileTomlFile := path.Join(installDir, "yashan-migrate-platform", "db", "conf", "profile.toml")
 
-			ctx.Logger.Info("Configuring YMP ports before installation: Web=%d, DB=%d, yasom=%d, yasagent=%d", port, dbPort, yasomPort, yasagentPort)
+			// ── 安装前配置：端口 + DB 模式（必须在 ymp.sh install 之前完成）──
+			if port != 8090 {
+				ctx.Logger.Info("Configuring ports before installation: Web=%d, DB=%d, yasom=%d, yasagent=%d", port, dbPort, yasomPort, yasagentPort)
+
+				// 修改 application.properties 中的 server.port
+				result, _ = ctx.Execute(fmt.Sprintf("test -f %s", appPropsFile), false)
+				if result != nil && result.GetExitCode() == 0 {
+					sedCmd := fmt.Sprintf(
+						"grep -q '^server\\.port=' %s && sed -i 's/^server\\.port=.*/server.port=%d/' %s || echo 'server.port=%d' >> %s",
+						appPropsFile, port, appPropsFile, port, appPropsFile,
+					)
+					if _, err := ctx.ExecuteWithCheck(sedCmd, true); err != nil {
+						ctx.Logger.Warn("Failed to set server.port in application.properties: %v", err)
+					} else {
+						ctx.Logger.Info("✓ server.port=%d in %s", port, appPropsFile)
+					}
+				}
+
+				// 修改 db.properties 中的 YASDB_PORT 和 YASDB_YASOM_PORT / YASDB_YASAGENT_PORT
+				result, _ = ctx.Execute(fmt.Sprintf("test -f %s", dbPropsFile), false)
+				if result != nil && result.GetExitCode() == 0 {
+					for _, kv := range [][2]string{
+						{"YASDB_PORT", fmt.Sprintf("%d", dbPort)},
+						{"YASDB_YASOM_PORT", fmt.Sprintf("%d", yasomPort)},
+						{"YASDB_YASAGENT_PORT", fmt.Sprintf("%d", yasagentPort)},
+					} {
+						sedCmd := fmt.Sprintf(
+							"grep -q '^%s=' %s && sed -i 's/^%s=.*/%s=%s/' %s || echo '%s=%s' >> %s",
+							kv[0], dbPropsFile, kv[0], kv[0], kv[1], dbPropsFile, kv[0], kv[1], dbPropsFile,
+						)
+						ctx.Execute(sedCmd, true)
+					}
+					ctx.Logger.Info("✓ DB ports configured in %s (YASDB_PORT=%d)", dbPropsFile, dbPort)
+				}
+			}
 
 			// 若 db 模式为 mysql，在安装前修改 conf/db.properties 中的 YASDB_MODE
-			dbPropsFilePre := filepath.Join(installDir, "yashan-migrate-platform", "conf", "db.properties")
 			if dbMode == "mysql" {
-				ctx.Logger.Info("DB mode is mysql, modifying YASDB_MODE in %s", dbPropsFilePre)
-				result, _ := ctx.Execute(fmt.Sprintf("test -f %s", dbPropsFilePre), false)
+				ctx.Logger.Info("DB mode is mysql, modifying YASDB_MODE in %s", dbPropsFile)
+				result, _ := ctx.Execute(fmt.Sprintf("test -f %s", dbPropsFile), false)
 				if result != nil && result.GetExitCode() == 0 {
-					// 若已有 YASDB_MODE 则替换，否则追加
 					setModeCmd := fmt.Sprintf(
 						"grep -q '^YASDB_MODE=' %s && sed -i 's/^YASDB_MODE=.*/YASDB_MODE=mysql/' %s || echo 'YASDB_MODE=mysql' >> %s",
-						dbPropsFilePre, dbPropsFilePre, dbPropsFilePre,
+						dbPropsFile, dbPropsFile, dbPropsFile,
 					)
 					if _, err := ctx.ExecuteWithCheck(setModeCmd, true); err != nil {
 						return fmt.Errorf("failed to set YASDB_MODE=mysql in db.properties: %w", err)
 					}
-					ctx.Logger.Info("✓ YASDB_MODE set to mysql in %s", dbPropsFilePre)
+					ctx.Logger.Info("✓ YASDB_MODE set to mysql in %s", dbPropsFile)
 				} else {
-					return fmt.Errorf("db.properties not found at %s, cannot set YASDB_MODE", dbPropsFilePre)
+					return fmt.Errorf("db.properties not found at %s, cannot set YASDB_MODE", dbPropsFile)
 				}
 			} else {
-				ctx.Logger.Info("DB mode: yashandb (default, no modification needed)")
+				ctx.Logger.Info("DB mode: yashandb (default)")
 			}
 
-			// 执行安装（配置文件会在安装时生成）
-			ympSh := filepath.Join(installDir, "yashan-migrate-platform", "bin", "ymp.sh")
+			// ── 执行安装 ──
+			ympSh := path.Join(installDir, "yashan-migrate-platform", "bin", "ymp.sh")
 			cmd := fmt.Sprintf("sh %s install --db %s --path %s", ympSh, dbPath, icDir)
 
 			ctx.Logger.Info("Running: ymp.sh install --db %s --path %s", dbPath, icDir)
 
-			// 使用 ExecuteAsUser 以 ympUser 身份执行命令
-			// YMP 安装不需要环境变量文件
-			result, err = commonos.ExecuteAsUser(ctx.Executor, ympUser, cmd, false)
+			result, err = commonos.ExecuteAsUser(ctx, ympUser, cmd, false)
 			if err != nil {
 				return fmt.Errorf("ymp.sh install failed: %w", err)
-			}
-
-			// 记录命令执行结果到日志
-			if ctx.Logger != nil {
-				ctx.Logger.LogCommand(
-					ctx.Executor.Host(),
-					ctx.CurrentStepID,
-					fmt.Sprintf("su - %s -c 'sh %s install --db %s --path %s'", ympUser, ympSh, dbPath, icDir),
-					result.GetStdout(),
-					result.GetStderr(),
-					result.GetExitCode(),
-					result.GetDuration(),
-				)
 			}
 
 			// 检查执行结果
@@ -201,9 +232,8 @@ func StepH010InstallYMP() *runner.Step {
 
 				// 先完全停止服务（包括数据库），确保所有进程都停止
 				ctx.Logger.Info("Stopping YMP service and database...")
-				stopCmd := fmt.Sprintf("cd %s && sh bin/ymp.sh stop 2>&1", filepath.Join(installDir, "yashan-migrate-platform"))
-				// 使用 ExecuteAsUser 以 ympUser 身份执行命令（不检查错误，服务可能未启动）
-				commonos.ExecuteAsUser(ctx.Executor, ympUser, stopCmd, false)
+				stopCmd := fmt.Sprintf("cd %s && sh bin/ymp.sh stop 2>&1", path.Join(installDir, "yashan-migrate-platform"))
+				commonos.ExecuteAsUser(ctx, ympUser, stopCmd, false)
 
 				// 等待进程完全停止
 				ctx.Logger.Info("Waiting for processes to stop...")
@@ -317,9 +347,9 @@ func StepH010InstallYMP() *runner.Step {
 				ctx.Execute("sleep 2", false)
 
 				// 重新启动 YMP 服务（这会重新启动数据库）
-				startCmd := fmt.Sprintf("cd %s && sh bin/ymp.sh start 2>&1", filepath.Join(installDir, "yashan-migrate-platform"))
-				// 使用 ExecuteAsUserWithCheck 以 ympUser 身份执行命令
-				if _, err := commonos.ExecuteAsUserWithCheck(ctx.Executor, ympUser, startCmd, true); err != nil {
+				startCmd := fmt.Sprintf("cd %s && sh bin/ymp.sh start 2>&1", path.Join(installDir, "yashan-migrate-platform"))
+				_, startErr := commonos.ExecuteAsUserWithCheck(ctx, ympUser, startCmd, true)
+				if startErr != nil {
 					ctx.Logger.Warn("Failed to restart YMP service: %v", err)
 					ctx.Logger.Info("Please manually restart YMP service to apply new port configuration")
 					ctx.Logger.Info("Note: Database port may need to be reconfigured in cluster profile.toml")

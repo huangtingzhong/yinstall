@@ -43,7 +43,7 @@ type YasqlResult struct {
 // 返回：
 //   - YasqlResult: 执行结果
 //   - error: 错误信息
-func ExecuteSQL(executor runner.Executor, cfg *YasqlConfig, sql string) (*YasqlResult, error) {
+func ExecuteSQL(ctx *runner.StepContext, cfg *YasqlConfig, sql string) (*YasqlResult, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("yasql config is required")
 	}
@@ -57,8 +57,7 @@ func ExecuteSQL(executor runner.Executor, cfg *YasqlConfig, sql string) (*YasqlR
 		// 使用 / as sysdba 连接（不需要密码，不需要 @cluster）
 		connStr = "/ as sysdba"
 	} else if cfg.User != "" && cfg.Password != "" {
-		// 使用用户名密码连接
-		connStr = fmt.Sprintf("%s/'%s'@%s", cfg.User, cfg.Password, cfg.ClusterName)
+		connStr = fmt.Sprintf("%s/%s@%s", cfg.User, commonos.YasqlQuotePassword(cfg.Password), cfg.ClusterName)
 	} else {
 		return nil, fmt.Errorf("either AsSysdba=true or User/Password must be provided")
 	}
@@ -95,7 +94,7 @@ func ExecuteSQL(executor runner.Executor, cfg *YasqlConfig, sql string) (*YasqlR
 
 	// 使用 commonos.ExecuteAsUserWithEnv 执行命令
 	result, err := commonos.ExecuteAsUserWithEnv(
-		executor,
+		ctx,
 		cfg.OSUser,
 		cfg.EnvFile,
 		yasqlCmd,
@@ -138,7 +137,7 @@ func ExecuteSQL(executor runner.Executor, cfg *YasqlConfig, sql string) (*YasqlR
 // 返回：
 //   - YasqlResult: 执行结果
 //   - error: 错误信息
-func ExecuteSQLAsSysdba(executor runner.Executor, osUser, envFile, clusterName, sql string, showOutput bool) (*YasqlResult, error) {
+func ExecuteSQLAsSysdba(ctx *runner.StepContext, osUser, envFile, clusterName, sql string, showOutput bool) (*YasqlResult, error) {
 	cfg := &YasqlConfig{
 		ClusterName: clusterName,
 		AsSysdba:    true,
@@ -148,7 +147,7 @@ func ExecuteSQLAsSysdba(executor runner.Executor, osUser, envFile, clusterName, 
 		Silent:      true,
 		ShowOutput:  showOutput,
 	}
-	return ExecuteSQL(executor, cfg, sql)
+	return ExecuteSQL(ctx, cfg, sql)
 }
 
 // ExecuteSQLAsSysdbaCtx 以 sysdba 身份执行 SQL（带 StepContext，支持日志记录）
@@ -224,10 +223,10 @@ func ExecuteSQLAsSysdbaCtx(ctx *runner.StepContext, osUser, envFile, clusterName
 // 返回：
 //   - 参数值（如果找到）
 //   - error: 错误信息
-func QueryParameter(executor runner.Executor, osUser, envFile, clusterName, paramName string, showOutput bool) (string, error) {
+func QueryParameter(ctx *runner.StepContext, osUser, envFile, clusterName, paramName string, showOutput bool) (string, error) {
 	sql := fmt.Sprintf("SELECT value FROM v$parameter WHERE name = '%s';", paramName)
 
-	result, err := ExecuteSQLAsSysdba(executor, osUser, envFile, clusterName, sql, showOutput)
+	result, err := ExecuteSQLAsSysdba(ctx, osUser, envFile, clusterName, sql, showOutput)
 	if err != nil {
 		return "", err
 	}
