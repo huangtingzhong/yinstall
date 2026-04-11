@@ -109,6 +109,12 @@ func genStandaloneConfig(ctx *runner.StepContext, yasbootPath, clusterName, user
 		installPath, dataPath, logPath,
 		beginPort, memoryPercent)
 
+	extra := ctx.GetParamString("yasboot_extra_args", "")
+	genCmd = commonos.YasbootAppendExtraArgs(genCmd, extra, true)
+	if strings.TrimSpace(extra) != "" {
+		ctx.Logger.Info("yasboot package se gen: appending extra args: %s", strings.TrimSpace(extra))
+	}
+
 	// Execute as yashan user
 	cmd := fmt.Sprintf("su - %s -c '%s'", user, genCmd)
 
@@ -225,6 +231,12 @@ func genYACConfig(ctx *runner.StepContext, yasbootPath, clusterName, user, passw
 			interCIDR, publicNetwork, vipStr,
 			diskFoundPath,
 			systemDisks, dataDisks)
+	}
+
+	extra := ctx.GetParamString("yasboot_extra_args", "")
+	genCmd = commonos.YasbootAppendExtraArgs(genCmd, extra, true)
+	if strings.TrimSpace(extra) != "" {
+		ctx.Logger.Info("yasboot package ce gen: appending extra args: %s", strings.TrimSpace(extra))
 	}
 
 	// Execute as yashan user

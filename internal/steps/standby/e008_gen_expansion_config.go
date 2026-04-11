@@ -123,6 +123,12 @@ func StepE008GenExpansionConfig() *runner.Step {
 					nodeCount)
 			}
 
+			extra := ctx.GetParamString("yasboot_extra_args", "")
+			genCmd = commonos.YasbootAppendExtraArgs(genCmd, extra, false)
+			if strings.TrimSpace(extra) != "" {
+				ctx.Logger.Info("yasboot config node gen: appending extra args: %s", strings.TrimSpace(extra))
+			}
+
 			// Execute as primary user with environment sourced
 			ctx.Logger.Info("Running: yasboot config node gen ...")
 			result, err := commonos.ExecuteAsUserWithEnvCtx(ctx, primaryUser, envFile, genCmd, true)
@@ -169,6 +175,7 @@ func StepE008GenExpansionConfig() *runner.Step {
 														installPath, dataPath, logPath,
 														beginPort,
 														nodeCount)
+													genCmd = commonos.YasbootAppendExtraArgs(genCmd, ctx.GetParamString("yasboot_extra_args", ""), false)
 													result, err = commonos.ExecuteAsUserWithEnvCheckCtx(ctx, primaryUser, envFile, genCmd, true)
 													if err == nil {
 														break

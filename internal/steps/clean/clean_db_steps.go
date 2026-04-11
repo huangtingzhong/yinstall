@@ -127,13 +127,15 @@ func StepCleanDB002StopProcesses() *runner.Step {
 		Action: func(ctx *runner.StepContext) error {
 			yasdbHome := ctx.GetParamString("yasdb_home", "/data/yashan/yasdb_home")
 			yasdbData := ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data")
+			yasdbLog := ctx.GetParamString("yasdb_log", "/data/yashan/log")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
+			osUser := ctx.GetParamString("os_user", "yashan")
 
 			ctx.Logger.Info("Finding YashanDB processes...")
 
 			// 1. 先停止 monit 监控进程（防止自动重启）
 			ctx.Logger.Info("Step 1: Stopping monit monitoring process...")
-			monitCmd := "ps -ef | grep 'monit.*monitrc' | grep -v grep | awk '{print $2}'"
+			monitCmd := buildFindMonitPSCmd(ctx, osUser, clusterName, true)
 			result, _ := ctx.Execute(monitCmd, false)
 			if result != nil && result.GetStdout() != "" {
 				monitPids := strings.Split(strings.TrimSpace(result.GetStdout()), "\n")
@@ -149,18 +151,9 @@ func StepCleanDB002StopProcesses() *runner.Step {
 				ctx.Logger.Info("No monit process found")
 			}
 
-			// 2. 查找所有 YashanDB 进程
+			// 2. 查找所有 YashanDB 进程（grep -F 固定路径前缀，不误伤 yasdb_home_2788 等）
 			ctx.Logger.Info("Step 2: Finding all YashanDB processes...")
-			yasdbHomePattern := yasdbHome
-			if !strings.HasSuffix(yasdbHomePattern, "/") {
-				yasdbHomePattern = yasdbHomePattern + "/"
-			}
-			yasdbDataPattern := yasdbData
-			if !strings.HasSuffix(yasdbDataPattern, "/") {
-				yasdbDataPattern = yasdbDataPattern + "/"
-			}
-			findProcessCmd := fmt.Sprintf("ps -ef | grep -E '(%s|%s|%s)' | grep -v grep | awk '{print $2}'",
-				yasdbHomePattern, yasdbDataPattern, clusterName)
+			findProcessCmd := buildFindYashanDBProcessPSCmd(ctx, yasdbHome, yasdbData, yasdbLog, osUser, clusterName, true)
 			result, _ = ctx.Execute(findProcessCmd, false)
 
 			var pids []string
@@ -234,18 +227,11 @@ func StepCleanDB002StopProcesses() *runner.Step {
 		PostCheck: func(ctx *runner.StepContext) error {
 			yasdbHome := ctx.GetParamString("yasdb_home", "/data/yashan/yasdb_home")
 			yasdbData := ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data")
+			yasdbLog := ctx.GetParamString("yasdb_log", "/data/yashan/log")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
+			osUser := ctx.GetParamString("os_user", "yashan")
 
-			yasdbHomePattern := yasdbHome
-			if !strings.HasSuffix(yasdbHomePattern, "/") {
-				yasdbHomePattern = yasdbHomePattern + "/"
-			}
-			yasdbDataPattern := yasdbData
-			if !strings.HasSuffix(yasdbDataPattern, "/") {
-				yasdbDataPattern = yasdbDataPattern + "/"
-			}
-			findProcessCmd := fmt.Sprintf("ps -ef | grep -E '(%s|%s|%s)' | grep -v grep",
-				yasdbHomePattern, yasdbDataPattern, clusterName)
+			findProcessCmd := buildFindYashanDBProcessPSCmd(ctx, yasdbHome, yasdbData, yasdbLog, osUser, clusterName, false)
 			result, _ := ctx.Execute(findProcessCmd, false)
 
 			if result != nil && result.GetStdout() != "" {
@@ -584,20 +570,13 @@ func StepCleanDB006FinalCheck() *runner.Step {
 		Action: func(ctx *runner.StepContext) error {
 			yasdbHome := ctx.GetParamString("yasdb_home", "/data/yashan/yasdb_home")
 			yasdbData := ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data")
+			yasdbLog := ctx.GetParamString("yasdb_log", "/data/yashan/log")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
+			osUser := ctx.GetParamString("os_user", "yashan")
 
 			ctx.Logger.Info("Performing final process cleanup check...")
 
-			yasdbHomePattern := yasdbHome
-			if !strings.HasSuffix(yasdbHomePattern, "/") {
-				yasdbHomePattern = yasdbHomePattern + "/"
-			}
-			yasdbDataPattern := yasdbData
-			if !strings.HasSuffix(yasdbDataPattern, "/") {
-				yasdbDataPattern = yasdbDataPattern + "/"
-			}
-			findProcessCmd := fmt.Sprintf("ps -ef | grep -E '(%s|%s|%s)' | grep -v grep | awk '{print $2}'",
-				yasdbHomePattern, yasdbDataPattern, clusterName)
+			findProcessCmd := buildFindYashanDBProcessPSCmd(ctx, yasdbHome, yasdbData, yasdbLog, osUser, clusterName, true)
 
 			time.Sleep(2 * time.Second)
 			result, _ := ctx.Execute(findProcessCmd, false)

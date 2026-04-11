@@ -52,6 +52,8 @@ var (
 	// YAC 模式和多实例支持
 	standbyYACMode   bool // 是否为 YAC 模式（影响环境变量和自启动配置）
 	standbyBeginPort int  // 数据库起始端口（用于多实例场景的环境变量文件命名）
+
+	standbyYasbootExtraArgs string // 追加到 yasboot config node gen 的额外参数
 )
 
 // standbyCmd 添加备库命令
@@ -106,6 +108,7 @@ func init() {
 	// YAC 模式和多实例支持
 	standbyCmd.Flags().BoolVar(&standbyYACMode, "yac-mode", false, "Enable YAC mode (affects env vars and autostart config)")
 	standbyCmd.Flags().IntVar(&standbyBeginPort, "db-begin-port", 1688, "Database begin port (for multi-instance env file naming)")
+	standbyCmd.Flags().StringVar(&standbyYasbootExtraArgs, "yasboot-extra-args", "", "Extra arguments appended to yasboot config node gen only (space-separated)")
 }
 
 // runStandby 执行添加备库流程
@@ -339,6 +342,7 @@ func buildStandbyParams(flags GlobalFlags) map[string]interface{} {
 	params["standby_targets_str"] = strings.Join(flags.Targets, ",")
 	params["standby_cleanup_on_failure"] = standbyCleanupOnFailure
 	params["skip_os"] = skipOS
+	params["yasboot_extra_args"] = standbyYasbootExtraArgs
 
 	return params
 }

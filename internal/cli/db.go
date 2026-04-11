@@ -32,6 +32,7 @@ var (
 	dbDisableArchivelog bool // 关闭归档：将 yashandb.toml 中 ISARCHIVELOG 设为 false
 	dbCustomSQLScript string // 自定义 SQL 脚本路径
 	dbTPCC          bool   // TPCC 参数优化
+	dbYasbootExtraArgs string // 追加到 yasboot package se/ce gen 等命令的额外参数
 
 	// OS user parameters for DB (needed for gen-config)
 	dbOSUser         string
@@ -131,6 +132,7 @@ func init() {
 	dbCmd.Flags().StringVar(&dbCustomSQLScript, "db-custom-sql-script", "", "Custom SQL script to execute after installation (supports: remote:/path, local:/path, /absolute/path, relative/path)")
 	dbCmd.Flags().BoolVar(&dbTPCC, "db-tpcc", false, "Enable TPCC parameter optimization (default: false)")
 	dbCmd.Flags().MarkHidden("db-tpcc")
+	dbCmd.Flags().StringVar(&dbYasbootExtraArgs, "yasboot-extra-args", "", "Extra arguments appended to yasboot package se gen / package ce gen (space-separated, e.g. '--disk-found-path /dev/foo')")
 
 	// YAC diskgroup parameters (shared with os command)
 	dbCmd.Flags().StringVar(&yacSystemDG, "yac-systemdg", "", "System diskgroup (format: dgname:/dev/sda,/dev/sdb, required for YAC)")
@@ -696,6 +698,7 @@ func buildDBParams(isYACMode bool, targetCount int) map[string]interface{} {
 	params["db_disable_archivelog"] = dbDisableArchivelog
 	params["db_custom_sql_script"] = dbCustomSQLScript
 	params["db_tpcc"] = dbTPCC
+	params["yasboot_extra_args"] = dbYasbootExtraArgs
 
 	// YAC network params
 	params["yac_inter_cidr"] = yacInterCIDR

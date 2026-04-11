@@ -5,6 +5,7 @@ import (
 	"path"
 	"strings"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -34,8 +35,14 @@ func StepC015InstallSoftware() *runner.Step {
 			yasbootDir := path.Join(homeDir, ".yasboot")
 			envFile := path.Join(yasbootDir, clusterName+".env")
 			homeLink := path.Join(yasbootDir, clusterName+"_yasdb_home")
-			killYasomCmd := fmt.Sprintf("pgrep -f 'yasom.*-c %s' | xargs -r kill -9 2>/dev/null || true", clusterName)
-			killYasagentCmd := fmt.Sprintf("pgrep -f 'yasagent.*-c %s' | xargs -r kill -9 2>/dev/null || true", clusterName)
+			killYasomCmd := fmt.Sprintf(
+				"pgrep -f %s | xargs -r kill -9 2>/dev/null || true",
+				commonos.ShellSingleQuote(commonos.PgrepBinaryClusterArgPattern("yasom", clusterName)),
+			)
+			killYasagentCmd := fmt.Sprintf(
+				"pgrep -f %s | xargs -r kill -9 2>/dev/null || true",
+				commonos.ShellSingleQuote(commonos.PgrepBinaryClusterArgPattern("yasagent", clusterName)),
+			)
 
 			// 获取需要清理的节点列表
 			hostsToClean := ctx.TargetHosts

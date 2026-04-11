@@ -36,6 +36,85 @@ func isSafePath(p string) bool {
 	return len(parts) >= 2
 }
 
+// psPathPrefixForMatch 将远端安装目录规范为「仅匹配本实例」的前缀（末尾必有 /），
+// 避免 /data/yashan/yasdb_home/ 误匹配 yasdb_home_2788 等更长目录名。
+func psPathPrefixForMatch(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+	p = strings.ReplaceAll(p, `\`, `/`)
+	p = path.Clean(p)
+	if p == "/" || p == "." {
+		return ""
+	}
+	if !strings.HasSuffix(p, "/") {
+		p += "/"
+	}
+	return p
+}
+
+// buildFindYashanDBProcessPSCmd 构造 ps|grep，仅匹配当前清理目标相关进程：
+// - 使用 grep -F 固定串 + 路径末尾 /，避免 yasdb_home 匹配到 yasdb_home_2788；
+// - 使用 ~/.yasboot/<cluster>_yasdb_home/ 匹配 monit 等，不用裸 cluster 名（避免 yashandb 匹配 yashandb_2788）。
+func buildFindYashanDBProcessPSCmd(ctx *runner.StepContext, yasdbHome, yasdbData, yasdbLog, osUser, clusterName string, awkPrintPid bool) string {
+	homePat := psPathPrefixForMatch(yasdbHome)
+	dataPat := psPathPrefixForMatch(yasdbData)
+	logPat := psPathPrefixForMatch(yasdbLog)
+
+	u := strings.TrimSpace(osUser)
+	if u == "" {
+		u = "yashan"
+	}
+	userHome, err := commonos.GetUserHomeDir(ctx, u)
+	if err != nil {
+		userHome = path.Join("/home", u)
+	}
+	yasbootPat := psPathPrefixForMatch(path.Join(userHome, ".yasboot", clusterName+"_yasdb_home"))
+
+	var grepFe []string
+	for _, pat := range []string{homePat, dataPat, logPat, yasbootPat} {
+		if pat == "" {
+			continue
+		}
+		grepFe = append(grepFe, "-e "+commonos.ShellSingleQuote(pat))
+	}
+	if len(grepFe) == 0 {
+		return `false`
+	}
+
+	cmd := fmt.Sprintf(
+		`ps -ef | grep -E '(yasdb|yasagent|yasom|monit)' | grep -F %s | grep -v grep | grep -v yinstall`,
+		strings.Join(grepFe, " "),
+	)
+	if awkPrintPid {
+		return cmd + ` | awk '{print $2}'`
+	}
+	return cmd
+}
+
+// buildFindMonitPSCmd 仅匹配当前集群 monit（其 -c 指向 ~/.yasboot/<cluster>_yasdb_home/.../monitrc），
+// 避免误杀其他实例的 monit。
+func buildFindMonitPSCmd(ctx *runner.StepContext, osUser, clusterName string, awkPrintPid bool) string {
+	u := strings.TrimSpace(osUser)
+	if u == "" {
+		u = "yashan"
+	}
+	userHome, err := commonos.GetUserHomeDir(ctx, u)
+	if err != nil {
+		userHome = path.Join("/home", u)
+	}
+	monitrc := strings.ReplaceAll(path.Join(userHome, ".yasboot", clusterName+"_yasdb_home", "om/monit/monitrc"), `\`, `/`)
+	cmd := fmt.Sprintf(
+		`ps -ef | grep monit | grep -F %s | grep -v grep | grep -v yinstall`,
+		commonos.ShellSingleQuote(monitrc),
+	)
+	if awkPrintPid {
+		return cmd + ` | awk '{print $2}'`
+	}
+	return cmd
+}
+
 // removeDir removes a directory with rm -rf after safety validation
 func removeDir(ctx *runner.StepContext, path, label string) {
 	if !isSafePath(path) {
@@ -152,22 +231,9 @@ func StepCleanDB() *runner.Step {
 
 			ctx.Logger.Info("Starting DB cleanup process")
 
-			// 1. Find all YashanDB processes
+			// 1. Find all YashanDB processes（固定串 + 路径尾 / + .yasboot/<cluster>_yasdb_home/，不误伤其他实例）
 			ctx.Logger.Info("Step 1: Finding YashanDB processes")
-			yasdbHomePattern := yasdbHome
-			if !strings.HasSuffix(yasdbHomePattern, "/") {
-				yasdbHomePattern = yasdbHomePattern + "/"
-			}
-			yasdbDataPattern := yasdbData
-			if !strings.HasSuffix(yasdbDataPattern, "/") {
-				yasdbDataPattern = yasdbDataPattern + "/"
-			}
-			// Only target YashanDB-related processes, and avoid matching this cleanup command itself.
-			// Note: clusterName / paths may appear in this tool's own command line flags.
-			findProcessCmd := fmt.Sprintf(
-				"ps -ef | grep -E '(yasdb|yasagent|yasom|monit)' | grep -E '(%s|%s|%s)' | grep -v grep | grep -v yinstall | awk '{print $2}'",
-				yasdbHomePattern, yasdbDataPattern, clusterName,
-			)
+			findProcessCmd := buildFindYashanDBProcessPSCmd(ctx, yasdbHome, yasdbData, yasdbLog, osUser, clusterName, true)
 			result, _ := ctx.Execute(findProcessCmd, false)
 
 			var pids []string
@@ -298,21 +364,8 @@ func StepCleanDB() *runner.Step {
 
 			ctx.Logger.Info("Verifying cleanup results")
 
-			// 1. Check if processes still exist
-			// 在路径后添加 / 以避免误匹配
-			yasdbHomePattern := yasdbHome
-			if !strings.HasSuffix(yasdbHomePattern, "/") {
-				yasdbHomePattern = yasdbHomePattern + "/"
-			}
-			yasdbDataPattern := yasdbData
-			if !strings.HasSuffix(yasdbDataPattern, "/") {
-				yasdbDataPattern = yasdbDataPattern + "/"
-			}
-			// Only consider YashanDB-related processes and avoid matching this cleanup tool itself.
-			findProcessCmd := fmt.Sprintf(
-				"ps -ef | grep -E '(yasdb|yasagent|yasom|monit)' | grep -E '(%s|%s|%s)' | grep -v grep | grep -v yinstall",
-				yasdbHomePattern, yasdbDataPattern, clusterName,
-			)
+			// 1. Check if processes still exist（与 Action 相同：精准路径 + .yasboot 目录，不含裸 cluster 名）
+			findProcessCmd := buildFindYashanDBProcessPSCmd(ctx, yasdbHome, yasdbData, yasdbLog, osUser, clusterName, false)
 			result, _ := ctx.Execute(findProcessCmd, false)
 
 			if result != nil && result.GetStdout() != "" {
@@ -343,7 +396,12 @@ func StepCleanDB() *runner.Step {
 
 			// 4. Check .bashrc no longer references this cluster
 			bashrc := fmt.Sprintf("%s/.bashrc", userHome)
-			checkCmd := fmt.Sprintf("grep -c '%s_yasdb_home' %s 2>/dev/null || echo 0", clusterName, bashrc)
+			needle := fmt.Sprintf("%s_yasdb_home", clusterName)
+			checkCmd := fmt.Sprintf(
+				"grep -cF %s %s 2>/dev/null || echo 0",
+				commonos.ShellSingleQuote(needle),
+				commonos.ShellSingleQuote(bashrc),
+			)
 			checkResult, _ := ctx.Execute(checkCmd, false)
 			if checkResult != nil {
 				count := strings.TrimSpace(checkResult.GetStdout())

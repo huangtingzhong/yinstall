@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -80,8 +81,13 @@ func StepC001PortCheck() *runner.Step {
 				if !strings.HasSuffix(installPathPattern, "/") {
 					installPathPattern = installPathPattern + "/"
 				}
-				// 检查安装路径下是否有进程，且命令行参数中包含集群名（-c clusterName）
-				processCmd := fmt.Sprintf("ps -ef | grep -E '(yasdb|yasagent|yasom)' | grep -v grep | grep '%s' | grep -E '(-c %s|--cluster %s)'", installPathPattern, clusterName, clusterName)
+				// 路径固定串 + 集群名边界（避免 -c yashandb 匹配到 -c yashandb_2788）
+				clusterGrep := commonos.ClusterArgBoundaryGrepE(clusterName)
+				processCmd := fmt.Sprintf(
+					"ps -ef | grep -E '(yasdb|yasagent|yasom)' | grep -v grep | grep -F %s | grep -E %s",
+					commonos.ShellSingleQuote(installPathPattern),
+					commonos.ShellSingleQuote(clusterGrep),
+				)
 				processResult, _ := hctx.Execute(processCmd, false)
 				if processResult != nil && processResult.GetExitCode() == 0 && strings.TrimSpace(processResult.GetStdout()) != "" {
 					processInfo := strings.TrimSpace(processResult.GetStdout())

@@ -32,3 +32,18 @@ func YasqlQuotePassword(s string) string {
 func ShellEscapeForSuC(s string) string {
 	return "'\\''" + strings.ReplaceAll(s, "'", "'\\''") + "'\\''"
 }
+
+// YasbootAppendExtraArgs 将用户自定义的 yasboot 附加参数拼到命令末尾（空格分隔）。
+// escapeInnerSingleQuotesForSu 为 true 时，将 extra 中的单引号转义为 '\''，用于整条子命令被包在
+// su - user -c '...' 的单引号对内（如 C-011 gen-config）。为 false 时原样追加，适用于整条命令随后会由
+// ExecuteAsUserWithEnv 等对整段命令做引号转义的场景。
+func YasbootAppendExtraArgs(base, extra string, escapeInnerSingleQuotesForSu bool) string {
+	e := strings.TrimSpace(extra)
+	if e == "" {
+		return base
+	}
+	if escapeInnerSingleQuotesForSu {
+		e = strings.ReplaceAll(e, `'`, `'\''`)
+	}
+	return base + " " + e
+}
