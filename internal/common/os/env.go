@@ -5,7 +5,7 @@ package os
 
 import (
 	"fmt"
-	"path/filepath"
+	"path"
 	"strings"
 
 	"github.com/yinstall/internal/runner"
@@ -53,11 +53,12 @@ func GetYasdbProcessCount(ctx *runner.StepContext) int {
 
 // DetermineEnvFile 根据端口号确定环境变量文件路径
 // 规则：默认端口 1688 写入 ~/.bashrc；其他端口写入 ~/.port<端口号>
+// 使用 path.Join：homeDir 来自远端 Linux（getent），控制端可能是 Windows，须保持正斜杠。
 func DetermineEnvFile(homeDir string, beginPort int) string {
 	if beginPort == 1688 {
-		return filepath.Join(homeDir, ".bashrc")
+		return path.Join(homeDir, ".bashrc")
 	}
-	return filepath.Join(homeDir, fmt.Sprintf(".port%d", beginPort))
+	return path.Join(homeDir, fmt.Sprintf(".port%d", beginPort))
 }
 
 // GetBashrcPath 获取 yasboot 生成的 bashrc 文件路径
@@ -197,7 +198,7 @@ func CleanEnvVars(ctx *runner.StepContext, user, clusterName, dataPath string, b
 	}
 
 	if beginPort == 1688 {
-		bashrc := filepath.Join(homeDir, ".bashrc")
+		bashrc := path.Join(homeDir, ".bashrc")
 
 		r, _ := ctx.Execute(fmt.Sprintf("test -f %s", bashrc), false)
 		if r == nil || r.GetExitCode() != 0 {
@@ -224,7 +225,7 @@ func CleanEnvVars(ctx *runner.StepContext, user, clusterName, dataPath string, b
 
 		ctx.Execute(fmt.Sprintf("sed -i '/^$/N;/^\\n$/d' %s", bashrc), false)
 	} else {
-		portFile := filepath.Join(homeDir, fmt.Sprintf(".port%d", beginPort))
+		portFile := path.Join(homeDir, fmt.Sprintf(".port%d", beginPort))
 		r, _ := ctx.Execute(fmt.Sprintf("test -f %s", portFile), false)
 		if r != nil && r.GetExitCode() == 0 {
 			ctx.Execute(fmt.Sprintf("rm -f %s", portFile), true)

@@ -2,7 +2,7 @@ package clean
 
 import (
 	"fmt"
-	"path/filepath"
+	"path"
 	"strings"
 	"time"
 
@@ -10,19 +10,29 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// isSafePath checks that a path is safe to rm -rf (not empty, not root-level)
-func isSafePath(path string) bool {
-	path = strings.TrimSpace(path)
-	if path == "" || path == "/" {
+// isSafePath checks that a remote Linux path is safe to rm -rf (not empty, not root-only).
+// Control plane may be Windows while targets are Linux; paths here are always remote Unix paths,
+// so we use path.Clean (forward slashes) like YMP/db steps — not filepath.Clean, which on Windows
+// turns "/data/yashan/..." into "\\data\\..." and breaks depth checks when splitting on "/".
+func isSafePath(p string) bool {
+	p = strings.TrimSpace(p)
+	if p == "" || p == "/" {
 		return false
 	}
-	// Clean the path and reject single-level paths like "/data"
-	cleaned := filepath.Clean(path)
-	if cleaned == "/" || cleaned == "." {
+	p = strings.ReplaceAll(p, `\`, `/`)
+	cleaned := path.Clean(p)
+	if cleaned == "/" || cleaned == "." || cleaned == "" {
 		return false
 	}
-	// Must have at least 2 levels (e.g. /data/yashan)
+	if !strings.HasPrefix(cleaned, "/") {
+		return false
+	}
 	parts := strings.Split(strings.TrimPrefix(cleaned, "/"), "/")
+	for _, seg := range parts {
+		if seg == "" || seg == "." {
+			return false
+		}
+	}
 	return len(parts) >= 2
 }
 
