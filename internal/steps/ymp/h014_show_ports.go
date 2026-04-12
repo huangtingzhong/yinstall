@@ -1,5 +1,5 @@
-// h013_show_ports.go - 显示 YMP 相关端口状态
-// H-013: 检查并显示 YMP 使用的所有端口是否已启动
+// h014_show_ports.go - 显示 YMP 相关端口状态
+// H-014: 检查并显示 YMP 使用的所有端口是否已启动
 
 package ymp
 
@@ -11,10 +11,10 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepH013ShowPorts 显示 YMP 相关端口状态
-func StepH013ShowPorts() *runner.Step {
+// StepH014ShowPorts 显示 YMP 相关端口状态
+func StepH014ShowPorts() *runner.Step {
 	return &runner.Step{
-		ID:          "H-013",
+		ID:          "H-014",
 		Name:        "Show YMP Ports Status",
 		Description: "Check and display status of all YMP-related ports",
 		Tags:        []string{"ymp", "verify", "ports"},

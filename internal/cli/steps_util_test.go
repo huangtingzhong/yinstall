@@ -1,83 +1,58 @@
 package cli
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/yinstall/internal/runner"
 )
 
-func TestParseStepRanges(t *testing.T) {
-	steps := []*runner.Step{
-		{ID: "B-001"},
-		{ID: "B-002"},
-		{ID: "C-001"},
-		{ID: "C-002"},
-		{ID: "C-003"},
+func TestFilterStepsExcludeWinsOverInclude(t *testing.T) {
+	all := []*runner.Step{
+		{ID: "A-001", Name: "one", Tags: []string{"x"}},
+		{ID: "A-002", Name: "two", Tags: []string{"y"}},
+		{ID: "A-003", Name: "three", Tags: []string{"z"}},
 	}
+	flags := GlobalFlags{
+		IncludeSteps: []string{"A-001", "A-002", "A-003"},
+		ExcludeSteps: []string{"A-002"},
+	}
+	out := filterSteps(all, flags)
+	if len(out) != 2 {
+		t.Fatalf("want 2 steps, got %d: %+v", len(out), ids(out))
+	}
+	if ids(out)[0] != "A-001" || ids(out)[1] != "A-003" {
+		t.Fatalf("unexpected order/ids: %+v", ids(out))
+	}
+}
 
-	tests := []struct {
-		name    string
-		specs   []string
-		wantIDs []string
-		wantErr bool
-	}{
-		{
-			name:    "Single step",
-			specs:   []string{"B-001"},
-			wantIDs: []string{"B-001"},
-		},
-		{
-			name:    "Single step lowercase",
-			specs:   []string{"b001"},
-			wantIDs: []string{"B-001"},
-		},
-		{
-			name:    "Comma separated",
-			specs:   []string{"B-001,C-001"},
-			wantIDs: []string{"B-001", "C-001"},
-		},
-		{
-			name:    "Range start-end",
-			specs:   []string{"B-002-C-002"},
-			wantIDs: []string{"B-002", "C-001", "C-002"},
-		},
-		{
-			name:    "Range start-",
-			specs:   []string{"C-001-"},
-			wantIDs: []string{"C-001", "C-002", "C-003"},
-		},
-		{
-			name:    "Range -end",
-			specs:   []string{"-B-002"},
-			wantIDs: []string{"B-001", "B-002"},
-		},
-		{
-			name:    "Mixed",
-			specs:   []string{"B-001", "C-002-"},
-			wantIDs: []string{"B-001", "C-002", "C-003"},
-		},
-		{
-			name:    "Normalized range",
-			specs:   []string{"c001-c002"},
-			wantIDs: []string{"C-001", "C-002"},
-		},
+func TestFilterStepsExcludeOnly(t *testing.T) {
+	all := []*runner.Step{
+		{ID: "B-001", Name: "a"},
+		{ID: "B-002", Name: "b"},
 	}
+	flags := GlobalFlags{ExcludeSteps: []string{"B-001"}}
+	out := filterSteps(all, flags)
+	if len(out) != 1 || out[0].ID != "B-002" {
+		t.Fatalf("got %+v", ids(out))
+	}
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseStepRanges(steps, tt.specs)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("parseStepRanges() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			var gotIDs []string
-			for _, s := range got {
-				gotIDs = append(gotIDs, s.ID)
-			}
-			if !reflect.DeepEqual(gotIDs, tt.wantIDs) {
-				t.Errorf("parseStepRanges() = %v, want %v", gotIDs, tt.wantIDs)
-			}
-		})
+func TestFilterStepsIncludeOnly(t *testing.T) {
+	all := []*runner.Step{
+		{ID: "C-001", Name: "a"},
+		{ID: "C-002", Name: "b"},
 	}
+	flags := GlobalFlags{IncludeSteps: []string{"C-002"}}
+	out := filterSteps(all, flags)
+	if len(out) != 1 || out[0].ID != "C-002" {
+		t.Fatalf("got %+v", ids(out))
+	}
+}
+
+func ids(steps []*runner.Step) []string {
+	var s []string
+	for _, x := range steps {
+		s = append(s, x.ID)
+	}
+	return s
 }

@@ -7,42 +7,42 @@ import (
 // GetAllSteps Get all OS baseline steps
 func GetAllSteps() []*runner.Step {
 	return []*runner.Step{
-		StepB000CheckConnectivity(),
-		StepB001CreateGroup(),
-		StepB002CreateUser(),
-		StepB003SetUserPassword(),
-		StepB004ConfigureSudoers(),
-		StepB028ConfigureUmask(),
-		StepB005SetTimezone(),
-		StepB006WriteSysctlConfig(),
-		StepB007ApplySysctl(),
-		StepB008WriteLimitsConfig(),
-		StepB029ConfigureHugepages(),
-		StepB009WriteKernelArgs(),
-		StepB010MountISO(),
-		StepB011WriteYumRepo(),
-		StepB012InstallDeps(),
-		StepB013ConfigureChrony(),
-		StepB014DisableFirewall(),
-		StepB015OpenFirewallPorts(),
-		StepB016RebootCheck(),
+		StepB001CheckConnectivity(),
+		StepB002CreateGroup(),
+		StepB003CreateUser(),
+		StepB004SetUserPassword(),
+		StepB005ConfigureSudoers(),
+		StepB006ConfigureUmask(),
+		StepB007SetTimezone(),
+		StepB008WriteSysctlConfig(),
+		StepB009ApplySysctl(),
+		StepB010WriteLimitsConfig(),
+		StepB011ConfigureHugepages(),
+		StepB012WriteKernelArgs(),
+		StepB013MountISO(),
+		StepB014WriteYumRepo(),
+		StepB015InstallDeps(),
+		StepB016ConfigureChrony(),
+		StepB017DisableFirewall(),
+		StepB018OpenFirewallPorts(),
+		StepB019RebootCheck(),
 		// Local disk setup
-		StepB025SetupLocalDisk(),
-		// YAC auto-discover shared disks (runs before B-026 when diskgroups not configured)
-		StepB026AAutoDiscoverSharedDisks(),
+		StepB020SetupLocalDisk(),
+		// YAC auto-discover shared disks (runs before B-022 when diskgroups not configured)
+		StepB021AutoDiscoverSharedDisks(),
 		// YAC diskgroup validation (must run before multipath steps)
-		// B-026 检测到非多路径磁盘时会自动设置 yac_multipath_enable=true
-		StepB026ValidateYACDiskgroups(),
+		// B-022 检测到非多路径磁盘时会自动设置 yac_multipath_enable=true
+		StepB022ValidateYACDiskgroups(),
 		// Hostname configuration
-		StepB027SetHostname(),
-		// YAC multipath related (runs only when needed, auto-enabled by B-026)
-		StepB017InstallMultipath(),
-		StepB018CollectWWID(),
-		StepB019WriteMultipathConf(),
-		StepB020EnableMultipathd(),
-		StepB021VerifyMultipath(),
-		StepB022WriteUdevRules(),
-		StepB023TriggerUdev(),
-		StepB024VerifyDiskPermissions(),
+		StepB023SetHostname(),
+		// YAC multipath related (runs only when needed, auto-enabled by B-022)
+		StepB024InstallMultipath(),
+		StepB025CollectWWID(),
+		StepB026WriteMultipathConf(),
+		StepB027EnableMultipathd(),
+		StepB028VerifyMultipath(),
+		StepB029WriteUdevRules(),
+		StepB030TriggerUdev(),
+		StepB031VerifyDiskPermissions(),
 	}
 }

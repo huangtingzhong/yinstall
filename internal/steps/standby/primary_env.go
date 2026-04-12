@@ -93,77 +93,89 @@ func getUserHomeDir(ctx *runner.StepContext, user string) (string, error) {
 	return homeDir, nil
 }
 
-// ExtractClusterNameFromEnvFile 从环境文件中提取集群名
-// 环境文件格式示例：
-//
-//	source /home/yashan/.yasboot/huang_yasdb_home/conf/huang.bashrc
-//
-// 从路径中提取集群名（如 huang）
-func ExtractClusterNameFromEnvFile(ctx *runner.StepContext, envFile string) (string, error) {
-	result, err := ctx.Execute(fmt.Sprintf("cat %s", envFile), false)
-	if err != nil {
-		return "", fmt.Errorf("failed to read environment file %s: %w", envFile, err)
-	}
-	if result == nil || result.GetStdout() == "" {
-		return "", fmt.Errorf("environment file %s is empty", envFile)
-	}
-
-	content := result.GetStdout()
+// ClusterNameFromEnvFileContent 从端口包装文件（如 ~/.port3988）或直连 bashrc 的文本内容中解析 yasboot 集群名。
+// 典型行：source /home/yashan/.yasboot/yashandb_3988_yasdb_home/conf/yashandb_3988.bashrc
+// 集群名为路径中的 <cluster>（与 <cluster>_yasdb_home、<cluster>.bashrc 一致）。
+func ClusterNameFromEnvFileContent(content string) (string, error) {
 	lines := strings.Split(content, "\n")
-
-	// 查找包含 source 和 .yasboot 的行
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "source") && strings.Contains(line, ".yasboot") {
-			// 提取路径，格式：source /path/to/.yasboot/<cluster>_yasdb_home/conf/<cluster>.bashrc
-			// 或者：source ~/.yasboot/<cluster>_yasdb_home/conf/<cluster>.bashrc
-			parts := strings.Fields(line)
-			if len(parts) < 2 {
-				continue
-			}
-			path := parts[1]
+		if !strings.HasPrefix(line, "source") {
+			continue
+		}
+		if !strings.Contains(line, ".yasboot") && !strings.Contains(line, "_yasdb_home") {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		path := parts[1]
 
-			// 处理 ~ 符号（如果需要，可以在这里展开 ~ 路径）
-			// 目前直接使用路径，因为 executor.Execute 会处理 ~ 符号
-
-			// 从路径中提取集群名
-			// 路径格式：.../.yasboot/<cluster>_yasdb_home/conf/<cluster>.bashrc
-			// 或者：.../<cluster>_yasdb_home/conf/<cluster>.bashrc
-			if strings.Contains(path, "_yasdb_home/conf/") {
-				// 提取 <cluster>_yasdb_home 部分
-				startIdx := strings.Index(path, "_yasdb_home/conf/")
-				if startIdx > 0 {
-					// 向前查找，找到集群名的开始位置
-					// 查找最后一个 / 或 ~/ 或 .yasboot/ 之后的位置
-					prefix := path[:startIdx]
-					// 查找最后一个 / 的位置
-					lastSlash := strings.LastIndex(prefix, "/")
-					if lastSlash >= 0 {
-						clusterName := prefix[lastSlash+1:]
-						if clusterName != "" {
-							return clusterName, nil
-						}
+		if strings.Contains(path, "_yasdb_home/conf/") {
+			startIdx := strings.Index(path, "_yasdb_home/conf/")
+			if startIdx > 0 {
+				prefix := path[:startIdx]
+				lastSlash := strings.LastIndex(prefix, "/")
+				if lastSlash >= 0 {
+					clusterName := prefix[lastSlash+1:]
+					if clusterName != "" {
+						return clusterName, nil
 					}
 				}
 			}
+		}
 
-			// 备用方法：从文件名提取（如 huang.bashrc）
-			if strings.Contains(path, ".bashrc") {
-				// 提取文件名（不含路径）
-				lastSlash := strings.LastIndex(path, "/")
-				if lastSlash >= 0 {
-					filename := path[lastSlash+1:]
-					// 移除 .bashrc 后缀
-					if strings.HasSuffix(filename, ".bashrc") {
-						clusterName := strings.TrimSuffix(filename, ".bashrc")
-						if clusterName != "" {
-							return clusterName, nil
-						}
+		if strings.Contains(path, ".bashrc") {
+			lastSlash := strings.LastIndex(path, "/")
+			if lastSlash >= 0 {
+				filename := path[lastSlash+1:]
+				if strings.HasSuffix(filename, ".bashrc") {
+					clusterName := strings.TrimSuffix(filename, ".bashrc")
+					if clusterName != "" {
+						return clusterName, nil
 					}
 				}
 			}
 		}
 	}
+	return "", fmt.Errorf("cannot extract cluster name from env file content (expected a line like: source .../.yasboot/<cluster>_yasdb_home/conf/<cluster>.bashrc)")
+}
 
-	return "", fmt.Errorf("cannot extract cluster name from environment file %s (no source line with .yasboot found)", envFile)
+// ExtractClusterNameFromEnvFile 在远端 cat envFile 后解析集群名（供独立步骤或 Sync 使用）。
+func ExtractClusterNameFromEnvFile(ctx *runner.StepContext, envFile string) (string, error) {
+	result, err := ctx.Execute(fmt.Sprintf("cat %s", envFile), false)
+	if err != nil {
+		return "", fmt.Errorf("failed to read environment file %s: %w", envFile, err)
+	}
+	if result == nil || strings.TrimSpace(result.GetStdout()) == "" {
+		return "", fmt.Errorf("environment file %s is empty", envFile)
+	}
+	return ClusterNameFromEnvFileContent(result.GetStdout())
+}
+
+// SyncPrimaryClusterNameFromEnvFile 根据已解析到的主库 env 文件（如 ~/.port3988、.yasboot 下 bashrc）尝试解析 yasboot 集群名并写回 Params["db_cluster_name"]。
+// 解析成功则覆盖为与 yasboot -c 一致的名字（如 yashandb_3988）；适用于「显式 primary_env_file」与「GetPrimaryEnvFile 自动探测」两种路径。
+// 解析失败时：若用户显式设置了 primary_env_file 则返回错误；否则静默跳过（保留 CLI 默认或手动传入的 db_cluster_name，例如仅含 PATH 的 .bashrc）。
+// 任意在主库上执行且依赖集群名的步骤，在 GetPrimaryEnvFile 成功后应调用本函数（支持单独 -s 重跑某步）。
+func SyncPrimaryClusterNameFromEnvFile(ctx *runner.StepContext, envFile string) error {
+	explicitEnv := strings.TrimSpace(ctx.GetParamString("primary_env_file", "")) != ""
+	name, err := ExtractClusterNameFromEnvFile(ctx, envFile)
+	if err != nil {
+		if explicitEnv {
+			return fmt.Errorf("primary_env_file set but cluster name could not be derived: %w", err)
+		}
+		return nil
+	}
+	if name == "" {
+		if explicitEnv {
+			return fmt.Errorf("primary_env_file set but extracted cluster name is empty")
+		}
+		return nil
+	}
+	if ctx.Params == nil {
+		ctx.Params = make(map[string]interface{})
+	}
+	ctx.Params["db_cluster_name"] = name
+	return nil
 }

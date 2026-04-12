@@ -175,6 +175,10 @@ type HostInfo struct {
 
 func runOS(cmd *cobra.Command, args []string) error {
 	flags := GetGlobalFlags()
+	if flags.ListSteps {
+		PrintOSStepCatalog()
+		return nil
+	}
 
 	// If --targets is not specified, default to local execution.
 	if len(flags.Targets) == 0 {
@@ -214,6 +218,7 @@ func runOS(cmd *cobra.Command, args []string) error {
 
 	params := buildOSParams(isYACMode, len(flags.Targets))
 	params["ssh_port"] = flags.SSHPort
+	params["yasboot_ssh_port"] = flags.YasbootSSHPort
 	allSteps := ossteps.GetAllSteps()
 	steps := filterSteps(allSteps, flags)
 
@@ -233,7 +238,7 @@ func runOS(cmd *cobra.Command, args []string) error {
 	var otherSteps []*runner.Step
 
 	for _, step := range steps {
-		if step.ID == "B-000" {
+		if step.ID == "B-001" {
 			connectivityStep = step
 		} else {
 			otherSteps = append(otherSteps, step)

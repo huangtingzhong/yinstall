@@ -8,29 +8,29 @@ import "github.com/yinstall/internal/runner"
 func GetAllSteps() []*runner.Step {
 	return []*runner.Step{
 		// Pre-installation checks
-		StepH000CheckPort(),
-		StepH001CheckInstallDir(),
+		StepH001CheckPort(),
+		StepH002CheckInstallDir(),
 
 		// Environment preparation
-		StepH002CreateUser(),
-		StepH003WriteLimits(),
-		StepH004InstallDeps(),
+		StepH003CreateUser(),
+		StepH004WriteLimits(),
+		StepH005InstallDeps(),
 
 		// JDK：先安装（可选），再校验（必须）
 		StepH006InstallJDK(),
-		StepH005ValidateJDK(),
+		StepH007ValidateJDK(),
 
 		// Software extraction
-		StepH007ExtractYMP(),
-		StepH008ExtractInstantclient(),
-		StepH009SetupSQLPlus(),
+		StepH008ExtractYMP(),
+		StepH009ExtractInstantclient(),
+		StepH010SetupSQLPlus(),
 
 		// Installation
-		StepH010InstallYMP(),
+		StepH011InstallYMP(),
 
 		// Verification
-		StepH011VerifyProcess(),
-		StepH012VerifyPort(),
-		StepH013ShowPorts(),
+		StepH012VerifyProcess(),
+		StepH013VerifyPort(),
+		StepH014ShowPorts(),
 	}
 }

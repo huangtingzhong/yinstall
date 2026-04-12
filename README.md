@@ -47,9 +47,8 @@ yasinstall [command]
 
 **执行控制：**
 
-- `--dry-run`：只生成计划，不执行
+- `--dry-run`：跳过各步骤的 Action/PostCheck（PreCheck 及 db 等命令里的全局预检查仍可能执行）
 - `--precheck`：只做检查，不做变更
-- `--resume`：从上次失败步骤继续
 - `--include-steps` / `--exclude-steps`：只执行/跳过指定步骤
 - `--include-tags` / `--exclude-tags`：按标签过滤步骤
 - `--force <步骤ID>`：强制重新执行指定步骤（会删除已有资源）

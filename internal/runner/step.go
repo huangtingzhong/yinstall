@@ -26,7 +26,7 @@ type Executor interface {
 
 // Step 步骤定义
 type Step struct {
-	ID          string   // 步骤 ID，如 B-001
+	ID          string   // 步骤 ID，如 B-002
 	Name        string   // 步骤名称
 	Description string   // 步骤描述
 	Tags        []string // 标签，如 os, db, yac
@@ -69,7 +69,7 @@ type StepContext struct {
 	DryRun            bool
 	Precheck          bool
 	Results           map[string]interface{} // 存储步骤产出
-	OSInfo            *OSInfo                // 操作系统信息（由 B-000 填充）
+	OSInfo            *OSInfo                // 操作系统信息（由 B-001 填充）
 	LocalSoftwareDirs []string               // 本地软件目录
 	RemoteSoftwareDir string                 // 远程软件目录
 	ForceAll          bool                   // 强制执行所有步骤（-f 无参数）
@@ -333,6 +333,19 @@ func (ctx *StepContext) GetParamInt(key string, defaultVal int) int {
 		return i
 	}
 	return defaultVal
+}
+
+// YasbootRemoteSSHPort 返回 yasboot 访问远端节点时使用的 SSH 端口（对应 yasboot 的 --port）。
+// 优先使用 params["yasboot_ssh_port"]；未设置或为 0 时回退到 params["ssh_port"]，再回退到 defaultVal。
+func (ctx *StepContext) YasbootRemoteSSHPort(defaultVal int) int {
+	if ctx == nil {
+		return defaultVal
+	}
+	p := ctx.GetParamInt("yasboot_ssh_port", 0)
+	if p > 0 {
+		return p
+	}
+	return ctx.GetParamInt("ssh_port", defaultVal)
 }
 
 // GetParamBool 获取布尔参数

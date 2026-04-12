@@ -5,7 +5,8 @@ package ycm
 
 import "github.com/yinstall/internal/runner"
 
-// GetAllSteps returns all YCM installation steps in execution order
+// GetAllSteps returns all YCM installation steps in execution order.
+// 步骤编号为 G-001 … G-010，与文件名 g001_*.go … g010_*.go 一一对应。
 func GetAllSteps() []*runner.Step {
 	return []*runner.Step{
 		// Dependencies

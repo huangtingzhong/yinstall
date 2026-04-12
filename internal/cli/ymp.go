@@ -1,6 +1,6 @@
 // ymp.go - YMP 安装命令实现
 // 本文件实现 yinstall ymp 命令，用于安装 YMP（YashanDB Migration Platform）
-// 流程：OS 基线配置（可选）→ YMP 安装步骤（H-001 ~ H-012）
+// 流程：OS 基线配置（可选）→ YMP 安装步骤（H-001 ~ H-014）
 
 package cli
 
@@ -122,6 +122,10 @@ func runYMP(cmd *cobra.Command, args []string) error {
 	}
 
 	flags := GetGlobalFlags()
+	if flags.ListSteps {
+		PrintYMPStepCatalog(ympSkipOS)
+		return nil
+	}
 
 	// If --targets is not specified, default to local execution.
 	if len(flags.Targets) == 0 {
@@ -180,7 +184,7 @@ func runYMP(cmd *cobra.Command, args []string) error {
 		// 即使跳过OS，也需要连通性检查
 		osSteps := ossteps.GetAllSteps()
 		for _, step := range osSteps {
-			if step.ID == "B-000" {
+			if step.ID == "B-001" {
 				allSteps = append(allSteps, step)
 				break
 			}
@@ -209,7 +213,7 @@ func runYMP(cmd *cobra.Command, args []string) error {
 	var otherSteps []*runner.Step
 
 	for _, step := range steps {
-		if step.ID == "B-000" {
+		if step.ID == "B-001" {
 			connectivityStep = step
 		} else {
 			otherSteps = append(otherSteps, step)
@@ -392,6 +396,8 @@ func runYMP(cmd *cobra.Command, args []string) error {
 // buildYMPParams 构建 YMP 安装参数
 func buildYMPParams(cmd *cobra.Command, flags GlobalFlags) map[string]interface{} {
 	params := buildOSParams(false, len(flags.Targets))
+	params["ssh_port"] = flags.SSHPort
+	params["yasboot_ssh_port"] = flags.YasbootSSHPort
 
 	// Override OS ignore install errors if specified
 	params["os_ignore_install_errors"] = ympIgnoreInstallErrors
@@ -453,16 +459,16 @@ func buildYMPParams(cmd *cobra.Command, flags GlobalFlags) map[string]interface{
 func getYMPRequiredOSSteps() []*runner.Step {
 	allOSSteps := ossteps.GetAllSteps()
 	requiredStepIDs := []string{
-		"B-000", // 连通性检查（必须）
-		// B-001~B-004 已移除：用户和组的创建在 YMP 步骤 H-001 中完成
-		"B-005", // 时区配置（建议，确保时间正确）
-		// B-008 已移除：用户资源限制配置在 YMP 步骤 H-002 中完成
-		// B-010, B-011, B-012 已移除：H-004/H-006 内部通过 EnsureLocalISORepo 自行处理 ISO 挂载和 repo 配置，
-		//   B-012 安装的是数据库依赖包（libzstd, lz4 等），YMP 不需要；YMP 自身依赖由 H-004（libaio, lsof）和 H-006（JDK）处理
-		"B-013", // chrony 配置（建议，时间同步）
-		"B-014", // 禁用防火墙（如果客户无特殊要求）
-		"B-027", // 主机名配置（基础配置）
-		// 注意：B-015（开放防火墙端口）可以通过 --include-steps 单独添加
+		"B-001", // 连通性检查（必须）
+		// B-002~B-005 已移除：用户和组的创建在 YMP 步骤 H-002 中完成
+		"B-007", // 时区配置（建议，确保时间正确）
+		// B-010 已移除：用户资源限制配置在 YMP 步骤 H-003 中完成
+		// B-013, B-014, B-015 已移除：H-005/H-006 内部通过 EnsureLocalISORepo 自行处理 ISO 挂载和 repo 配置，
+		//   B-015 安装的是数据库依赖包（libzstd, lz4 等），YMP 不需要；YMP 自身依赖由 H-005（libaio, lsof）和 H-006（JDK）处理
+		"B-016", // chrony 配置（建议，时间同步）
+		"B-017", // 禁用防火墙（如果客户无特殊要求）
+		"B-023", // 主机名配置（基础配置）
+		// 注意：B-018（开放防火墙端口）可以通过 --include-steps 单独添加
 	}
 
 	var ympOSSteps []*runner.Step

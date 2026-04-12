@@ -125,6 +125,10 @@ func runYCM(cmd *cobra.Command, args []string) error {
 	}
 
 	flags := GetGlobalFlags()
+	if flags.ListSteps {
+		PrintYCMStepCatalog(ycmSkipOS)
+		return nil
+	}
 
 	// If --targets is not specified, default to local execution.
 	if len(flags.Targets) == 0 {
@@ -187,10 +191,10 @@ func runYCM(cmd *cobra.Command, args []string) error {
 		osSteps := ossteps.GetAllSteps()
 		allSteps = append(allSteps, osSteps...)
 	} else {
-		// 即使跳过 OS，也需要连通性检查 (B-000)
+		// 即使跳过 OS，也需要连通性检查 (B-001)
 		osSteps := ossteps.GetAllSteps()
 		for _, step := range osSteps {
-			if step.ID == "B-000" {
+			if step.ID == "B-001" {
 				allSteps = append(allSteps, step)
 				break
 			}
@@ -220,7 +224,7 @@ func runYCM(cmd *cobra.Command, args []string) error {
 	var otherSteps []*runner.Step
 
 	for _, step := range steps {
-		if step.ID == "B-000" {
+		if step.ID == "B-001" {
 			connectivityStep = step
 		} else {
 			otherSteps = append(otherSteps, step)
@@ -398,6 +402,8 @@ func runYCM(cmd *cobra.Command, args []string) error {
 func buildYCMParams(flags GlobalFlags) map[string]interface{} {
 	// 复用 OS 参数构建
 	params := buildOSParams(false, len(flags.Targets))
+	params["ssh_port"] = flags.SSHPort
+	params["yasboot_ssh_port"] = flags.YasbootSSHPort
 
 	// 覆盖 OS 用户参数（YCM 可能用不同用户）
 	if ycmOSUser != "" {

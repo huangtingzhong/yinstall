@@ -40,9 +40,10 @@ Supported cleanup types:
   - ymp: Clean YMP installation (requires --ymp-home)
 
 Examples:
-  # Clean YashanDB on multiple nodes (default type)
+  # Clean YashanDB on multiple nodes (default type). For standby nodes, use the SAME --yasdb-home/--yasdb-data
+  # as yinstall db / yinstall standby (--db-home-path / --db-data-path), or yasboot host add may fail with "should be empty".
   yinstall clean --targets 10.10.10.125,10.10.10.126 \
-    --yasdb-home /home/yashan/install --yasdb-data /data/yashan/yasdb_data \
+    --yasdb-home /data/yashan/yasdb_home --yasdb-data /data/yashan/yasdb_data \
     --yasdb-log /data/yashan/log --cluster-name yashandb
 
   # Clean YCM on single node
@@ -56,6 +57,10 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Get global flags
 			globalFlags := GetGlobalFlags()
+			if globalFlags.ListSteps {
+				PrintCleanStepCatalog()
+				return nil
+			}
 
 			// Validate and normalize cleanup type
 			cleanType = strings.ToLower(cleanType)
@@ -151,9 +156,10 @@ Examples:
 				steps = []*runner.Step{clean.GetStepByID("CLEAN-YMP")}
 			}
 
+			steps = filterSteps(steps, globalFlags)
 			if len(steps) == 0 {
-				fmt.Fprintf(os.Stderr, "Error: no cleanup steps found for type: %s\n", cleanType)
-				return fmt.Errorf("no cleanup steps found for type: %s", cleanType)
+				fmt.Fprintf(os.Stderr, "Error: no cleanup steps to run for type %s after step filters (--include-steps / --exclude-steps / tags)\n", cleanType)
+				return fmt.Errorf("no cleanup steps to run for type %s after step filters", cleanType)
 			}
 
 			// Create parameters

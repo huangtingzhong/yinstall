@@ -15,7 +15,7 @@ import (
 var (
 	// DB common parameters
 	dbClusterName   string
-	dbBeginPort     int
+	dbPort int
 	dbMemoryPercent int
 	dbCharacterSet  string
 	dbUseNativeType bool
@@ -114,7 +114,7 @@ func init() {
 
 	// DB common parameters
 	dbCmd.Flags().StringVar(&dbClusterName, "db-cluster-name", "yashandb", "Cluster name")
-	dbCmd.Flags().IntVar(&dbBeginPort, "db-begin-port", 1688, "Begin port number")
+	dbCmd.Flags().IntVar(&dbPort, "db-port", 1688, "Database begin port (yasboot --begin-port)")
 	dbCmd.Flags().IntVar(&dbMemoryPercent, "db-memory-percent", 50, "Memory percentage (0-100)")
 	dbCmd.Flags().StringVar(&dbCharacterSet, "db-character-set", "utf8", "Character set: UTF8, GBK, ASCII, GB18030, BINARY, LATIN1, UTF8MB3, UTF8MB4 (case-insensitive)")
 	dbCmd.Flags().BoolVar(&dbUseNativeType, "db-use-native-type", true, "Use native type")
@@ -168,7 +168,7 @@ const defaultOSUserPassword = "aaBB11@@33$$"
 
 func runDB(cmd *cobra.Command, args []string) error {
 	if err := validatePorts(map[string]int{
-		"--db-begin-port": dbBeginPort,
+		"--db-port": dbPort,
 	}); err != nil {
 		return err
 	}
@@ -177,6 +177,10 @@ func runDB(cmd *cobra.Command, args []string) error {
 	}
 
 	flags := GetGlobalFlags()
+	if flags.ListSteps {
+		PrintDBStepCatalog(dbSkipOS)
+		return nil
+	}
 
 	if dbOSUserPassword == "" {
 		dbOSUserPassword = defaultOSUserPassword
@@ -192,18 +196,18 @@ func runDB(cmd *cobra.Command, args []string) error {
 
 	// When port is not 1688, if user did not explicitly set home/data/log/cluster-name,
 	// use port-suffixed defaults to avoid conflicting with default instance (yasdb_home_<port>, etc.).
-	if dbBeginPort != 1688 {
+	if dbPort != 1688 {
 		if !cmd.Flags().Changed("db-home-path") {
-			dbInstallPath = fmt.Sprintf("/data/yashan/yasdb_home_%d", dbBeginPort)
+			dbInstallPath = fmt.Sprintf("/data/yashan/yasdb_home_%d", dbPort)
 		}
 		if !cmd.Flags().Changed("db-data-path") {
-			dbDataPath = fmt.Sprintf("/data/yashan/yasdb_data_%d", dbBeginPort)
+			dbDataPath = fmt.Sprintf("/data/yashan/yasdb_data_%d", dbPort)
 		}
 		if !cmd.Flags().Changed("db-log-path") {
-			dbLogPath = fmt.Sprintf("/data/yashan/log_%d", dbBeginPort)
+			dbLogPath = fmt.Sprintf("/data/yashan/log_%d", dbPort)
 		}
 		if !cmd.Flags().Changed("db-cluster-name") {
-			dbClusterName = fmt.Sprintf("yashandb_%d", dbBeginPort)
+			dbClusterName = fmt.Sprintf("yashandb_%d", dbPort)
 		}
 	}
 
@@ -225,10 +229,10 @@ func runDB(cmd *cobra.Command, args []string) error {
 		if yacSystemDG == "" || yacDataDG == "" {
 			if dbSkipOS {
 				return fmt.Errorf("--yac-systemdg and --yac-datadg are required for YAC mode when --skip-os is set\n" +
-					"  Hint: run without --skip-os to enable auto disk discovery (B-026A),\n" +
+					"  Hint: run without --skip-os to enable auto disk discovery (B-021),\n" +
 					"        or run 'yinstall os' first to discover disks, then 'yinstall db --skip-os' with discovered disk groups")
 			}
-			// --skip-os=false: B-026A will auto-discover disks during OS steps
+			// --skip-os=false: B-021 will auto-discover disks during OS steps
 		}
 		// SCAN mode scanname parsing is done below after params are built
 	}
@@ -263,6 +267,7 @@ func runDB(cmd *cobra.Command, args []string) error {
 	params := buildDBParams(isYACMode, len(flags.Targets))
 	params["target_ips"] = flags.Targets
 	params["ssh_port"] = flags.SSHPort
+	params["yasboot_ssh_port"] = flags.YasbootSSHPort
 
 	if isYACMode && yacAccessMode == "scan" {
 		if yacScanName == "" {
@@ -285,10 +290,10 @@ func runDB(cmd *cobra.Command, args []string) error {
 		osSteps := ossteps.GetAllSteps()
 		allSteps = append(allSteps, osSteps...)
 	} else {
-		// Even when skipping OS, still need connectivity check (B-000)
+		// Even when skipping OS, still need connectivity check (B-001)
 		osSteps := ossteps.GetAllSteps()
 		for _, step := range osSteps {
-			if step.ID == "B-000" {
+			if step.ID == "B-001" {
 				allSteps = append(allSteps, step)
 				break
 			}
@@ -318,7 +323,7 @@ func runDB(cmd *cobra.Command, args []string) error {
 	var otherSteps []*runner.Step
 
 	for _, step := range steps {
-		if step.ID == "B-000" {
+		if step.ID == "B-001" {
 			connectivityStep = step
 		} else {
 			otherSteps = append(otherSteps, step)
@@ -382,47 +387,47 @@ func runDB(cmd *cobra.Command, args []string) error {
 		logger.Info("======== Phase 2: Executing steps ========")
 	}
 
-	// 构建 hostExecs 供 C-000、C-004-VIP、C-005-SCAN 等全局预检查使用
+	// 构建 hostExecs 供 C-001、C-009-VIP、C-013-SCAN 等全局预检查使用
 	hostExecs := make([]dbsteps.HostExec, 0, len(hostInfos))
 	for _, info := range hostInfos {
-		hostExecs = append(hostExecs, dbsteps.HostExec{Host: info.Host, Executor: &c000ExecAdapter{e: &runnerExecAdapter{e: info.Executor}}})
+		hostExecs = append(hostExecs, dbsteps.HostExec{Host: info.Host, Executor: &c001ExecAdapter{e: &runnerExecAdapter{e: info.Executor}}})
 	}
 
-	// C-000 runs once as global precheck (network + YAC UID/GID + shared disks on all nodes)
+	// C-001 runs once as global precheck (network + YAC UID/GID + shared disks on all nodes)
 	var stepsToRun []*runner.Step
-	if len(otherSteps) > 0 && otherSteps[0].ID == "C-000" {
+	if len(otherSteps) > 0 && otherSteps[0].ID == "C-001" {
 		if err := dbsteps.RunConnectivityAndYACPrecheck(hostExecs, params, logger, isYACMode); err != nil {
 			for _, info := range hostInfos {
 				info.Executor.Close()
 			}
-			return fmt.Errorf("C-000 precheck failed: %w", err)
+			return fmt.Errorf("C-001 precheck failed: %w", err)
 		}
 		stepsToRun = otherSteps[1:]
 	} else {
 		stepsToRun = otherSteps
 	}
 
-	// C-000A: Network CIDR validation and auto-detection (before VIP/SCAN)
+	// C-001A: Network CIDR validation and auto-detection (before VIP/SCAN)
 	if isYACMode {
 		if err := dbsteps.RunNetworkValidation(hostExecs, params, logger); err != nil {
 			for _, info := range hostInfos {
 				info.Executor.Close()
 			}
-			return fmt.Errorf("C-000A network validation failed: %w", err)
+			return fmt.Errorf("C-001A network validation failed: %w", err)
 		}
 	}
 
-	// C-004-VIP runs once when YAC mode (both vip and scan modes need VIP)
+	// C-009-VIP runs once when YAC mode（与步骤 C-009 VIP 占位对应）
 	if isYACMode {
 		if err := dbsteps.RunVIPValidationOrAutoGenerate(hostExecs, params, logger); err != nil {
 			for _, info := range hostInfos {
 				info.Executor.Close()
 			}
-			return fmt.Errorf("C-004-VIP VIP check failed: %w", err)
+			return fmt.Errorf("C-009-VIP VIP check failed: %w", err)
 		}
 	}
 
-	// C-005-SCAN runs once when YAC scan mode
+	// C-013-SCAN runs once when YAC scan mode（与步骤 C-013 SCAN 名解析对应）
 	if isYACMode && yacAccessMode == "scan" {
 		scanMode, _ := params["yac_scan_mode"].(string)
 		if scanMode == "local" {
@@ -430,14 +435,14 @@ func runDB(cmd *cobra.Command, args []string) error {
 				for _, info := range hostInfos {
 					info.Executor.Close()
 				}
-				return fmt.Errorf("C-005-SCAN local SCAN IP allocation failed: %w", err)
+				return fmt.Errorf("C-013-SCAN local SCAN IP allocation failed: %w", err)
 			}
 		} else {
 			if err := dbsteps.RunScanNameResolveAndSubnetCheck(hostExecs, params, logger); err != nil {
 				for _, info := range hostInfos {
 					info.Executor.Close()
 				}
-				return fmt.Errorf("C-005-SCAN SCAN name check failed: %w", err)
+				return fmt.Errorf("C-013-SCAN SCAN name check failed: %w", err)
 			}
 		}
 	}
@@ -612,8 +617,8 @@ func buildDBParams(isYACMode bool, targetCount int) map[string]interface{} {
 
 	// Auto-adjust paths based on port number (if not default 1688)
 	// For non-default ports, add _<port> suffix to avoid conflicts
-	if dbBeginPort != 1688 {
-		portSuffix := fmt.Sprintf("_%d", dbBeginPort)
+	if dbPort != 1688 {
+		portSuffix := fmt.Sprintf("_%d", dbPort)
 
 		// Only auto-adjust if user hasn't explicitly set these paths
 		// Check by comparing with default values
@@ -680,7 +685,7 @@ func buildDBParams(isYACMode bool, targetCount int) map[string]interface{} {
 
 	// Add DB specific params
 	params["db_cluster_name"] = dbClusterName
-	params["db_begin_port"] = dbBeginPort
+	params["db_begin_port"] = dbPort
 	params["db_memory_percent"] = dbMemoryPercent
 	params["db_character_set"] = dbCharacterSet
 	params["db_use_native_type"] = dbUseNativeType
@@ -720,15 +725,15 @@ func buildDBParams(isYACMode bool, targetCount int) map[string]interface{} {
 	return params
 }
 
-// c000ExecAdapter 将 runner.Executor 适配为 dbsteps.ExecutorForC000，供 C-000 预检查调用（db 包不直接依赖 ssh）
-type c000ExecAdapter struct {
+// c001ExecAdapter 将 runner.Executor 适配为 dbsteps.ExecutorForC001，供 C-001 预检查调用（db 包不直接依赖 ssh）
+type c001ExecAdapter struct {
 	e runner.Executor
 }
 
-func (a *c000ExecAdapter) Execute(cmd string, sudo bool) (dbsteps.ExecResultForC000, error) {
+func (a *c001ExecAdapter) Execute(cmd string, sudo bool) (dbsteps.ExecResultForC001, error) {
 	return a.e.Execute(cmd, sudo)
 }
 
-func (a *c000ExecAdapter) Host() string {
+func (a *c001ExecAdapter) Host() string {
 	return a.e.Host()
 }

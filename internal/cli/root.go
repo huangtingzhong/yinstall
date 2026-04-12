@@ -14,7 +14,6 @@ var (
 	runID        string
 	dryRun       bool
 	precheck     bool
-	resume       bool
 	includeSteps []string
 	excludeSteps []string
 	includeTags  []string
@@ -27,6 +26,8 @@ var (
 	// SSH 参数
 	targets     []string
 	sshPort     int
+	// yasbootSshPort 为 0 时表示与 sshPort 一致（传给 yasboot package se/ce gen、config node gen 等的 --port）
+	yasbootSshPort int
 	sshUser     string
 	sshAuth     string
 	sshPassword string
@@ -36,6 +37,8 @@ var (
 	// 软件目录参数
 	localSoftwareDirs []string // 本地软件目录（控制端）
 	remoteSoftwareDir string   // 远程软件目录（目标端）
+
+	listSteps bool // -l / --list-steps：列出当前子命令的步骤说明后退出
 )
 
 // AppVersion 在运行时可被 cmd/yinstall/main.go 的 init() 通过构建时注入的 Version 变量覆盖
@@ -54,10 +57,18 @@ A CLI tool for automating YashanDB installation, including:
   - OS baseline preparation
   - Database installation (single/YAC)
   - Standby database setup
-  - YCM/YMP installation`,
+  - YCM/YMP installation
+
+Use  yinstall <command> -l  to print the step catalog (IDs, order, descriptions) for that command.`,
 	Version: AppVersion,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		return validatePort("--ssh-port", sshPort)
+		if err := validatePort("--ssh-port", sshPort); err != nil {
+			return err
+		}
+		if yasbootSshPort != 0 {
+			return validatePort("--yasboot-ssh-port", yasbootSshPort)
+		}
+		return nil
 	},
 }
 
@@ -74,21 +85,22 @@ func SetAppVersion(version string) {
 func init() {
 	// 全局参数
 	rootCmd.PersistentFlags().StringVar(&runID, "run-id", "", "Run ID (auto-generated if not specified)")
-	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Generate plan without execution")
+	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Skip each step's Action and PostCheck after PreCheck (connectivity/SSH and out-of-band checks may still run)")
 	rootCmd.PersistentFlags().BoolVar(&precheck, "precheck", false, "Only run checks, no changes")
-	rootCmd.PersistentFlags().BoolVar(&resume, "resume", false, "Resume from last failed step")
-	rootCmd.PersistentFlags().StringSliceVarP(&includeSteps, "include-steps", "s", nil, "Only execute these steps (default: execute all steps; e.g. -s B-004,B-014)")
-	rootCmd.PersistentFlags().StringSliceVar(&excludeSteps, "exclude-steps", nil, "Skip these steps")
+	rootCmd.PersistentFlags().StringSliceVarP(&includeSteps, "include-steps", "s", nil, "Only execute these steps (default: all; e.g. -s B-005,B-017). Trailing hyphen is a range (E-011- = E-011 through last); use E-011 for a single step. If --exclude-steps also lists a step, exclude wins")
+	rootCmd.PersistentFlags().StringSliceVar(&excludeSteps, "exclude-steps", nil, "Skip these steps (applied after --include-steps; same ID in both flags is skipped)")
 	rootCmd.PersistentFlags().StringSliceVar(&includeTags, "include-tags", nil, "Only execute steps with these tags")
 	rootCmd.PersistentFlags().StringSliceVar(&excludeTags, "exclude-tags", nil, "Skip steps with these tags")
 	rootCmd.PersistentFlags().BoolVarP(&forceAll, "force", "f", false, "Force execute all steps (skip pre-check guards); or use --force-steps to specify individual steps")
-	rootCmd.PersistentFlags().StringSliceVar(&forceSteps, "force-steps", nil, "Force execute specific steps (e.g. --force-steps B-001,B-002)")
+	rootCmd.PersistentFlags().StringSliceVar(&forceSteps, "force-steps", nil, "Force execute specific steps (e.g. --force-steps B-002,B-003)")
 	rootCmd.PersistentFlags().BoolVar(&forceDeleteUser, "force-delete-user", false, "Allow -f / --force-steps to delete and recreate existing users and groups (dangerous)")
 	rootCmd.PersistentFlags().StringVar(&logDir, "log-dir", defaultLogDir(), "Log directory")
+	rootCmd.PersistentFlags().BoolVarP(&listSteps, "list-steps", "l", false, "List step catalog for the subcommand (IDs, order, descriptions) and exit")
 
 	// SSH 参数
 	rootCmd.PersistentFlags().StringSliceVarP(&targets, "targets", "t", nil, "Target hosts (comma-separated)")
 	rootCmd.PersistentFlags().IntVarP(&sshPort, "ssh-port", "p", 22, "SSH port")
+	rootCmd.PersistentFlags().IntVar(&yasbootSshPort, "yasboot-ssh-port", 0, "SSH port passed to yasboot remote operations (--port; 0 = same as --ssh-port)")
 	rootCmd.PersistentFlags().StringVarP(&sshUser, "ssh-user", "u", "root", "SSH user")
 	rootCmd.PersistentFlags().StringVar(&sshAuth, "ssh-auth", "password", "SSH auth method (password|key)")
 	rootCmd.PersistentFlags().StringVar(&sshPassword, "ssh-password", "", "SSH password")
@@ -147,7 +159,6 @@ type GlobalFlags struct {
 	RunID             string
 	DryRun            bool
 	Precheck          bool
-	Resume            bool
 	IncludeSteps      []string
 	ExcludeSteps      []string
 	IncludeTags       []string
@@ -158,6 +169,7 @@ type GlobalFlags struct {
 	LogDir            string
 	Targets           []string
 	SSHPort           int
+	YasbootSSHPort    int // 传给 yasboot 的远端 SSH 端口；与 SSHPort 相同时即未单独指定 --yasboot-ssh-port（0 已解析）
 	SSHUser           string
 	SSHAuth           string
 	SSHPassword       string
@@ -168,14 +180,18 @@ type GlobalFlags struct {
 	UseSudo           bool
 	LocalSoftwareDirs []string
 	RemoteSoftwareDir string
+	ListSteps         bool
 }
 
 func GetGlobalFlags() GlobalFlags {
+	ybPort := yasbootSshPort
+	if ybPort == 0 {
+		ybPort = sshPort
+	}
 	return GlobalFlags{
 		RunID:             runID,
 		DryRun:            dryRun,
 		Precheck:          precheck,
-		Resume:            resume,
 		IncludeSteps:      includeSteps,
 		ExcludeSteps:      excludeSteps,
 		IncludeTags:       includeTags,
@@ -186,6 +202,7 @@ func GetGlobalFlags() GlobalFlags {
 		LogDir:            logDir,
 		Targets:           targets,
 		SSHPort:           sshPort,
+		YasbootSSHPort:    ybPort,
 		SSHUser:           sshUser,
 		SSHAuth:           sshAuth,
 		SSHPassword:       sshPassword,
@@ -194,6 +211,7 @@ func GetGlobalFlags() GlobalFlags {
 		UseSudo:           useSudo,
 		LocalSoftwareDirs: localSoftwareDirs,
 		RemoteSoftwareDir: remoteSoftwareDir,
+		ListSteps:         listSteps,
 	}
 }
 

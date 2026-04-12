@@ -5,62 +5,62 @@ import "github.com/yinstall/internal/runner"
 // GetAllSteps returns all DB installation steps
 func GetAllSteps() []*runner.Step {
 	return []*runner.Step{
-		// First: connectivity and YAC prerequisites (C-000 runs as global precheck in db.go)
-		StepC000Check(),
+		// First: connectivity and YAC prerequisites (C-001 runs as global precheck in db.go)
+		StepC001Check(),
 		// Port check: verify db begin port is not in use (runs per host)
-		StepC001PortCheck(),
+		StepC002PortCheck(),
 		// Home check: verify no yasdb/yasagent processes under YASDB_HOME (runs per host)
-		StepC002HomeCheck(),
+		StepC003HomeCheck(),
 
 		// Directory creation
-		StepC003CreateInstallDir(),
-		StepC004CreateDataDirs(),
-		StepC005SetDirOwnership(),
+		StepC004CreateInstallDir(),
+		StepC005CreateDataDirs(),
+		StepC006SetDirOwnership(),
 
 		// Package extraction
-		StepC006ExtractPackage(),
+		StepC007ExtractPackage(),
 
 		// Clean stale .bashrc entries before su - yashan
-		StepC006ACleanStaleBashrc(),
+		StepC008CleanStaleBashrc(),
 
-		// VIP validation or auto-generation (C-004-VIP runs as global precheck in db.go when YAC vip mode; must run before gen_config)
-		StepC007VIPCheck(),
+		// VIP 占位；实际校验/自动生成在 db.go 中 C-009-VIP 预检查阶段执行
+		StepC009VIPCheck(),
 		// Write VIP/SCAN entries to /etc/hosts on all YAC nodes
-		StepC007AWriteHosts(),
-		// SCAN DNS validation (C-004-SCAN-DNS runs after VIP check; validates SCAN DNS resolution, subnet and IP availability)
-		StepC008ScanDNS(),
-		// Shared disk validation (C-004-DISK runs after VIP check; validates disk existence, ownership and permissions on all nodes)
-		StepC009DiskCheck(),
-		// SCAN name resolve and subnet check (C-005-SCAN runs as global precheck in db.go when YAC scan mode; must run before gen_config)
-		StepC010ScanNameCheck(),
+		StepC010WriteHosts(),
+		// SCAN DNS 校验（C-011）
+		StepC011ScanDNS(),
+		// Shared disk validation（C-012）
+		StepC012DiskCheck(),
+		// SCAN 名解析；实际逻辑在 db.go 中 C-013-SCAN 预检查阶段执行
+		StepC013ScanNameCheck(),
 
 		// Configuration
-		StepC011GenConfig(),
-		StepC012SetCharacterSet(),
-		StepC012BDisableArchivelog(),
-		StepC012AConfigureRedo(), // Configure REDO file parameters
-		StepC013SetNativeType(),
-		// YFS tuning (C-007-YFS runs after native type setting; configures YFS parameters for YAC)
-		StepC014TuneYFSParams(),
+		StepC014GenConfig(),
+		StepC015SetCharacterSet(),
+		StepC016DisableArchivelog(),
+		StepC017ConfigureRedo(), // Configure REDO file parameters
+		StepC018SetNativeType(),
+		// YFS tuning（C-019）
+		StepC019TuneYFSParams(),
 
 		// Installation
-		StepC015InstallSoftware(),
-		StepC016DeployDatabase(),
-		StepC016BConfigureTPCC(),
-		StepC016ACreateArchDG(),
+		StepC020InstallSoftware(),
+		StepC021DeployDatabase(),
+		StepC022ConfigureTPCC(),
+		StepC023CreateArchDG(),
 
 		// Post installation
-		StepC017SetEnvVars(),
-		StepC018VerifyInstall(),
+		StepC024SetEnvVars(),
+		StepC025VerifyInstall(),
 
 		// Autostart configuration (optional)
-		StepC019ConfigAutostartScript(),
-		StepC020ConfigAutostartService(),
+		StepC026ConfigAutostartScript(),
+		StepC027ConfigAutostartService(),
 
 		// Final step: display cluster status
-		StepC021ShowClusterStatus(),
+		StepC028ShowClusterStatus(),
 
 		// Custom SQL script execution (optional)
-		StepC022ExecuteCustomSQL(),
+		StepC029ExecuteCustomSQL(),
 	}
 }

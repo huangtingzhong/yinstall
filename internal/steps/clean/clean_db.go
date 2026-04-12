@@ -376,9 +376,20 @@ func StepCleanDB() *runner.Step {
 				ctx.Logger.Info("[OK] All processes stopped successfully")
 			}
 
-			// 2. Check if directories still exist
-			verifyDirRemoved(ctx, yasdbHome, "YASDB_HOME")
-			verifyDirRemoved(ctx, yasdbData, "YASDB_DATA")
+			// 2. Check if directories still exist（HOME/DATA 必须删净，否则备库扩容 yasboot host add 会报 path should be empty）
+			for _, pair := range []struct {
+				path  string
+				label string
+			}{
+				{yasdbHome, "YASDB_HOME"},
+				{yasdbData, "YASDB_DATA"},
+			} {
+				res, _ := ctx.Execute(fmt.Sprintf("test -d %s", pair.path), false)
+				if res != nil && res.GetExitCode() == 0 {
+					return fmt.Errorf("cleanup incomplete: %s still exists at %s (rm may have failed or wrong path; check sudo/permissions and processes holding files)", pair.label, pair.path)
+				}
+				ctx.Logger.Info("[OK] %s removed: %s", pair.label, pair.path)
+			}
 			verifyDirRemoved(ctx, yasdbLog, "YASDB_LOG")
 
 			// 3. Check if .yasboot files still exist (use dynamic home directory)

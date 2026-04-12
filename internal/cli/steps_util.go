@@ -7,7 +7,14 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// filterSteps filters steps based on include/exclude flags and tags
+// filterSteps filters steps based on include/exclude flags and tags.
+//
+// Order and precedence:
+//  1. --include-steps (-s): narrows to the listed step IDs (ranges supported). Omitted = all steps.
+//  2. --exclude-steps: removes listed IDs from the current set. If both include and exclude list the same ID,
+//     exclude wins (step is not run). Parsed against the same catalog as step 1.
+//  3. --include-tags: narrows to steps that have at least one listed tag.
+//  4. --exclude-tags: removes steps that have any listed tag.
 func filterSteps(allSteps []*runner.Step, flags GlobalFlags) []*runner.Step {
 	var stepsToRun []*runner.Step
 
@@ -34,25 +41,25 @@ func filterSteps(allSteps []*runner.Step, flags GlobalFlags) []*runner.Step {
 		copy(stepsToRun, allSteps)
 	}
 
-	// 2. Handle exclude-steps (ranges supported)
+	// 2. Handle exclude-steps (ranges supported). Runs after include-steps: same ID in both → excluded (not run).
 	if len(flags.ExcludeSteps) > 0 {
 		excluded, err := parseStepRanges(allSteps, flags.ExcludeSteps)
 		if err != nil {
 			fmt.Printf("Error parsing exclude-steps: %v\n", err)
 			return nil
 		}
-
-		// Remove excluded steps
+		excludedID := make(map[string]struct{}, len(excluded))
+		for _, ex := range excluded {
+			if ex != nil {
+				excludedID[ex.ID] = struct{}{}
+			}
+		}
 		var retained []*runner.Step
 		for _, step := range stepsToRun {
-			isExcluded := false
-			for _, ex := range excluded {
-				if step.ID == ex.ID {
-					isExcluded = true
-					break
-				}
+			if step == nil {
+				continue
 			}
-			if !isExcluded {
+			if _, drop := excludedID[step.ID]; !drop {
 				retained = append(retained, step)
 			}
 		}
@@ -135,13 +142,8 @@ func parseStepRanges(allSteps []*runner.Step, specs []string) ([]*runner.Step, e
 		if realID, ok := idMapLower[strings.ToLower(input)]; ok {
 			return realID, true
 		}
-		// 3. Try normalizing separators/format if needed (e.g. c005 -> C-005)
-		// But here we rely on the input matching the ID format or at least case-insensitive.
-		// The requirement says "c005" matches "C-005".
-		// We can try adding hyphens if not present: "c005" -> "C-005"
-		// If input is "c005", try "C-005".
+		// 3. Try normalizing separators/format if needed（如 c005 -> C-005）
 		// Simple heuristic: insert hyphen after first letter if it's a letter followed by digits
-		// e.g. c005 -> C-005
 		normalized := normalizeStepID(input)
 		if realID, ok := idMapLower[strings.ToLower(normalized)]; ok {
 			return realID, true
@@ -168,7 +170,7 @@ func parseStepRanges(allSteps []*runner.Step, specs []string) ([]*runner.Step, e
 			// 4. "single"
 
 			if strings.Contains(part, "-") {
-				// Potential range. But wait, step IDs themselves might contain hyphens (e.g. C-005).
+				// Potential range. But wait, step IDs themselves might contain hyphens (e.g. C-006).
 				// We need to distinguish between ID hyphen and range separator.
 				// However, if we follow the rule:
 				// c005-c006 -> range
@@ -176,14 +178,14 @@ func parseStepRanges(allSteps []*runner.Step, specs []string) ([]*runner.Step, e
 				// c005- -> range
 				// -c006 -> range
 				//
-				// Ambiguity: C-005 is a valid ID. "C-005" contains "-".
-				// "C-005-C-006" -> is it "C-005" to "C-006"? Yes.
-				// "C-005-" -> "C-005" to end? Yes.
+				// Ambiguity: C-006 is a valid ID. "C-006" contains "-".
+				// "C-006-C-007" -> is it "C-006" to "C-007"? Yes.
+				// "C-006-" -> "C-006" to end? Yes.
 				//
 				// Logic: Split by "-" is risky if IDs have hyphens.
 				// But we know standard IDs are like X-NNN.
 				// Let's allow users to likely use concise IDs like c005.
-				// If they use full IDs C-005, we have C-005-C-006. Two hyphens?
+				// If they use full IDs C-006, we have C-006-C-007. Two hyphens?
 				//
 				// Let's try to parse intelligently.
 				// If the string starts with "-", it's "-end"
@@ -191,8 +193,8 @@ func parseStepRanges(allSteps []*runner.Step, specs []string) ([]*runner.Step, e
 				// unique separator?
 				//
 				// Best approach: check if the string *is* a valid ID first.
-				// "C-005" -> yes. Treat as single.
-				// "C-005-C-006" -> not a valid ID. Treat as range check.
+				// "C-006" -> yes. Treat as single.
+				// "C-006-C-007" -> not a valid ID. Treat as range check.
 				// "c005" -> maybe valid (case insensitive). check first.
 
 				// 1. Check if it's a single valid ID (exact or loose)
@@ -207,7 +209,7 @@ func parseStepRanges(allSteps []*runner.Step, specs []string) ([]*runner.Step, e
 				// If we have "start-end", and start/end might contain hyphens.
 				// Try to match longest possible valid IDs?
 				// Or assume the range separator is the *last* hyphen? or *first*?
-				// "C-005-C-006". Middle one.
+				// "C-006-C-007". Middle one.
 				// "c005-c006". Middle one.
 				//
 				// Let's try checking prefix and suffix.
