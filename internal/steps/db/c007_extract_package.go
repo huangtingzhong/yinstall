@@ -8,6 +8,7 @@ import (
 	"path"
 	"strings"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/common/file"
 	"github.com/yinstall/internal/runner"
 )
@@ -60,6 +61,25 @@ func StepC007ExtractPackage() *runner.Step {
 			ctx.Logger.Info("Remote software dir: %s", remoteDir)
 			ctx.Logger.Info("Local software dirs: %v", ctx.LocalSoftwareDirs)
 
+			// 解压前校验 stage 目录应为空，避免历史残留导致 yasboot/om 与 package 内容版本错配，
+			// 进而在后续 C-014 才以 tar 形式报错（如 “database-xxx not found in archive”）。
+			// 若用户显式强制该步（--force-steps C-007 或 -f 全局强制），则清空后再解压。
+			stageQ := commonos.ShellSingleQuote(stageDir)
+			emptyCheckCmd := fmt.Sprintf(`test -z "$(find %s -mindepth 1 2>/dev/null | head -1)" && echo EMPTY || echo NOT_EMPTY`, stageQ)
+			emptyRes, _ := ctx.Execute(emptyCheckCmd, true)
+			isEmpty := emptyRes != nil && strings.Contains(strings.TrimSpace(emptyRes.GetStdout()), "EMPTY")
+			if !isEmpty {
+				if ctx.IsForceStep() {
+					ctx.Logger.Warn("Stage directory %s is not empty; force mode enabled, cleaning before extraction", stageDir)
+					cleanCmd := fmt.Sprintf(`rm -rf %s/* %s/.[!.]* %s/.??* 2>/dev/null || true`, stageQ, stageQ, stageQ)
+					if _, err := ctx.ExecuteWithCheck(cleanCmd, true); err != nil {
+						return fmt.Errorf("failed to cleanup stage directory %s before extraction: %w", stageDir, err)
+					}
+				} else {
+					return fmt.Errorf("stage directory %s is not empty; please clean it first or re-run with --force-steps C-007 (or global -f) to auto-clean before extraction", stageDir)
+				}
+			}
+
 			fullPath, err := file.FindAndDistribute(
 				ctx,
 				pkgPath,
@@ -93,6 +113,14 @@ func StepC007ExtractPackage() *runner.Step {
 			cmd = fmt.Sprintf("chown -R %s:%s %s", user, group, stageDir)
 			if _, err := ctx.ExecuteWithCheck(cmd, true); err != nil {
 				return fmt.Errorf("failed to set ownership: %w", err)
+			}
+
+			// 校验解压结果包含 database 负载文件，避免后续 yasboot package se/ce gen 才报 “Not found in archive”
+			// 只做最小校验：至少存在一个 database-*.tar.gz
+			payloadCmd := fmt.Sprintf(`test -n "$(find %s -maxdepth 2 -type f -name 'database-*.tar.gz' 2>/dev/null | head -1)" && echo OK || echo MISSING`, stageQ)
+			payloadRes, _ := ctx.Execute(payloadCmd, true)
+			if payloadRes == nil || !strings.Contains(strings.TrimSpace(payloadRes.GetStdout()), "OK") {
+				return fmt.Errorf("extracted package in %s does not contain database-*.tar.gz payload; the package may be incomplete or mismatched. Please provide the correct DB package via --db-package", stageDir)
 			}
 
 			ctx.Logger.Info("Package extracted successfully on first node")

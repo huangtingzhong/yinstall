@@ -187,7 +187,8 @@ var standbyCmd = &cobra.Command{
   - Verify standby synchronization
 
 Global --include-steps / -s applies to every phase (e.g. -s E-013 runs only E-013 if prerequisites are already satisfied).
-Note: a trailing hyphen is range syntax (e.g. E-013- means E-013 through the last step), not a single step; use -s E-013 for one step.`,
+Note: a trailing hyphen is range syntax (e.g. E-013- means E-013 through the last step), not a single step; use -s E-013 for one step.
+Global -l/--list-steps prints the OS + standby step catalog; the OS section follows the current --skip-os value (default: B-001 only).`,
 	RunE:         runStandby,
 	SilenceUsage: true, // 报错时不显示帮助信息
 }
@@ -235,7 +236,7 @@ func init() {
 func runStandby(cmd *cobra.Command, args []string) error {
 	flags := GetGlobalFlags()
 	if flags.ListSteps {
-		PrintStandbyStepCatalog()
+		PrintStandbyStepCatalog(skipOS)
 		return nil
 	}
 
@@ -409,6 +410,11 @@ func runStandby(cmd *cobra.Command, args []string) error {
 	// 阶段 6：显示集群状态
 	logger.Info("======== Phase 6: Show cluster status ========")
 	if err := showClusterStatus(primaryExecutor, logger, params, steps, flags); err != nil {
+		return err
+	}
+
+	// 阶段 7：可选清理（E-018，在主库；仅当过滤结果含该步；PreCheck 不满足则 Optional 跳过）
+	if err := runStandbyOptionalCleanup(primaryExecutor, logger, params, steps, flags); err != nil {
 		return err
 	}
 
@@ -749,9 +755,9 @@ func executeExpansionSteps(executor ssh.Executor, logger *logging.Logger, params
 	return nil
 }
 
-// configureStandbyPostSteps 配置备库后续步骤（仅执行 filtered 中的 E-015、E-016，顺序与过滤列表一致）
+// configureStandbyPostSteps 配置备库后续步骤（仅执行 filtered 中的 E-015、E-016、E-017，顺序与过滤列表一致）
 func configureStandbyPostSteps(standbyHosts []*HostInfo, logger *logging.Logger, params map[string]interface{}, flags GlobalFlags, filtered []*runner.Step) error {
-	postPhase := map[string]bool{"E-015": true, "E-016": true}
+	postPhase := map[string]bool{"E-015": true, "E-016": true, "E-017": true}
 	var postSteps []*runner.Step
 	for _, step := range filtered {
 		if postPhase[step.ID] {
@@ -796,5 +802,24 @@ func showClusterStatus(executor ssh.Executor, logger *logging.Logger, params map
 		return nil
 	}
 	logger.Warn("E-019 not in filtered step list, skipping cluster status display")
+	return nil
+}
+
+// runStandbyOptionalCleanup 若 filtered 含 E-018，在主库执行；步骤为 Optional，PreCheck 不满足时跳过
+func runStandbyOptionalCleanup(executor ssh.Executor, logger *logging.Logger, params map[string]interface{}, filtered []*runner.Step, flags GlobalFlags) error {
+	for _, step := range filtered {
+		if step.ID != "E-018" {
+			continue
+		}
+		logger.Info("======== Phase 7: Optional cleanup (E-018) ========")
+		ctx := newStandbyStepContext(&runnerExecAdapter{e: executor}, logger, params, flags)
+		ctx.CurrentStepID = step.ID
+		setStandbyStepProgress(ctx, filtered, step)
+		result := runner.RunStep(step, ctx)
+		if !result.Success && !result.Skipped {
+			return fmt.Errorf("step %s failed: %w", step.ID, result.Error)
+		}
+		return nil
+	}
 	return nil
 }

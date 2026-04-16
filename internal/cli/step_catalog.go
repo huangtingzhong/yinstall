@@ -80,10 +80,19 @@ func PrintDBStepCatalog(skipOS bool) {
 	fmt.Fprintln(os.Stdout, "")
 }
 
-// PrintStandbyStepCatalog lists standby expansion steps.
-func PrintStandbyStepCatalog() {
-	fmt.Fprintln(os.Stdout, "yinstall standby — step catalog (execution order)")
+// PrintStandbyStepCatalog lists OS prefix + standby steps, matching the default allSteps layout
+// (skipOS=true → B-001 only; skipOS=false → full OS baseline), then E-001…E-019.
+// Actual execution is phased (primary / per-standby / primary); see standby command docs.
+func PrintStandbyStepCatalog(skipOS bool) {
+	fmt.Fprintln(os.Stdout, "yinstall standby — step catalog")
+	fmt.Fprintln(os.Stdout, "Layout matches combined step list before -s/--exclude-steps filters. Runtime order is phased (see logs: Phase 1–6+).")
+	if skipOS {
+		printStepSection("OS (default --skip-os=true: B-001 on each standby)", osStepsB001Only())
+	} else {
+		printStepSection("OS baseline (--skip-os=false, on each standby)", ossteps.GetAllSteps())
+	}
 	printStepSection("Standby / expansion steps", standbysteps.GetAllSteps())
+	fmt.Fprintln(os.Stdout, "E-018 is optional/dangerous: without --force-steps E-018 (or -f) or --standby-cleanup-on-failure, it is skipped when executed.")
 	fmt.Fprintln(os.Stdout, "")
 }
 
