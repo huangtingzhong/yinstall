@@ -35,6 +35,7 @@ var (
 	standbyOSUser         string
 	standbyOSUserPassword string
 	standbyOSGroup        string
+	standbyOSDepsPkgs     string // 覆盖 OS 依赖包列表（B-015），仅在 --skip-os=false 时生效
 
 	// 数据库参数（复用部分 db.go 中的参数）
 	standbyClusterName   string
@@ -207,6 +208,7 @@ func init() {
 	// 操作系统配置控制
 	standbyCmd.Flags().BoolVar(&skipOS, "skip-os", true, "Skip standby OS baseline configuration (default: true)")
 	standbyCmd.Flags().BoolVar(&standbyIgnoreInstallErrors, "os-ignore-install-errors", false, "Ignore package installation errors and continue (only show warnings)")
+	standbyCmd.Flags().StringVar(&standbyOSDepsPkgs, "os-deps-db-packages", "", "[OS] Override DB dependency packages for B-015 (space-separated; only effective when --skip-os=false; default: use OS preset list)")
 
 	// 备库 OS 用户参数
 	standbyCmd.Flags().StringVar(&standbyOSUser, "os-user", "yashan", "Standby product user name")
@@ -457,6 +459,9 @@ func buildStandbyParams(flags GlobalFlags) map[string]interface{} {
 
 	// Override OS ignore install errors if specified
 	params["os_ignore_install_errors"] = standbyIgnoreInstallErrors
+	if strings.TrimSpace(standbyOSDepsPkgs) != "" {
+		params["os_deps_db_packages"] = strings.TrimSpace(standbyOSDepsPkgs)
+	}
 
 	params["ssh_port"] = flags.SSHPort
 	params["yasboot_ssh_port"] = flags.YasbootSSHPort

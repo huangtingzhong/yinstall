@@ -70,8 +70,9 @@ Examples:
 			}
 
 			if len(globalFlags.Targets) == 0 {
-				fmt.Fprintf(os.Stderr, "Error: at least one target (--targets) is required\n")
-				return fmt.Errorf("at least one target (--targets) is required")
+				// If --targets is not specified, default to local execution (same behavior as db/os/ycm/ymp).
+				globalFlags.Local = true
+				globalFlags.Targets = []string{"localhost"}
 			}
 
 			// Parse targets: support comma-separated IPs

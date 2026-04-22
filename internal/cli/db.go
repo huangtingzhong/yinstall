@@ -117,7 +117,7 @@ func init() {
 	dbCmd.Flags().IntVar(&dbPort, "db-port", 1688, "Database begin port (yasboot --begin-port)")
 	dbCmd.Flags().IntVar(&dbMemoryPercent, "db-memory-percent", 50, "Memory percentage (0-100)")
 	dbCmd.Flags().StringVar(&dbCharacterSet, "db-character-set", "utf8", "Character set: UTF8, GBK, ASCII, GB18030, BINARY, LATIN1, UTF8MB3, UTF8MB4 (case-insensitive)")
-	dbCmd.Flags().BoolVar(&dbUseNativeType, "db-use-native-type", true, "Use native type")
+	dbCmd.Flags().BoolVar(&dbUseNativeType, "db-use-native-type", false, "Set USE_NATIVE_TYPE in cluster TOML (native column types when true) (default: false)")
 	dbCmd.Flags().StringVar(&dbSysPassword, "db-sys-password", "Yashan1!", "Database SYS password")
 	dbCmd.Flags().StringVar(&dbInstallPath, "db-home-path", "/data/yashan/yasdb_home", "Software installation path (auto-appends _<port> for non-default ports, e.g., yasdb_home_2688)")
 	dbCmd.Flags().StringVar(&dbDataPath, "db-data-path", "/data/yashan/yasdb_data", "Data directory path (auto-appends _<port> for non-default ports, e.g., yasdb_data_2688)")
@@ -721,6 +721,9 @@ func buildDBParams(isYACMode bool, targetCount int) map[string]interface{} {
 	params["yac_redo_file_num"] = yacRedoFileNum
 	params["yac_shm_pool_size"] = yacShmPoolSize
 	params["yac_max_instances"] = yacMaxInstances
+
+	// DB install always sizes sysctl from --db-memory-percent (merged OS steps), not standalone max-RAM mode.
+	params["os_sysctl_shm_use_max_ram_only"] = false
 
 	return params
 }

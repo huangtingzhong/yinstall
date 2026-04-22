@@ -34,6 +34,9 @@ var (
 	// Hugepages parameters
 	osHugepagesEnable bool
 
+	// Align sysctl shmmax/shmall with DB memory percent when set (standalone OS); -1 = omit (use 90%% RAM sizing)
+	osDbMemoryPercent int
+
 	osYumMode       string
 	osISODevice     string
 	osISOMountpoint string
@@ -119,6 +122,9 @@ func init() {
 
 	// Hugepages parameters
 	osCmd.Flags().BoolVar(&osHugepagesEnable, "os-hugepages-enable", false, "Enable huge pages configuration (memory size based on db-memory-percent)")
+
+	// Same name as db install: set (1-100) to size shmmax/shmall from MemTotal; omit on standalone os to use 90%% RAM for shmmax and db_memory_percent=90 for hugepages.
+	osCmd.Flags().IntVar(&osDbMemoryPercent, "db-memory-percent", -1, "Planned DB memory percent (1-100) for shared memory sizing; omit on standalone os to use 90%% physical RAM")
 
 	// YUM parameters
 	osCmd.Flags().StringVar(&osYumMode, "os-yum-mode", "none", "YUM mode (online/local-iso/none)")
@@ -219,6 +225,18 @@ func runOS(cmd *cobra.Command, args []string) error {
 	params := buildOSParams(isYACMode, len(flags.Targets))
 	params["ssh_port"] = flags.SSHPort
 	params["yasboot_ssh_port"] = flags.YasbootSSHPort
+
+	if cmd.Flags().Changed("db-memory-percent") {
+		if err := validateMemoryPercent("--db-memory-percent", osDbMemoryPercent); err != nil {
+			return err
+		}
+		params["os_sysctl_shm_use_max_ram_only"] = false
+		params["db_memory_percent"] = osDbMemoryPercent
+	} else {
+		params["os_sysctl_shm_use_max_ram_only"] = true
+		params["db_memory_percent"] = 90
+	}
+
 	allSteps := ossteps.GetAllSteps()
 	steps := filterSteps(allSteps, flags)
 

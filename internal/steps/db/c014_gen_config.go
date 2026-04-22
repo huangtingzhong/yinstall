@@ -3,6 +3,7 @@ package db
 import (
 	"fmt"
 	"path"
+	"strconv"
 	"strings"
 
 	commonos "github.com/yinstall/internal/common/os"
@@ -32,6 +33,10 @@ func StepC014GenConfig() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			if err := checkKernelShmMeetsDBRequirements(ctx); err != nil {
+				return err
+			}
+
 			isYACMode := ctx.GetParamBool("yac_mode", false)
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
@@ -72,6 +77,96 @@ func StepC014GenConfig() *runner.Step {
 			return nil
 		},
 	}
+}
+
+// checkKernelShmMeetsDBRequirements verifies kernel.shmmax / kernel.shmall against the same
+// sizing rules as OS step B-008. Fails (unless force) when the host cannot satisfy the planned
+// database memory percent (or standalone-OS max-RAM policy when os_sysctl_shm_use_max_ram_only).
+func checkKernelShmMeetsDBRequirements(ctx *runner.StepContext) error {
+	if ctx.DryRun {
+		return nil
+	}
+
+	useMaxRAM := ctx.GetParamBool("os_sysctl_shm_use_max_ram_only", false)
+	dbPct := ctx.GetParamInt("db_memory_percent", 50)
+
+	for _, th := range ctx.HostsToRun() {
+		sub := ctx.ForHost(th)
+		memKB, err := parseMemTotalKBFromProc(sub)
+		if err != nil {
+			return fmt.Errorf("host %s: %w", th.Host, err)
+		}
+		pageSize, err := parsePageSizeFromHost(sub)
+		if err != nil {
+			return fmt.Errorf("host %s: %w", th.Host, err)
+		}
+		curShmmax, curShmall, err := parseShmSysctlFromHost(sub)
+		if err != nil {
+			return fmt.Errorf("host %s: %w", th.Host, err)
+		}
+
+		ok, reason := commonos.ShmMeetsDBRequirement(memKB, pageSize, useMaxRAM, dbPct, curShmmax, curShmall)
+		if ok {
+			sub.Logger.Info("host %s: kernel shared memory sysctl OK (shmmax=%d shmall=%d)", th.Host, curShmmax, curShmall)
+			continue
+		}
+		msg := fmt.Sprintf("host %s: %s (shmmax=%d shmall=%d, MemTotal=%d kB, db_memory_percent=%d, os_sysctl_shm_use_max_ram_only=%v)",
+			th.Host, reason, curShmmax, curShmall, memKB, dbPct, useMaxRAM)
+		if ctx.IsForceStep() {
+			sub.Logger.Warn("C-014: %s — continuing because step is forced", msg)
+			continue
+		}
+		return fmt.Errorf("C-014: %s — fix sysctl (e.g. re-run OS preparation) or use --force-steps C-014 to override", msg)
+	}
+	return nil
+}
+
+func parseMemTotalKBFromProc(ctx *runner.StepContext) (int64, error) {
+	result, err := ctx.Execute("awk '/^MemTotal:/{print $2}' /proc/meminfo", false)
+	if err != nil || result == nil || result.GetExitCode() != 0 {
+		return 0, fmt.Errorf("read MemTotal from /proc/meminfo")
+	}
+	v, err := strconv.ParseInt(strings.TrimSpace(result.GetStdout()), 10, 64)
+	if err != nil || v <= 0 {
+		return 0, fmt.Errorf("parse MemTotal")
+	}
+	return v, nil
+}
+
+func parsePageSizeFromHost(ctx *runner.StepContext) (int64, error) {
+	result, err := ctx.Execute("getconf PAGE_SIZE 2>/dev/null || echo 4096", false)
+	if err != nil || result == nil {
+		return 4096, nil
+	}
+	out := strings.TrimSpace(result.GetStdout())
+	if out == "" {
+		return 4096, nil
+	}
+	v, err := strconv.ParseInt(out, 10, 64)
+	if err != nil || v <= 0 {
+		return 4096, nil
+	}
+	return v, nil
+}
+
+func parseShmSysctlFromHost(ctx *runner.StepContext) (shmmax, shmall int64, err error) {
+	r1, e1 := ctx.Execute("sysctl -n kernel.shmmax 2>/dev/null", false)
+	if e1 != nil || r1 == nil || r1.GetExitCode() != 0 {
+		return 0, 0, fmt.Errorf("read kernel.shmmax (sysctl)")
+	}
+	r2, e2 := ctx.Execute("sysctl -n kernel.shmall 2>/dev/null", false)
+	if e2 != nil || r2 == nil || r2.GetExitCode() != 0 {
+		return 0, 0, fmt.Errorf("read kernel.shmall (sysctl)")
+	}
+	shmmax, err = strconv.ParseInt(strings.TrimSpace(r1.GetStdout()), 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse kernel.shmmax")
+	}
+	shmall, err = strconv.ParseInt(strings.TrimSpace(r2.GetStdout()), 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse kernel.shmall")
+	}
+	return shmmax, shmall, nil
 }
 
 func genStandaloneConfig(ctx *runner.StepContext, yasbootPath, clusterName, user, password, installPath, dataPath, logPath string, beginPort int) error {
@@ -176,6 +271,7 @@ func genYACConfig(ctx *runner.StepContext, yasbootPath, clusterName, user, passw
 --data-path %s \
 --log-path %s \
 --begin-port %d \
+--memory-limit %d \
 --node %d \
 --inter-cidr %s \
 --public-network %s \
@@ -186,7 +282,7 @@ func genYACConfig(ctx *runner.StepContext, yasbootPath, clusterName, user, passw
 			stageDir, yasbootPath, clusterName,
 			user, commonos.ShellEscapeForSuC(password), ips, ctx.YasbootRemoteSSHPort(22),
 			installPath, dataPath, logPath,
-			beginPort, nodeCount,
+			beginPort, memoryPercent, nodeCount,
 			interCIDR, publicNetwork, scanName,
 			diskFoundPath,
 			systemDisks, dataDisks)
@@ -217,6 +313,7 @@ func genYACConfig(ctx *runner.StepContext, yasbootPath, clusterName, user, passw
 --data-path %s \
 --log-path %s \
 --begin-port %d \
+--memory-limit %d \
 --node %d \
 --inter-cidr %s \
 --public-network %s \
@@ -227,7 +324,7 @@ func genYACConfig(ctx *runner.StepContext, yasbootPath, clusterName, user, passw
 			stageDir, yasbootPath, clusterName,
 			user, commonos.ShellEscapeForSuC(password), ips, ctx.YasbootRemoteSSHPort(22),
 			installPath, dataPath, logPath,
-			beginPort, nodeCount,
+			beginPort, memoryPercent, nodeCount,
 			interCIDR, publicNetwork, vipStr,
 			diskFoundPath,
 			systemDisks, dataDisks)

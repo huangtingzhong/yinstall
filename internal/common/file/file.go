@@ -177,28 +177,30 @@ func remoteSearchDirs(ctx *runner.StepContext, remoteDir string) []string {
 }
 
 // FindLatestDBPackage 自动查找最新版本的数据库软件包
-// 软件包格式: yashandb-23.4.7.100-linux-x86_64.tar.gz 或 yashandb-23.4.7.100-linux-aarch64.tar.gz
+// 软件包格式（linux 段常见两种写法，均支持）：
+//   - x86: yashandb-23.4.7.100-linux-x86_64.tar.gz 或 ...-linux-x86-64.tar.gz
+//   - arm: yashandb-23.4.7.100-linux-aarch64.tar.gz 或 ...-linux-aarch-64.tar.gz
 // 返回找到的软件包路径（远程或本地）
 func FindLatestDBPackage(
 	ctx *runner.StepContext,
 	localDirs []string,
 	remoteDir string,
 ) (string, error) {
-	arch := "x86_64"
+	dbLinuxArchRE := `(?:x86_64|x86-64)`
 	result, _ := ctx.Execute("uname -m", false)
 	if result != nil && strings.TrimSpace(result.GetStdout()) != "" {
 		remoteArch := strings.TrimSpace(result.GetStdout())
 		if remoteArch == "aarch64" || remoteArch == "arm64" {
-			arch = "aarch64"
+			dbLinuxArchRE = `(?:aarch64|aarch-64)`
 		}
 	}
 
-	pattern := fmt.Sprintf(`yashandb-(\d+\.\d+\.\d+\.\d+)-linux-%s\.tar\.gz`, arch)
+	pattern := fmt.Sprintf(`yashandb-(\d+\.\d+\.\d+\.\d+)-linux-%s\.tar\.gz`, dbLinuxArchRE)
 	re := regexp.MustCompile(pattern)
 
 	var remotePackages []string
 	for _, dir := range remoteSearchDirs(ctx, remoteDir) {
-		result, _ := ctx.Execute(fmt.Sprintf("ls -1 %s/yashandb-*-linux-%s.tar.gz 2>/dev/null || true", dir, arch), false)
+		result, _ := ctx.Execute(fmt.Sprintf("ls -1 %s/yashandb-*-linux-*.tar.gz 2>/dev/null || true", dir), false)
 		if result != nil && result.GetStdout() != "" {
 			for _, f := range strings.Split(strings.TrimSpace(result.GetStdout()), "\n") {
 				f = strings.TrimSpace(f)
@@ -214,7 +216,7 @@ func FindLatestDBPackage(
 
 	var localPackages []string
 	for _, dir := range localDirs {
-		matches, err := filepath.Glob(filepath.Join(dir, fmt.Sprintf("yashandb-*-linux-%s.tar.gz", arch)))
+		matches, err := filepath.Glob(filepath.Join(dir, "yashandb-*-linux-*.tar.gz"))
 		if err == nil {
 			for _, m := range matches {
 				if re.MatchString(filepath.Base(m)) {
@@ -226,7 +228,7 @@ func FindLatestDBPackage(
 
 	if len(localPackages) == 0 {
 		remoteDirs := remoteSearchDirs(ctx, remoteDir)
-		return "", fmt.Errorf("no yashandb package found for architecture %s in remote dirs %v or local dirs %v", arch, remoteDirs, localDirs)
+		return "", fmt.Errorf("no yashandb package found (linux-x86_64|linux-x86-64 or linux-aarch64|linux-aarch-64) in remote dirs %v or local dirs %v", remoteDirs, localDirs)
 	}
 
 	latest := findLatestVersion(localPackages, re)
@@ -234,28 +236,30 @@ func FindLatestDBPackage(
 }
 
 // FindLatestYCMPackage 自动查找最新版本的 YCM 软件包
-// 软件包格式: yashandb-cloud-manager-23.5.3.2-linux-x86_64.tar.gz 或 yashandb-cloud-manager-23.5.3.2-linux-aarch64.tar.gz
+// 软件包格式（linux 段常见两种写法，均支持）：
+//   - x86: yashandb-cloud-manager-23.5.3.2-linux-x86_64.tar.gz 或 ...-linux-x86-64.tar.gz
+//   - arm: yashandb-cloud-manager-23.5.3.2-linux-aarch64.tar.gz 或 ...-linux-aarch-64.tar.gz
 // 返回找到的软件包路径（远程或本地）
 func FindLatestYCMPackage(
 	ctx *runner.StepContext,
 	localDirs []string,
 	remoteDir string,
 ) (string, error) {
-	arch := "x86_64"
+	ycmLinuxArchRE := `(?:x86_64|x86-64)`
 	result, _ := ctx.Execute("uname -m", false)
 	if result != nil && strings.TrimSpace(result.GetStdout()) != "" {
 		remoteArch := strings.TrimSpace(result.GetStdout())
 		if remoteArch == "aarch64" || remoteArch == "arm64" {
-			arch = "aarch64"
+			ycmLinuxArchRE = `(?:aarch64|aarch-64)`
 		}
 	}
 
-	pattern := fmt.Sprintf(`yashandb-cloud-manager-(\d+\.\d+\.\d+\.\d+)-linux-%s\.tar\.gz`, arch)
+	pattern := fmt.Sprintf(`yashandb-cloud-manager-(\d+\.\d+\.\d+\.\d+)-linux-%s\.tar\.gz`, ycmLinuxArchRE)
 	re := regexp.MustCompile(pattern)
 
 	var remotePackages []string
 	for _, dir := range remoteSearchDirs(ctx, remoteDir) {
-		result, _ := ctx.Execute(fmt.Sprintf("ls -1 %s/yashandb-cloud-manager-*-linux-%s.tar.gz 2>/dev/null || true", dir, arch), false)
+		result, _ := ctx.Execute(fmt.Sprintf("ls -1 %s/yashandb-cloud-manager-*-linux-*.tar.gz 2>/dev/null || true", dir), false)
 		if result != nil && result.GetStdout() != "" {
 			for _, f := range strings.Split(strings.TrimSpace(result.GetStdout()), "\n") {
 				f = strings.TrimSpace(f)
@@ -271,7 +275,7 @@ func FindLatestYCMPackage(
 
 	var localPackages []string
 	for _, dir := range localDirs {
-		matches, err := filepath.Glob(filepath.Join(dir, fmt.Sprintf("yashandb-cloud-manager-*-linux-%s.tar.gz", arch)))
+		matches, err := filepath.Glob(filepath.Join(dir, "yashandb-cloud-manager-*-linux-*.tar.gz"))
 		if err == nil {
 			for _, m := range matches {
 				if re.MatchString(filepath.Base(m)) {
@@ -283,7 +287,7 @@ func FindLatestYCMPackage(
 
 	if len(localPackages) == 0 {
 		remoteDirs := remoteSearchDirs(ctx, remoteDir)
-		return "", fmt.Errorf("no yashandb-cloud-manager package found for architecture %s in remote dirs %v or local dirs %v", arch, remoteDirs, localDirs)
+		return "", fmt.Errorf("no yashandb-cloud-manager package found (linux-x86_64|linux-x86-64 or linux-aarch64|linux-aarch-64) in remote dirs %v or local dirs %v", remoteDirs, localDirs)
 	}
 
 	latest := findLatestVersion(localPackages, re)
@@ -291,28 +295,32 @@ func FindLatestYCMPackage(
 }
 
 // FindLatestYMPPackage 自动查找最新版本的 YMP 软件包
-// 软件包格式: yashan-migrate-platform-23.5.3.2-linux-x86_64.zip 或 yashan-migrate-platform-23.5.3.2-linux-aarch64.zip
+// 软件包格式（linux 段常见两种写法，均支持）：
+//   - x86: yashan-migrate-platform-23.5.3.2-linux-x86_64.zip 或 ...-linux-x86-64.zip
+//   - arm: yashan-migrate-platform-23.5.3.2-linux-aarch64.zip 或 ...-linux-aarch-64.zip
 // 返回找到的软件包路径（远程或本地）
 func FindLatestYMPPackage(
 	ctx *runner.StepContext,
 	localDirs []string,
 	remoteDir string,
 ) (string, error) {
-	arch := "x86_64"
+	// 与文件名中 linux-<arch> 段对齐：x86 允许 x86_64 / x86-64；aarch64 允许 aarch64 / aarch-64
+	ympLinuxArchRE := `(?:x86_64|x86-64)`
 	result, _ := ctx.Execute("uname -m", false)
 	if result != nil && strings.TrimSpace(result.GetStdout()) != "" {
 		remoteArch := strings.TrimSpace(result.GetStdout())
 		if remoteArch == "aarch64" || remoteArch == "arm64" {
-			arch = "aarch64"
+			ympLinuxArchRE = `(?:aarch64|aarch-64)`
 		}
 	}
 
-	pattern := fmt.Sprintf(`yashan-migrate-platform-(\d+\.\d+\.\d+\.\d+)-linux-%s\.zip`, arch)
+	pattern := fmt.Sprintf(`yashan-migrate-platform-(\d+\.\d+\.\d+\.\d+)-linux-%s\.zip`, ympLinuxArchRE)
 	re := regexp.MustCompile(pattern)
 
 	var remotePackages []string
 	for _, dir := range remoteSearchDirs(ctx, remoteDir) {
-		result, _ := ctx.Execute(fmt.Sprintf("ls -1 %s/yashan-migrate-platform-*-linux-%s.zip 2>/dev/null || true", dir, arch), false)
+		// 用较宽 glob 再 regex 过滤，避免远端 shell 对花括号展开差异
+		result, _ := ctx.Execute(fmt.Sprintf("ls -1 %s/yashan-migrate-platform-*-linux-*.zip 2>/dev/null || true", dir), false)
 		if result != nil && result.GetStdout() != "" {
 			for _, f := range strings.Split(strings.TrimSpace(result.GetStdout()), "\n") {
 				f = strings.TrimSpace(f)
@@ -328,7 +336,7 @@ func FindLatestYMPPackage(
 
 	var localPackages []string
 	for _, dir := range localDirs {
-		matches, err := filepath.Glob(filepath.Join(dir, fmt.Sprintf("yashan-migrate-platform-*-linux-%s.zip", arch)))
+		matches, err := filepath.Glob(filepath.Join(dir, "yashan-migrate-platform-*-linux-*.zip"))
 		if err == nil {
 			for _, m := range matches {
 				if re.MatchString(filepath.Base(m)) {
@@ -340,7 +348,7 @@ func FindLatestYMPPackage(
 
 	if len(localPackages) == 0 {
 		remoteDirs := remoteSearchDirs(ctx, remoteDir)
-		return "", fmt.Errorf("no yashan-migrate-platform package found for architecture %s in remote dirs %v or local dirs %v", arch, remoteDirs, localDirs)
+		return "", fmt.Errorf("no yashan-migrate-platform package found (linux-x86_64|linux-x86-64 or linux-aarch64|linux-aarch-64) in remote dirs %v or local dirs %v", remoteDirs, localDirs)
 	}
 
 	latest := findLatestVersion(localPackages, re)

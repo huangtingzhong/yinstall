@@ -32,7 +32,7 @@ func StepC018SetNativeType() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			useNativeType := ctx.GetParamBool("db_use_native_type", true)
+			useNativeType := ctx.GetParamBool("db_use_native_type", false)
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
 
