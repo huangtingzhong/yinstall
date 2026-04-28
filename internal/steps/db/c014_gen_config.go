@@ -172,6 +172,7 @@ func parseShmSysctlFromHost(ctx *runner.StepContext) (shmmax, shmall int64, err 
 func genStandaloneConfig(ctx *runner.StepContext, yasbootPath, clusterName, user, password, installPath, dataPath, logPath string, beginPort int) error {
 	stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 	memoryPercent := ctx.GetParamInt("db_memory_percent", 50)
+	dbMode := ctx.GetParamString("db_mode", "")
 
 	// Get target IP (assuming single target)
 	// In real implementation, get from context
@@ -204,6 +205,10 @@ func genStandaloneConfig(ctx *runner.StepContext, yasbootPath, clusterName, user
 		installPath, dataPath, logPath,
 		beginPort, memoryPercent)
 
+	if dbMode == "mysql" {
+		genCmd += " \\\n--mode mysql"
+	}
+
 	extra := ctx.GetParamString("yasboot_extra_args", "")
 	genCmd = commonos.YasbootAppendExtraArgs(genCmd, extra, true)
 	if strings.TrimSpace(extra) != "" {
@@ -229,6 +234,7 @@ func genYACConfig(ctx *runner.StepContext, yasbootPath, clusterName, user, passw
 	publicNetwork := ctx.GetParamString("yac_public_network", "")
 	systemdgStr := ctx.GetParamString("yac_systemdg", "")
 	datadgStr := ctx.GetParamString("yac_datadg", "")
+	dbMode := ctx.GetParamString("db_mode", "")
 
 	// Parse diskgroups (yasboot uses --system-data and --data with comma-separated disk paths only)
 	systemdg, _ := parseYACDiskGroup(systemdgStr)
@@ -328,6 +334,10 @@ func genYACConfig(ctx *runner.StepContext, yasbootPath, clusterName, user, passw
 			interCIDR, publicNetwork, vipStr,
 			diskFoundPath,
 			systemDisks, dataDisks)
+	}
+
+	if dbMode == "mysql" {
+		genCmd += " \\\n--mode mysql"
 	}
 
 	extra := ctx.GetParamString("yasboot_extra_args", "")

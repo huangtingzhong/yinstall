@@ -16,17 +16,17 @@ import (
 // NewCleanCommand creates the clean command
 func NewCleanCommand() *cobra.Command {
 	var (
-		cleanType      string
-		yasdbHome      string
-		yasdbData      string
-		yasdbLog       string
-		clusterName    string
-		osUser         string
-		ycmHome        string
-		ympHome        string
-		ympUser        string
-		cleanYACDisks  string
-		detailedSteps  bool
+		cleanType     string
+		yasdbHome     string
+		yasdbData     string
+		yasdbLog      string
+		clusterName   string
+		osUser        string
+		ycmHome       string
+		ympHome       string
+		ympUser       string
+		cleanYACDisks string
+		detailedSteps bool
 	)
 
 	cmd := &cobra.Command{

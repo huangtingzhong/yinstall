@@ -2,6 +2,8 @@ package os
 
 import (
 	"fmt"
+	"net"
+	"strings"
 
 	"github.com/yinstall/internal/runner"
 )
@@ -16,15 +18,36 @@ func StepB016ConfigureChrony() *runner.Step {
 		Optional:    true,
 
 		PreCheck: func(ctx *runner.StepContext) error {
+			ntpServer := strings.TrimSpace(ctx.GetParamString("os_ntp_server", ""))
+			if ntpServer == "" {
+				return fmt.Errorf("os_ntp_server not set")
+			}
+
+			// Ensure chrony is installed
 			result, _ := ctx.Execute("which chronyd 2>/dev/null || rpm -q chrony", false)
 			if result.GetExitCode() != 0 {
 				return fmt.Errorf("chronyd not installed")
+			}
+
+			// Validate server value: IP format or resolvable domain
+			if net.ParseIP(ntpServer) == nil {
+				// Domain name: must be resolvable
+				if _, err := ctx.ExecuteWithCheck(fmt.Sprintf("getent hosts '%s' >/dev/null 2>&1", ntpServer), false); err != nil {
+					return fmt.Errorf("ntp server domain not resolvable: %s", ntpServer)
+				}
+			}
+
+			// Validate NTP port reachability (UDP/123)
+			// Prefer bash /dev/udp which is commonly available; treat non-zero as unreachable.
+			portCheck := fmt.Sprintf("timeout 3 bash -lc \"echo > /dev/udp/%s/123\" >/dev/null 2>&1", ntpServer)
+			if _, err := ctx.ExecuteWithCheck(portCheck, false); err != nil {
+				return fmt.Errorf("ntp server udp/123 not reachable: %s", ntpServer)
 			}
 			return nil
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			ntpServer := ctx.GetParamString("os_ntp_server", "ntp.aliyun.com")
+			ntpServer := strings.TrimSpace(ctx.GetParamString("os_ntp_server", ""))
 
 			// 备份原配置
 			ctx.Execute("cp /etc/chrony.conf /etc/chrony.conf.bak_$(date +%F) 2>/dev/null", true)

@@ -9,11 +9,18 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// DefaultPrimaryStageDir 未指定 --db-stage-dir 时使用：/home/<primaryOSUser>/install_<port>（port 为主库监听端口，与 db_begin_port 一致）。
+// dbDefaultBeginPort 与 internal/cli/db 默认 --db-port（1688）一致；非该端口时路径规则与 buildDBParams 中加 _<port> 后缀的策略对齐。
+const dbDefaultBeginPort = 1688
+
+// DefaultPrimaryStageDir 未指定 --db-stage-dir 时与 yinstall db 的 buildDBParams 一致：
+// db_begin_port==dbDefaultBeginPort 时为 /home/<user>/install；否则为 /home/<user>/install_<port>。
 func DefaultPrimaryStageDir(primaryOSUser string, port int) string {
 	u := strings.TrimSpace(primaryOSUser)
 	if u == "" {
 		u = "yashan"
+	}
+	if port == dbDefaultBeginPort {
+		return fmt.Sprintf("/home/%s/install", u)
 	}
 	return fmt.Sprintf("/home/%s/install_%d", u, port)
 }
@@ -26,33 +33,45 @@ func EnsurePrimaryStageDirParam(ctx *runner.StepContext) {
 	if strings.TrimSpace(ctx.GetParamString("db_stage_dir", "")) != "" {
 		return
 	}
-	port := ctx.GetParamInt("db_begin_port", 1688)
+	port := ctx.GetParamInt("db_begin_port", dbDefaultBeginPort)
 	ctx.Params["db_stage_dir"] = DefaultPrimaryStageDir(GetPrimaryOSUser(ctx), port)
 }
 
-// DefaultExpansionInstallPath 未指定 --db-home-path 时：/data/<user>/yasdb_home_<port>（与多实例主库目录惯例一致）。
+// DefaultExpansionInstallPath 未指定 --db-home-path 时与 yinstall db 默认 db-home-path / buildDBParams 一致：
+// dbDefaultBeginPort 为 /data/<user>/yasdb_home；否则 /data/<user>/yasdb_home_<port>。
 func DefaultExpansionInstallPath(osUser string, port int) string {
 	u := strings.TrimSpace(osUser)
 	if u == "" {
 		u = "yashan"
 	}
+	if port == dbDefaultBeginPort {
+		return fmt.Sprintf("/data/%s/yasdb_home", u)
+	}
 	return fmt.Sprintf("/data/%s/yasdb_home_%d", u, port)
 }
 
-// DefaultExpansionDataPath 未指定 --db-data-path 时：/data/<user>/yasdb_data_<port>。
+// DefaultExpansionDataPath 未指定 --db-data-path 时与 yinstall db 默认一致：
+// dbDefaultBeginPort 为 /data/<user>/yasdb_data；否则 /data/<user>/yasdb_data_<port>。
 func DefaultExpansionDataPath(osUser string, port int) string {
 	u := strings.TrimSpace(osUser)
 	if u == "" {
 		u = "yashan"
 	}
+	if port == dbDefaultBeginPort {
+		return fmt.Sprintf("/data/%s/yasdb_data", u)
+	}
 	return fmt.Sprintf("/data/%s/yasdb_data_%d", u, port)
 }
 
-// DefaultExpansionLogPath 未指定 --db-log-path 时：/data/<user>/log_<port>。
+// DefaultExpansionLogPath 未指定 --db-log-path 时与 yinstall db 默认一致：
+// dbDefaultBeginPort 为 /data/<user>/log；否则 /data/<user>/log_<port>。
 func DefaultExpansionLogPath(osUser string, port int) string {
 	u := strings.TrimSpace(osUser)
 	if u == "" {
 		u = "yashan"
+	}
+	if port == dbDefaultBeginPort {
+		return fmt.Sprintf("/data/%s/log", u)
 	}
 	return fmt.Sprintf("/data/%s/log_%d", u, port)
 }
@@ -63,7 +82,7 @@ func EnsureExpansionPathParams(ctx *runner.StepContext) {
 		return
 	}
 	u := GetPrimaryOSUser(ctx)
-	port := ctx.GetParamInt("db_begin_port", 1688)
+	port := ctx.GetParamInt("db_begin_port", dbDefaultBeginPort)
 	if strings.TrimSpace(ctx.GetParamString("db_install_path", "")) == "" {
 		ctx.Params["db_install_path"] = DefaultExpansionInstallPath(u, port)
 	}

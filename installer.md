@@ -694,6 +694,7 @@ cd /home/yashan/install && /home/yashan/install/bin/yasboot package se gen --clu
 --node 1
 ```
 
+如需 **MySQL 模式**（例如需要生成 MySQL 协议/兼容相关配置），在生成配置时增加参数：`--mode mysql`。\n+\n+使用 `yinstall` 安装时，对应参数为：`yinstall db --db-mode mysql ...`（默认不传表示不指定 mode）。\n+
 这里会生成hosts.toml和yashandb.toml文件，需要注意，在新版本中hosts.toml中的密码是加密密码。
 
 ### 4.1.4 安装软件

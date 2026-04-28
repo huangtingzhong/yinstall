@@ -78,7 +78,7 @@ func newStandbyStepContext(ex runner.Executor, logger *logging.Logger, params ma
 // 不依赖是否传入 --primary-env-file（自动探测 ~/.port* 时同样可得到 yashandb_3988 等真实集群名），
 // 使仅执行备库阶段（-s E-015 等）或跳过 E-002 时 params 已与主库一致。
 
-// tryResolvePrimaryStageDir 设置 params["db_stage_dir"]：显式 --db-stage-dir 且非空则用该路径，否则 /home/<primary-os-user>/install_<db_begin_port>。
+// tryResolvePrimaryStageDir 设置 params["db_stage_dir"]：显式 --db-stage-dir 且非空则用该路径，否则与 yinstall db 一致（1688→/home/<user>/install，其它端口→install_<port>）。
 func tryResolvePrimaryStageDir(cmd *cobra.Command, logger *logging.Logger, params map[string]interface{}) {
 	if cmd.Flags().Changed("db-stage-dir") && strings.TrimSpace(standbyStageDir) != "" {
 		params["db_stage_dir"] = strings.TrimSpace(standbyStageDir)
@@ -98,7 +98,7 @@ func tryResolvePrimaryStageDir(cmd *cobra.Command, logger *logging.Logger, param
 	logger.Info("Primary stage directory (default): %s", def)
 }
 
-// tryResolveExpansionPaths 设置备库扩容传给 yasboot 的 install/data/log：显式 flag 且非空则用 flag，否则 /data/<user>/yasdb_home_<port> 等。
+// tryResolveExpansionPaths 设置备库扩容传给 yasboot 的 install/data/log：显式 flag 且非空则用 flag，否则与 yinstall db 默认路径一致（1688 无 _port 后缀）。
 func tryResolveExpansionPaths(cmd *cobra.Command, logger *logging.Logger, params map[string]interface{}) {
 	u, _ := params["primary_os_user"].(string)
 	if strings.TrimSpace(u) == "" {
@@ -218,10 +218,10 @@ func init() {
 	// 数据库参数
 	standbyCmd.Flags().StringVar(&standbyClusterName, "db-cluster-name", "yashandb", "Database cluster name (must match primary)")
 	standbyCmd.Flags().StringVar(&standbyAdminPassword, "db-admin-password", "", "Database SYS admin password (optional, not used in standby creation)")
-	standbyCmd.Flags().StringVar(&standbyInstallPath, "db-home-path", "", "Standby install path for yasboot (default: /data/<primary-os-user>/yasdb_home_<port> when omitted)")
-	standbyCmd.Flags().StringVar(&standbyDataPath, "db-data-path", "", "Standby data path for yasboot (default: /data/<primary-os-user>/yasdb_data_<port> when omitted)")
-	standbyCmd.Flags().StringVar(&standbyLogPath, "db-log-path", "", "Standby log path for yasboot (default: /data/<primary-os-user>/log_<port> when omitted)")
-	standbyCmd.Flags().StringVar(&standbyStageDir, "db-stage-dir", "", "Primary stage directory on primary host (must exist; default: /home/<primary-os-user>/install_<port> when omitted, port from --db-port or primary LISTEN_ADDR)")
+	standbyCmd.Flags().StringVar(&standbyInstallPath, "db-home-path", "", "Standby install path for yasboot (default: same as yinstall db — /data/<primary-os-user>/yasdb_home for port 1688, else yasdb_home_<port>)")
+	standbyCmd.Flags().StringVar(&standbyDataPath, "db-data-path", "", "Standby data path for yasboot (default: same as yinstall db — /data/<primary-os-user>/yasdb_data or .../yasdb_data_<port>)")
+	standbyCmd.Flags().StringVar(&standbyLogPath, "db-log-path", "", "Standby log path for yasboot (default: same as yinstall db — /data/<primary-os-user>/log or .../log_<port>)")
+	standbyCmd.Flags().StringVar(&standbyStageDir, "db-stage-dir", "", "Primary stage directory on primary host (must exist; default same as yinstall db — /home/<user>/install for 1688, else install_<port>; port from --db-port or LISTEN_ADDR)")
 	standbyCmd.Flags().StringVar(&standbyDepsPackage, "db-deps-package", "", "SSL deps package path (optional)")
 	standbyCmd.Flags().IntVar(&standbyNodeCount, "standby-node-count", 0, "Number of standby nodes (auto-detected from --targets)")
 

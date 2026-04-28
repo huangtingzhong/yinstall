@@ -112,7 +112,7 @@ func init() {
 
 	// Timezone/time parameters
 	osCmd.Flags().StringVar(&osTimezone, "os-timezone", "Asia/Shanghai", "System timezone")
-	osCmd.Flags().StringVar(&osNTPServer, "os-ntp-server", "ntp.aliyun.com", "NTP server address")
+	osCmd.Flags().StringVar(&osNTPServer, "os-ntp-server", "", "NTP server address (empty to skip NTP configuration)")
 
 	// Kernel parameters
 	osCmd.Flags().StringVar(&osSysctlFile, "os-sysctl-file", "/etc/sysctl.d/yashandb.conf", "Sysctl config file path")

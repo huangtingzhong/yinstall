@@ -19,6 +19,7 @@ var (
 	dbMemoryPercent int
 	dbCharacterSet  string
 	dbUseNativeType bool
+	dbMode          string
 	dbSysPassword   string
 	dbInstallPath   string
 	dbDataPath      string
@@ -101,7 +102,7 @@ func init() {
 	// OS baseline parameters (only effective when --skip-os=false)
 	dbCmd.Flags().BoolVar(&dbIgnoreInstallErrors, "os-ignore-install-errors", false, "[OS] Ignore package installation errors and continue (only effective when --skip-os=false)")
 	dbCmd.Flags().StringVar(&dbOSTimezone, "os-timezone", "Asia/Shanghai", "[OS] System timezone (only effective when --skip-os=false)")
-	dbCmd.Flags().StringVar(&dbOSNTPServer, "os-ntp-server", "ntp.aliyun.com", "[OS] NTP server address (only effective when --skip-os=false)")
+	dbCmd.Flags().StringVar(&dbOSNTPServer, "os-ntp-server", "", "[OS] NTP server address (empty to skip NTP configuration; only effective when --skip-os=false)")
 	dbCmd.Flags().StringVar(&dbOSYumMode, "os-yum-mode", "none", "[OS] YUM mode: online/local-iso/none (only effective when --skip-os=false)")
 	dbCmd.Flags().StringVar(&dbOSISODevice, "os-iso-device", "/dev/cdrom", "[OS] ISO file path/name or block device used when --os-yum-mode=local-iso (auto-searched if filename only)")
 	dbCmd.Flags().StringVar(&dbOSISOMountpoint, "os-iso-mountpoint", "/media", "[OS] Mount point for ISO when --os-yum-mode=local-iso")
@@ -118,6 +119,7 @@ func init() {
 	dbCmd.Flags().IntVar(&dbMemoryPercent, "db-memory-percent", 50, "Memory percentage (0-100)")
 	dbCmd.Flags().StringVar(&dbCharacterSet, "db-character-set", "utf8", "Character set: UTF8, GBK, ASCII, GB18030, BINARY, LATIN1, UTF8MB3, UTF8MB4 (case-insensitive)")
 	dbCmd.Flags().BoolVar(&dbUseNativeType, "db-use-native-type", false, "Set USE_NATIVE_TYPE in cluster TOML (native column types when true) (default: false)")
+	dbCmd.Flags().StringVar(&dbMode, "db-mode", "", "Database mode for yasboot gen-config: empty (default = YashanDB mode, do not pass --mode) or mysql (case-insensitive; pass --mode mysql)")
 	dbCmd.Flags().StringVar(&dbSysPassword, "db-sys-password", "Yashan1!", "Database SYS password")
 	dbCmd.Flags().StringVar(&dbInstallPath, "db-home-path", "/data/yashan/yasdb_home", "Software installation path (auto-appends _<port> for non-default ports, e.g., yasdb_home_2688)")
 	dbCmd.Flags().StringVar(&dbDataPath, "db-data-path", "/data/yashan/yasdb_data", "Data directory path (auto-appends _<port> for non-default ports, e.g., yasdb_data_2688)")
@@ -180,6 +182,14 @@ func runDB(cmd *cobra.Command, args []string) error {
 	if flags.ListSteps {
 		PrintDBStepCatalog(dbSkipOS)
 		return nil
+	}
+
+	if dbMode != "" {
+		normalized := strings.ToLower(strings.TrimSpace(dbMode))
+		if normalized != "mysql" {
+			return fmt.Errorf("invalid --db-mode: '%s'. Valid values are: '' (default) or 'mysql' (case-insensitive)", dbMode)
+		}
+		dbMode = normalized
 	}
 
 	if dbOSUserPassword == "" {
@@ -250,6 +260,11 @@ func runDB(cmd *cobra.Command, args []string) error {
 
 	logger.Info("Starting DB installation (RunID: %s)", rid)
 	logger.Info("Targets: %v", flags.Targets)
+	if dbMode == "" {
+		logger.Info("DB mode: (empty)")
+	} else {
+		logger.Info("DB mode: %s", dbMode)
+	}
 
 	if isYACMode {
 		logger.Info("Mode: YAC (%d nodes)", len(flags.Targets))
@@ -689,6 +704,7 @@ func buildDBParams(isYACMode bool, targetCount int) map[string]interface{} {
 	params["db_memory_percent"] = dbMemoryPercent
 	params["db_character_set"] = dbCharacterSet
 	params["db_use_native_type"] = dbUseNativeType
+	params["db_mode"] = dbMode
 	params["db_admin_password"] = dbSysPassword
 	params["db_install_path"] = dbInstallPath
 	params["db_data_path"] = dbDataPath
