@@ -25,6 +25,25 @@ func StepH001CheckPort() *runner.Step {
 			if result == nil || result.GetExitCode() != 0 {
 				return fmt.Errorf("neither ss nor netstat command found")
 			}
+			// Also check ports in precheck so --precheck can surface issues.
+			port := ctx.GetParamInt("ymp_port", 8090)
+			ports := []struct {
+				name string
+				port int
+			}{
+				{"YMP Web Service", port},
+				{"Embedded Database", port + 1},
+				{"yasom", port + 3},
+				{"yasagent", port + 4},
+			}
+			for _, p := range ports {
+				cmd := fmt.Sprintf("ss -tlnp 2>/dev/null | grep -E ':%d([^0-9]|$)' || netstat -tlnp 2>/dev/null | grep -E ':%d([^0-9]|$)'", p.port, p.port)
+				r, _ := ctx.Execute(cmd, false)
+				if r != nil && r.GetExitCode() == 0 && strings.TrimSpace(r.GetStdout()) != "" {
+					portInfo := strings.TrimSpace(r.GetStdout())
+					return fmt.Errorf("port %d (%s) is already in use; port info: %s; please choose another base port (--ymp-port) or stop the process using it", p.port, p.name, portInfo)
+				}
+			}
 			return nil
 		},
 
@@ -58,16 +77,16 @@ func StepH001CheckPort() *runner.Step {
 					return fmt.Errorf("port %d (%s) is already in use; port info: %s; please choose another base port (--ymp-port) or stop the process using it", p.port, p.name, portInfo)
 				}
 
-				ctx.Logger.Info("✓ Port %d (%s) is available", p.port, p.name)
+				ctx.Logger.Info("OK: Port %d (%s) is available", p.port, p.name)
 			}
 
-			ctx.Logger.Info("✓ All YMP ports are available: Web=%d, DB=%d, yasom=%d, yasagent=%d", port, port+1, port+3, port+4)
+			ctx.Logger.Info("OK: All YMP ports are available: Web=%d, DB=%d, yasom=%d, yasagent=%d", port, port+1, port+3, port+4)
 			return nil
 		},
 
 		PostCheck: func(ctx *runner.StepContext) error {
 			port := ctx.GetParamInt("ymp_port", 8090)
-			ctx.Logger.Info("✓ All YMP ports availability verified: Web=%d, DB=%d, yasom=%d, yasagent=%d", port, port+1, port+3, port+4)
+			ctx.Logger.Info("OK: All YMP ports availability verified: Web=%d, DB=%d, yasom=%d, yasagent=%d", port, port+1, port+3, port+4)
 			return nil
 		},
 	}

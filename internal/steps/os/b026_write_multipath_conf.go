@@ -8,7 +8,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB026WriteMultipathConf Write multipath.conf (YAC)
+// StepB026WriteMultipathConf 写入 multipath.conf（YAC）
 // 使用 B-025 收集的 WWID 信息生成 multipath.conf
 func StepB026WriteMultipathConf() *runner.Step {
 	return &runner.Step{

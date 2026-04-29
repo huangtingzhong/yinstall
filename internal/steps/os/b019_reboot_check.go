@@ -4,7 +4,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB019RebootCheck Reboot check (optional)
+// StepB019RebootCheck 重启相关检查（可选）
 func StepB019RebootCheck() *runner.Step {
 	return &runner.Step{
 		ID:          "B-019",

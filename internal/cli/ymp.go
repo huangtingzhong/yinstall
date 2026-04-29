@@ -127,7 +127,7 @@ func runYMP(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// If --targets is not specified, default to local execution.
+	// 未指定 --targets 时，默认本地执行。
 	if len(flags.Targets) == 0 {
 		flags.Local = true
 		flags.Targets = []string{"localhost"}
@@ -225,6 +225,7 @@ func runYMP(cmd *cobra.Command, args []string) error {
 
 	if connectivityStep != nil {
 		logger.Info("======== Phase 1: Connectivity check ========")
+		precheckFailed := false
 		for _, target := range flags.Targets {
 			executor, err := createExecutor(target, flags, logger, "")
 			if err != nil {
@@ -251,6 +252,10 @@ func runYMP(cmd *cobra.Command, args []string) error {
 			result := runner.RunStep(connectivityStep, ctx)
 			if !result.Success && !result.Skipped {
 				executor.Close()
+				if flags.Precheck {
+					precheckFailed = true
+					continue
+				}
 				return fmt.Errorf("connectivity check failed for %s: %w", target, result.Error)
 			}
 
@@ -259,6 +264,9 @@ func runYMP(cmd *cobra.Command, args []string) error {
 				Executor: executor,
 				OSInfo:   ctx.OSInfo,
 			})
+		}
+		if flags.Precheck && precheckFailed {
+			logger.Error("Connectivity precheck has failures; continuing to collect all issues.")
 		}
 		stepIndex++
 	} else {
@@ -294,6 +302,7 @@ func runYMP(cmd *cobra.Command, args []string) error {
 	}
 
 	var lastErr error
+	precheckFailed := false
 
 	// OS 和 YMP 步骤共享 Results map（按主机隔离），使 OS 步骤产出可被 YMP 步骤读取
 	hostResultsMap := make(map[string]map[string]interface{})
@@ -318,8 +327,8 @@ func runYMP(cmd *cobra.Command, args []string) error {
 					LocalSoftwareDirs: flags.LocalSoftwareDirs,
 					RemoteSoftwareDir: flags.RemoteSoftwareDir,
 					ForceAll:          flags.ForceAll,
-				ForceSteps:        flags.ForceSteps,
-				ForceDeleteUser:   flags.ForceDeleteUser,
+					ForceSteps:        flags.ForceSteps,
+					ForceDeleteUser:   flags.ForceDeleteUser,
 					StepIndex:         stepIndex + i,
 					TotalSteps:        totalSteps,
 				}
@@ -328,6 +337,10 @@ func runYMP(cmd *cobra.Command, args []string) error {
 				// 如果步骤失败（不是跳过），即使是 Optional 的也要退出
 				if !result.Success && !result.Skipped {
 					logger.Error("Step %s failed: %v", step.ID, result.Error)
+					if flags.Precheck {
+						precheckFailed = true
+						continue
+					}
 					lastErr = result.Error
 					break
 				}
@@ -357,8 +370,8 @@ func runYMP(cmd *cobra.Command, args []string) error {
 					LocalSoftwareDirs: flags.LocalSoftwareDirs,
 					RemoteSoftwareDir: flags.RemoteSoftwareDir,
 					ForceAll:          flags.ForceAll,
-				ForceSteps:        flags.ForceSteps,
-				ForceDeleteUser:   flags.ForceDeleteUser,
+					ForceSteps:        flags.ForceSteps,
+					ForceDeleteUser:   flags.ForceDeleteUser,
 					StepIndex:         stepIndex + i,
 					TotalSteps:        totalSteps,
 				}
@@ -367,6 +380,10 @@ func runYMP(cmd *cobra.Command, args []string) error {
 				// 如果步骤失败（不是跳过），即使是 Optional 的也要退出
 				if !result.Success && !result.Skipped {
 					logger.Error("Step %s failed: %v", step.ID, result.Error)
+					if flags.Precheck {
+						precheckFailed = true
+						continue
+					}
 					lastErr = result.Error
 					break
 				}
@@ -382,6 +399,9 @@ func runYMP(cmd *cobra.Command, args []string) error {
 		logger.Error("YMP installation completed with errors")
 		logger.Info("Check debug logs at: %s", logger.DebugLogPath())
 		return lastErr
+	}
+	if flags.Precheck && precheckFailed {
+		return fmt.Errorf("precheck failed")
 	}
 
 	// 输出访问信息
@@ -399,7 +419,7 @@ func buildYMPParams(cmd *cobra.Command, flags GlobalFlags) map[string]interface{
 	params["ssh_port"] = flags.SSHPort
 	params["yasboot_ssh_port"] = flags.YasbootSSHPort
 
-	// Override OS ignore install errors if specified
+	// 若用户指定，则覆盖 OS ignore install errors 参数
 	params["os_ignore_install_errors"] = ympIgnoreInstallErrors
 	// YUM 模式及 ISO 参数覆盖（与 db --os-yum-mode 对齐）
 	params["os_yum_mode"] = ympOSYumMode

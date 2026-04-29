@@ -8,12 +8,12 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// areRequiredPackagesInstalledForMount checks if packages are installed (shared with b012)
+// areRequiredPackagesInstalledForMount 检查挂载 ISO 所需包是否已安装（与 b012 共用逻辑）
 func areRequiredPackagesInstalledForMount(ctx *runner.StepContext) bool {
 	return areRequiredPackagesInstalled(ctx)
 }
 
-// StepB013MountISO Mount ISO (optional)
+// StepB013MountISO 挂载 ISO（local-iso，可选）
 func StepB013MountISO() *runner.Step {
 	return &runner.Step{
 		ID:          "B-013",

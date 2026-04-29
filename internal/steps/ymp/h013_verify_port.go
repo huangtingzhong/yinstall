@@ -20,6 +20,19 @@ func StepH013VerifyPort() *runner.Step {
 		Optional:    false,
 
 		PreCheck: func(ctx *runner.StepContext) error {
+			r, _ := ctx.Execute("which ss 2>/dev/null || which netstat 2>/dev/null", false)
+			if r == nil || r.GetExitCode() != 0 {
+				return fmt.Errorf("neither ss nor netstat command found")
+			}
+			ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+				StepID:      "H-013",
+				StepName:    "Verify YMP Port",
+				Host:        ctx.Executor.Host(),
+				Severity:    runner.PrecheckSeverityInfo,
+				Code:        "PC.YMP.VERIFY.APPLY_ONLY",
+				Message:     "This step verifies port listening after apply; in --precheck it only checks that probing commands exist (it does not require the port to be listening).",
+				Remediation: "Run after installation completes (or run without --precheck) to perform the real verification.",
+			})
 			return nil
 		},
 
@@ -55,7 +68,7 @@ func StepH013VerifyPort() *runner.Step {
 
 		PostCheck: func(ctx *runner.StepContext) error {
 			port := ctx.GetParamInt("ymp_port", 8090)
-			ctx.Logger.Info("✓ YMP port %d verified", port)
+			ctx.Logger.Info("OK: YMP port %d verified", port)
 			return nil
 		},
 	}

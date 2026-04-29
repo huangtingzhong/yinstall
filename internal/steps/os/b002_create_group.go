@@ -8,7 +8,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB002CreateGroup Create product groups
+// StepB002CreateGroup 创建产品用户相关 group（含 DBA 组等）
 func StepB002CreateGroup() *runner.Step {
 	return &runner.Step{
 		ID:          "B-002",
@@ -103,7 +103,7 @@ func createOrForceGroup(ctx *runner.StepContext, group string, gid int, force bo
 				}
 			}
 		} else {
-			return fmt.Errorf("group '%s' already exists with GID %s, but expected GID %s (use -f --force-delete-user to recreate)", group, existingGID, expectedGID)
+			return fmt.Errorf("group '%s' already exists with GID %s, but expected GID %s (use -f B-002 --force-delete-user to recreate)", group, existingGID, expectedGID)
 		}
 	}
 
@@ -118,7 +118,7 @@ func createOrForceGroup(ctx *runner.StepContext, group string, gid int, force bo
 					return fmt.Errorf("failed to delete group %s: %w", existingGroup, err)
 				}
 			} else {
-				return fmt.Errorf("GID %d is already used by group '%s', cannot create group '%s' (use -f --force-delete-user to recreate)", gid, existingGroup, group)
+				return fmt.Errorf("GID %d is already used by group '%s', cannot create group '%s' (use -f B-002 --force-delete-user to recreate)", gid, existingGroup, group)
 			}
 		}
 	}

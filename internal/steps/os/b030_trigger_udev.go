@@ -6,7 +6,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB030TriggerUdev Trigger udev rules (YAC)
+// StepB030TriggerUdev 触发 udev 重新加载/应用规则（YAC）
 func StepB030TriggerUdev() *runner.Step {
 	return &runner.Step{
 		ID:          "B-030",

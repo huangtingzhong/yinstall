@@ -55,7 +55,7 @@ func StepH004WriteLimits() *runner.Step {
 			if result == nil || result.GetExitCode() != 0 {
 				return fmt.Errorf("limits not found for %s in %s", user, limitsFile)
 			}
-			ctx.Logger.Info("✓ Limits verified: %s", strings.TrimSpace(result.GetStdout()))
+			ctx.Logger.Info("OK: Limits verified: %s", strings.TrimSpace(result.GetStdout()))
 			return nil
 		},
 	}

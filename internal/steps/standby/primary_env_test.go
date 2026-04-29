@@ -17,9 +17,9 @@ source /home/yashan/.yasboot/yashandb_3988_yasdb_home/conf/yashandb_3988.bashrc
 			want: "yashandb_3988",
 		},
 		{
-			name: "leading spaces and tabs",
+			name:    "leading spaces and tabs",
 			content: "  source\t/home/yashan/.yasboot/mydb_1688_yasdb_home/conf/mydb_1688.bashrc",
-			want: "mydb_1688",
+			want:    "mydb_1688",
 		},
 		{
 			name: "first matching yasboot line wins",

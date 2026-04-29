@@ -15,8 +15,8 @@ import (
 type Logger struct {
 	runID          string
 	logDir         string
-	sessionFile    *os.File // session log = mirrors terminal output
-	debugFile      *os.File // debug log = all detailed logs
+	sessionFile    *os.File // session 日志：与终端输出保持一致（人类可读）
+	debugFile      *os.File // debug 日志：记录更详细的信息（含命令输出等）
 	sessionLogPath string
 	debugLogPath   string
 	mu             sync.Mutex
@@ -29,7 +29,7 @@ type LogEntry struct {
 	Host      string `json:"host,omitempty"`
 	StepID    string `json:"step_id,omitempty"`
 	Level     string `json:"level"`
-	Phase     string `json:"phase,omitempty"` // start, success, fail, skip
+	Phase     string `json:"phase,omitempty"` // start/success/fail/skip
 	Message   string `json:"message"`
 	Command   string `json:"command,omitempty"`
 	Stdout    string `json:"stdout,omitempty"`
@@ -75,13 +75,13 @@ func NewLogger(runID, logDir, version, author, contact string) (*Logger, error) 
 		debugLogPath:   debugPath,
 	}
 
-	// Print banner to terminal + session log
+	// 将 banner 输出到终端 + session 日志
 	banner := fmt.Sprintf("Version: %s\nAuthor: %s\nContact: %s\n\nThe log of current session can be found at:\n  %s\nDebug log can be found at:\n  %s\n",
 		version, author, contact, sessionPath, debugPath)
 	fmt.Print(banner)
 	sessionFile.WriteString(banner)
 
-	// Also write banner to debug log
+	// 同时写入 debug 日志
 	debugFile.WriteString(banner)
 
 	return l, nil
@@ -316,6 +316,25 @@ func (l *Logger) Close() {
 		_ = l.debugFile.Close()
 		l.debugFile = nil
 	}
+}
+
+// ConsolePrecheckIssue prints a single precheck issue line to terminal + session log.
+// This is for --precheck readability (no JSON output).
+func (l *Logger) ConsolePrecheckIssue(stepID, stepName, host, severity, code, message string) {
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
+	codePart := ""
+	if strings.TrimSpace(code) != "" {
+		codePart = " " + strings.TrimSpace(code)
+	}
+	line := fmt.Sprintf("%s %s: [precheck-%s]%s (%s) %s - %s\n",
+		timestamp, stepID, strings.ToLower(strings.TrimSpace(severity)), codePart, host, stepName, strings.TrimSpace(message))
+	l.mu.Lock()
+	fmt.Print(line)
+	if l.sessionFile != nil {
+		_, _ = l.sessionFile.WriteString(line)
+	}
+	l.mu.Unlock()
+	l.debugWrite("PRECHECK", line)
 }
 
 // ---- Legacy compatibility methods (delegate to new methods) ----

@@ -23,7 +23,7 @@ func StepE013AddStandbyInstance() *runner.Step {
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			envFile, err := GetPrimaryEnvFile(ctx)
 			if err != nil {
-				return err
+				return runner.SkipPrecheckDryRunWhenUpstreamArtifactMissing(ctx, err)
 			}
 			if err := SyncPrimaryClusterNameFromEnvFile(ctx, envFile); err != nil {
 				return err
@@ -34,7 +34,7 @@ func StepE013AddStandbyInstance() *runner.Step {
 			clusterAddFile := fmt.Sprintf("%s/%s_add.toml", stageDir, clusterName)
 			result, _ := ctx.Execute(fmt.Sprintf("test -f %s", clusterAddFile), false)
 			if result == nil || result.GetExitCode() != 0 {
-				return fmt.Errorf("%s_add.toml not found, run E-011 first", clusterName)
+				return runner.SkipPrecheckDryRunWhenUpstreamArtifactMissing(ctx, fmt.Errorf("%s_add.toml not found, run E-011 first", clusterName))
 			}
 
 			return nil

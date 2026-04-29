@@ -33,7 +33,7 @@ func (a *scanPingExecutorAdapter) Execute(cmd string, sudo bool) (commonos.PingE
 	return &scanPingResultAdapter{r: r}, nil
 }
 
-// StepC004ScanDNS Validate SCAN DNS resolution
+// StepC011ScanDNS 校验 SCAN 的 DNS 解析
 func StepC011ScanDNS() *runner.Step {
 	return &runner.Step{
 		ID:          "C-011",
@@ -58,10 +58,94 @@ func StepC011ScanDNS() *runner.Step {
 				return fmt.Errorf("local SCAN mode: DNS validation not required (using /etc/hosts)")
 			}
 
+			// precheck 阶段在此完成 DNS/网段/ping 等只读检查
+			scanName := ctx.GetParamString("yac_scanname", "")
+			publicNet := ctx.GetParamString("yac_public_network", "")
+			interCIDR := ctx.GetParamString("yac_inter_cidr", "")
+
+			if scanName == "" {
+				return fmt.Errorf("yac_scanname is required for SCAN DNS validation")
+			}
+			hosts := ctx.HostsToRun()
+			if len(hosts) == 0 {
+				return fmt.Errorf("no hosts available for SCAN DNS validation")
+			}
+			hctx := ctx.ForHost(hosts[0])
+
+			hctx.Logger.Info("Resolving SCAN name: %s", scanName)
+			resolvedIPs, err := commonos.ResolveHostnameToIP(scanName)
+			if err != nil {
+				return fmt.Errorf("failed to resolve SCAN name %s: %w", scanName, err)
+			}
+			if len(resolvedIPs) == 0 {
+				return fmt.Errorf("SCAN name %s resolved to no IP addresses", scanName)
+			}
+			hctx.Logger.Info("Resolved %s to IP(s): %v", scanName, resolvedIPs)
+
+			// 推导用于网段校验的 CIDR
+			var cidr string
+			if strings.Contains(publicNet, "/") {
+				cidr = strings.TrimSpace(publicNet)
+			} else if strings.Contains(interCIDR, "/") {
+				cidr = strings.TrimSpace(interCIDR)
+			} else {
+				firstHostIP := hosts[0].Host
+				var errCIDR error
+				cidr, errCIDR = commonos.CIDRFromIP(firstHostIP, 24)
+				if errCIDR != nil {
+					return fmt.Errorf("cannot derive CIDR from permanent IP %s (yac_public_network and yac_inter_cidr are not CIDR): %w", firstHostIP, errCIDR)
+				}
+				hctx.Logger.Info("Using derived CIDR for subnet check: %s", cidr)
+			}
+			hctx.Logger.Info("Business network CIDR: %s", cidr)
+
+			for _, ip := range resolvedIPs {
+				inSubnet, errSub := commonos.IPInSubnet(ip, cidr)
+				if errSub != nil {
+					return fmt.Errorf("check resolved IP %s: %w", ip, errSub)
+				}
+				if !inSubnet {
+					return fmt.Errorf("resolved IP %s for SCAN name %s is not in the same subnet as business network (CIDR %s)", ip, scanName, cidr)
+				}
+				hctx.Logger.Info("  OK: IP %s is in subnet %s", ip, cidr)
+			}
+
+			// ping 探测（只读）
+			pingExecutor := &scanPingExecutorAdapter{e: hctx.Executor}
+			for _, ip := range resolvedIPs {
+				hctx.Logger.Info("Checking if IP %s is alive...", ip)
+				isAlive, err := commonos.PingFromHost(pingExecutor, ip)
+				if err != nil {
+					return fmt.Errorf("failed to ping SCAN IP %s: %w", ip, err)
+				}
+				if isAlive {
+					return fmt.Errorf("SCAN IP %s is already in use (ping responded); SCAN IPs must not be in use before installation", ip)
+				}
+				hctx.Logger.Info("  OK: IP %s is not in use", ip)
+			}
+
+			// 在所有节点上做 DNS 解析检查
+			for _, th := range hosts {
+				nctx := ctx.ForHost(th)
+				nctx.Logger.Info("Validating SCAN DNS resolution on %s...", th.Host)
+				nctx.Logger.Info("  SCAN Name: %s", scanName)
+				r, _ := nctx.Execute(fmt.Sprintf("host %s 2>/dev/null || nslookup %s 2>/dev/null", scanName, scanName), false)
+				if r == nil || r.GetExitCode() != 0 {
+					return fmt.Errorf("failed to resolve SCAN name %s on %s", scanName, th.Host)
+				}
+			}
+
+			// 缓存解析结果，供 Action 日志引用（可选）
+			ctx.SetResult("scan_resolved_ips", resolvedIPs)
+			ctx.SetResult("scan_business_cidr", cidr)
 			return nil
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			// PreCheck 已校验 DNS/网段/ping；apply 时 Action 可为空，仅保留日志语义
+			if ctx.Precheck {
+				return nil
+			}
 			scanName := ctx.GetParamString("yac_scanname", "")
 			publicNet := ctx.GetParamString("yac_public_network", "")
 			interCIDR := ctx.GetParamString("yac_inter_cidr", "")
@@ -105,7 +189,7 @@ func StepC011ScanDNS() *runner.Step {
 				if !inSubnet {
 					return fmt.Errorf("resolved IP %s for SCAN name %s is not in the same subnet as business network (CIDR %s)", ip, scanName, cidr)
 				}
-				hctx.Logger.Info("  ✓ IP %s is in subnet %s", ip, cidr)
+				hctx.Logger.Info("  OK: IP %s is in subnet %s", ip, cidr)
 			}
 
 			// 4. 对所有解析出的 IP 进行 ping 探测，如果有 IP 存活，报错退出
@@ -120,7 +204,7 @@ func StepC011ScanDNS() *runner.Step {
 				if isAlive {
 					return fmt.Errorf("SCAN IP %s is already in use (ping responded); SCAN IPs must not be in use before installation", ip)
 				}
-				hctx.Logger.Info("  ✓ IP %s is not in use", ip)
+				hctx.Logger.Info("  OK: IP %s is not in use", ip)
 			}
 
 			// 5. 在所有节点上验证 DNS 解析（保持原有逻辑）

@@ -18,7 +18,7 @@ var (
 	reLegacyDBSection       = regexp.MustCompile(`^\[db\]\s*(#.*)?\s*$`)
 )
 
-// StepC018SetNativeType sets USE_NATIVE_TYPE in the cluster TOML (legacy [db] or yasboot [[group]] / [group.node.config]).
+// StepC018SetNativeType 在集群 TOML 中设置 USE_NATIVE_TYPE（兼容 legacy [db] 或 yasboot [[group]] / [group.node.config]）。
 func StepC018SetNativeType() *runner.Step {
 	return &runner.Step{
 		ID:          "C-018",
@@ -28,6 +28,14 @@ func StepC018SetNativeType() *runner.Step {
 		Optional:    true,
 
 		PreCheck: func(ctx *runner.StepContext) error {
+			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
+			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
+			configPath := path.Join(stageDir, clusterName+".toml")
+
+			r, _ := ctx.Execute(fmt.Sprintf("test -f %s", strconv.Quote(configPath)), false)
+			if r == nil || r.GetExitCode() != 0 {
+				return skipPrecheckDryRunWhenUpstreamDBArtifactMissing(ctx, fmt.Errorf("cluster config not found at %s", configPath))
+			}
 			return nil
 		},
 
@@ -112,7 +120,7 @@ func stripUseNativeLines(lines []string) []string {
 	return out
 }
 
-// insertUseNativeUnderEachGroupNodeConfig strips must be done first. Inserts one USE_NATIVE_TYPE per [group.node.config] table.
+// insertUseNativeUnderEachGroupNodeConfig：调用前须先执行 stripUseNativeLines；在每个 [group.node.config] 段下插入一行 USE_NATIVE_TYPE。
 func insertUseNativeUnderEachGroupNodeConfig(lines []string, value string) []string {
 	out := make([]string, 0, len(lines)+8)
 	for i := 0; i < len(lines); {
@@ -243,7 +251,7 @@ func writeRemoteTextViaUpload(ctx *runner.StepContext, dstPath, content string) 
 	return nil
 }
 
-// ensureUSENativeTypeInClusterTOML updates or inserts USE_NATIVE_TYPE for yasboot-generated layouts.
+// ensureUSENativeTypeInClusterTOML 在 yasboot 生成的配置布局中更新或插入 USE_NATIVE_TYPE。
 func ensureUSENativeTypeInClusterTOML(ctx *runner.StepContext, configPath, value string) error {
 	q := strconv.Quote(configPath)
 
@@ -273,7 +281,7 @@ func ensureUSENativeTypeInClusterTOML(ctx *runner.StepContext, configPath, value
 		return nil
 	}
 
-	// Legacy layout: top-level [db] section.
+	// 旧版布局：顶层 [db] 段
 	if !containsLegacyDBSection(lines) {
 		return fmt.Errorf("cluster config %s has no [group.node.config] and no [db] section; cannot set USE_NATIVE_TYPE", configPath)
 	}

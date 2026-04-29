@@ -28,7 +28,7 @@ var (
 	primaryEnvFile string // 主库环境变量文件路径，默认 .bashrc（相对用户家目录）或自动检测
 
 	// 操作系统配置控制
-	skipOS                    bool // 是否跳过备库操作系统配置，默认 true
+	skipOS                     bool // 是否跳过备库操作系统配置，默认 true
 	standbyIgnoreInstallErrors bool // 忽略软件包安装错误
 
 	// 备库 OS 用户参数（用于 yasboot 命令）
@@ -218,10 +218,10 @@ func init() {
 	// 数据库参数
 	standbyCmd.Flags().StringVar(&standbyClusterName, "db-cluster-name", "yashandb", "Database cluster name (must match primary)")
 	standbyCmd.Flags().StringVar(&standbyAdminPassword, "db-admin-password", "", "Database SYS admin password (optional, not used in standby creation)")
-	standbyCmd.Flags().StringVar(&standbyInstallPath, "db-home-path", "", "Standby install path for yasboot (default: same as yinstall db — /data/<primary-os-user>/yasdb_home for port 1688, else yasdb_home_<port>)")
-	standbyCmd.Flags().StringVar(&standbyDataPath, "db-data-path", "", "Standby data path for yasboot (default: same as yinstall db — /data/<primary-os-user>/yasdb_data or .../yasdb_data_<port>)")
-	standbyCmd.Flags().StringVar(&standbyLogPath, "db-log-path", "", "Standby log path for yasboot (default: same as yinstall db — /data/<primary-os-user>/log or .../log_<port>)")
-	standbyCmd.Flags().StringVar(&standbyStageDir, "db-stage-dir", "", "Primary stage directory on primary host (must exist; default same as yinstall db — /home/<user>/install for 1688, else install_<port>; port from --db-port or LISTEN_ADDR)")
+	standbyCmd.Flags().StringVar(&standbyInstallPath, "db-home-path", "", "Standby install path for yasboot (default: same as yinstall db: /data/<primary-os-user>/yasdb_home for port 1688, else yasdb_home_<port>)")
+	standbyCmd.Flags().StringVar(&standbyDataPath, "db-data-path", "", "Standby data path for yasboot (default: same as yinstall db: /data/<primary-os-user>/yasdb_data or .../yasdb_data_<port>)")
+	standbyCmd.Flags().StringVar(&standbyLogPath, "db-log-path", "", "Standby log path for yasboot (default: same as yinstall db: /data/<primary-os-user>/log or .../log_<port>)")
+	standbyCmd.Flags().StringVar(&standbyStageDir, "db-stage-dir", "", "Primary stage directory on primary host (must exist; default same as yinstall db: /home/<user>/install for 1688, else install_<port>; port from --db-port or LISTEN_ADDR)")
 	standbyCmd.Flags().StringVar(&standbyDepsPackage, "db-deps-package", "", "SSL deps package path (optional)")
 	standbyCmd.Flags().IntVar(&standbyNodeCount, "standby-node-count", 0, "Number of standby nodes (auto-detected from --targets)")
 
@@ -247,8 +247,8 @@ func runStandby(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Derive local execution for standby when both primary and all standby targets are local.
-	// (Standby still requires --targets, but we can avoid SSH when operating on localhost.)
+	// 当主库与全部备库 targets 都是本机时，推导为本地执行。
+	//（standby 仍要求 --targets，但在 localhost 场景下可以避免 SSH。）
 	if isLocalHost(primaryIP) {
 		allLocal := true
 		for _, t := range flags.Targets {
@@ -259,7 +259,7 @@ func runStandby(cmd *cobra.Command, args []string) error {
 		}
 		if allLocal {
 			flags.Local = true
-			// In local mode, do not inject default standby os-user-password unless explicitly set by user.
+			// 本地模式下，除非用户显式指定，否则不注入默认的备库 os-user-password。
 			if !cmd.Flags().Changed("os-user-password") {
 				standbyOSUserPassword = ""
 			}
@@ -457,7 +457,7 @@ func buildStandbyParams(flags GlobalFlags) map[string]interface{} {
 		params["os_group"] = standbyOSGroup
 	}
 
-	// Override OS ignore install errors if specified
+	// 若用户指定，则覆盖 OS ignore install errors 参数
 	params["os_ignore_install_errors"] = standbyIgnoreInstallErrors
 	if strings.TrimSpace(standbyOSDepsPkgs) != "" {
 		params["os_deps_db_packages"] = strings.TrimSpace(standbyOSDepsPkgs)
@@ -566,6 +566,10 @@ func checkPrimaryStatus(executor ssh.Executor, logger *logging.Logger, params ma
 		setStandbyStepProgress(ctx, filtered, step)
 		result := runner.RunStep(step, ctx)
 		if !result.Success && !result.Skipped {
+			if flags.Precheck {
+				// 继续收集问题
+				continue
+			}
 			return fmt.Errorf("step %s failed: %w", step.ID, result.Error)
 		}
 	}
@@ -576,6 +580,7 @@ func checkPrimaryStatus(executor ssh.Executor, logger *logging.Logger, params ma
 // prepareStandbyNodes 准备备库节点（OS 基线 + 备库侧 E-005～E-007；各步仅当出现在 filtered 中才执行，且按 E-005→E-006→E-007 顺序）
 func prepareStandbyNodes(flags GlobalFlags, logger *logging.Logger, params map[string]interface{}, osSteps []*runner.Step, filtered []*runner.Step) ([]*HostInfo, error) {
 	var hostInfos []*HostInfo
+	precheckFailed := false
 
 	for _, target := range flags.Targets {
 		executor, err := createExecutor(target, flags, logger, "")
@@ -605,6 +610,11 @@ func prepareStandbyNodes(flags GlobalFlags, logger *logging.Logger, params map[s
 			// B-015 等关键步骤失败时应该直接退出
 			if !result.Success && !result.Skipped {
 				executor.Close()
+				if flags.Precheck {
+					precheckFailed = true
+					// 当前主机上继续执行后续步骤
+					continue
+				}
 				return nil, fmt.Errorf("step %s failed on %s: %w", step.ID, target, result.Error)
 			}
 		}
@@ -636,6 +646,11 @@ func prepareStandbyNodes(flags GlobalFlags, logger *logging.Logger, params map[s
 				result := runner.RunStep(step, ctx)
 				if !result.Success && !result.Skipped {
 					executor.Close()
+					if flags.Precheck {
+						precheckFailed = true
+						// 当前主机上继续执行后续步骤
+						break
+					}
 					return nil, fmt.Errorf("step %s failed on %s: %w", step.ID, target, result.Error)
 				}
 				break
@@ -643,6 +658,9 @@ func prepareStandbyNodes(flags GlobalFlags, logger *logging.Logger, params map[s
 		}
 	}
 
+	if flags.Precheck && precheckFailed {
+		return hostInfos, fmt.Errorf("precheck failed")
+	}
 	return hostInfos, nil
 }
 
@@ -669,6 +687,9 @@ func checkArchiveDestination(primaryExecutor ssh.Executor, logger *logging.Logge
 		setStandbyStepProgress(ctx, filtered, step)
 		result := runner.RunStep(step, ctx)
 		if !result.Success && !result.Skipped {
+			if flags.Precheck {
+				return fmt.Errorf("precheck failed")
+			}
 			return fmt.Errorf("step %s failed: %w", step.ID, result.Error)
 		}
 		break
@@ -691,6 +712,9 @@ func checkAndCleanupExistingNodes(primaryExecutor ssh.Executor, logger *logging.
 		setStandbyStepProgress(ctx, filtered, step)
 		result := runner.RunStep(step, ctx)
 		if !result.Success && !result.Skipped {
+			if flags.Precheck {
+				return fmt.Errorf("precheck failed")
+			}
 			return fmt.Errorf("step %s failed: %w", step.ID, result.Error)
 		}
 		break
@@ -715,6 +739,9 @@ func checkNetworkConnectivity(primaryExecutor ssh.Executor, standbyHosts []*Host
 			if step.Optional {
 				logger.Warn("Network connectivity check failed, but step is optional, continuing...")
 			} else {
+				if flags.Precheck {
+					return fmt.Errorf("precheck failed")
+				}
 				return fmt.Errorf("network connectivity check failed: %w", result.Error)
 			}
 		}
@@ -745,13 +772,16 @@ func executeExpansionSteps(executor ssh.Executor, logger *logging.Logger, params
 				break
 			}
 		}
-		
+
 		if isExpansionStep {
 			ctx.CurrentStepID = step.ID
 			setStandbyStepProgress(ctx, orderedFiltered, step)
 			result := runner.RunStep(step, ctx)
 			// 如果步骤失败（不是跳过），即使是 Optional 的也要退出
 			if !result.Success && !result.Skipped {
+				if flags.Precheck {
+					return fmt.Errorf("precheck failed")
+				}
 				return fmt.Errorf("step %s failed: %w", step.ID, result.Error)
 			}
 		}
@@ -782,6 +812,9 @@ func configureStandbyPostSteps(standbyHosts []*HostInfo, logger *logging.Logger,
 			result := runner.RunStep(step, ctx)
 			// 如果步骤失败（不是跳过），即使是 Optional 的也要退出
 			if !result.Success && !result.Skipped {
+				if flags.Precheck {
+					return fmt.Errorf("precheck failed")
+				}
 				return fmt.Errorf("step %s failed on %s: %w", step.ID, host.Host, result.Error)
 			}
 		}
@@ -802,6 +835,9 @@ func showClusterStatus(executor ssh.Executor, logger *logging.Logger, params map
 		setStandbyStepProgress(ctx, filtered, step)
 		result := runner.RunStep(step, ctx)
 		if !result.Success && !result.Skipped {
+			if flags.Precheck {
+				return fmt.Errorf("precheck failed")
+			}
 			return fmt.Errorf("step %s failed: %w", step.ID, result.Error)
 		}
 		return nil
@@ -822,6 +858,9 @@ func runStandbyOptionalCleanup(executor ssh.Executor, logger *logging.Logger, pa
 		setStandbyStepProgress(ctx, filtered, step)
 		result := runner.RunStep(step, ctx)
 		if !result.Success && !result.Skipped {
+			if flags.Precheck {
+				return fmt.Errorf("precheck failed")
+			}
 			return fmt.Errorf("step %s failed: %w", step.ID, result.Error)
 		}
 		return nil

@@ -50,9 +50,9 @@ func StepG010VerifyWeb() *runner.Step {
 				httpCode := strings.TrimSpace(result.GetStdout())
 				switch {
 				case httpCode == "200":
-					ctx.Logger.Info("✓ YCM web interface is accessible (HTTP 200)")
+					ctx.Logger.Info("OK: YCM web interface is accessible (HTTP 200)")
 				case httpCode == "301" || httpCode == "302" || httpCode == "303":
-					ctx.Logger.Info("✓ YCM web interface is accessible (HTTP %s redirect)", httpCode)
+					ctx.Logger.Info("OK: YCM web interface is accessible (HTTP %s redirect)", httpCode)
 				case httpCode == "000":
 					ctx.Logger.Warn("YCM web interface connection refused or timeout")
 					ctx.Logger.Info("YCM may still be starting up. Try: http://%s:%d", host, ycmPort)

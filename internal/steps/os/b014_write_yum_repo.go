@@ -7,12 +7,12 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// areRequiredPackagesInstalledForYum checks if packages are installed (shared with b012)
+// areRequiredPackagesInstalledForYum 检查写 repo 所需包是否已安装（与 b012 共用逻辑）
 func areRequiredPackagesInstalledForYum(ctx *runner.StepContext) bool {
 	return areRequiredPackagesInstalled(ctx)
 }
 
-// StepB014WriteYumRepo Write YUM repo file (optional)
+// StepB014WriteYumRepo 写入本地 YUM repo 配置（可选）
 func StepB014WriteYumRepo() *runner.Step {
 	return &runner.Step{
 		ID:          "B-014",

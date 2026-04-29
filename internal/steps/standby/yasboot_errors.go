@@ -40,7 +40,7 @@ func ExplainYasbootNodeAddFailure(combined string) string {
 	case strings.Contains(low, "connection is shut down"):
 		return "Hint: RPC/agent connection was closed (often yasboot talking to yasagent on a cluster host). Check yasagent on primary and standby, port reachability (e.g. agent port), firewall, and that the previous host add step left agents healthy; retry after agents are stable."
 	case strings.Contains(low, "get host") && strings.Contains(low, "host info failed"):
-		return "Hint: primary cannot load host metadata for that hostid—usually host add did not fully succeed or the standby was cleaned while still registered. Fix any E-012 failure and re-run; after clean, ensure versioned dirs under --db-home-path are removed and ~/.yasboot on the standby is cleared if needed."
+		return "Hint: primary cannot load host metadata for that hostid - usually host add did not fully succeed or the standby was cleaned while still registered. Fix any E-012 failure and re-run; after clean, ensure versioned dirs under --db-home-path are removed and ~/.yasboot on the standby is cleared if needed."
 	case strings.Contains(low, "scale failed"):
 		return "Hint: a scale-failed node is present; try yasboot node remove --clean as prompted, then retry."
 	default:

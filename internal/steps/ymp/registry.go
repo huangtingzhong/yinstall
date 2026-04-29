@@ -4,7 +4,7 @@ package ymp
 
 import "github.com/yinstall/internal/runner"
 
-// GetAllSteps returns all YMP installation steps in execution order
+// GetAllSteps 返回全部 YMP 安装 steps（顺序即默认执行顺序）。
 func GetAllSteps() []*runner.Step {
 	return []*runner.Step{
 		// Pre-installation checks

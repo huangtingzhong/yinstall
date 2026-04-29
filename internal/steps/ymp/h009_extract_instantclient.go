@@ -79,7 +79,7 @@ func StepH009ExtractInstantclient() *runner.Step {
 			if result == nil || result.GetExitCode() != 0 {
 				return fmt.Errorf("instantclient directory not found in %s", installDir)
 			}
-			ctx.Logger.Info("✓ Instantclient directory found")
+			ctx.Logger.Info("OK: Instantclient directory found")
 			return nil
 		},
 	}

@@ -20,6 +20,20 @@ func StepG008VerifyProcess() *runner.Step {
 		Optional:    false,
 
 		PreCheck: func(ctx *runner.StepContext) error {
+			// Read-only capability check: ps must exist.
+			r, _ := ctx.Execute("command -v ps >/dev/null 2>&1", false)
+			if r == nil || r.GetExitCode() != 0 {
+				return fmt.Errorf("ps command not found")
+			}
+			ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+				StepID:      "G-008",
+				StepName:    "Verify YCM Processes",
+				Host:        ctx.Executor.Host(),
+				Severity:    runner.PrecheckSeverityInfo,
+				Code:        "PC.YCM.VERIFY.APPLY_ONLY",
+				Message:     "This step verifies processes after apply; in --precheck it only checks command availability (it does not require processes to already exist).",
+				Remediation: "Run after installation completes (or run without --precheck) to perform the real verification.",
+			})
 			return nil
 		},
 
@@ -52,7 +66,7 @@ func StepG008VerifyProcess() *runner.Step {
 				}
 			}
 
-			ctx.Logger.Info("✓ Found %d YCM process(es) running", processCount)
+			ctx.Logger.Info("OK: Found %d YCM process(es) running", processCount)
 			return nil
 		},
 

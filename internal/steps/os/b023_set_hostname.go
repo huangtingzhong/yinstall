@@ -8,7 +8,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB023SetHostname Configure system hostname
+// StepB023SetHostname 配置各节点主机名（及 /etc/hosts 托管块）
 func StepB023SetHostname() *runner.Step {
 	return &runner.Step{
 		ID:          "B-023",
@@ -73,15 +73,15 @@ func StepB023SetHostname() *runner.Step {
 					return fmt.Errorf("[%s] hostnamectl failed: %s", th.Host, result.GetStderr())
 				}
 
-			// 本地模式下 th.Host = "localhost"，需取真实 IP 写入 /etc/hosts
-			ip := th.Host
-			if ip == "localhost" || ip == "127.0.0.1" {
-				if r, _ := hctx.Execute("hostname -I | awk '{print $1}'", false); r != nil && strings.TrimSpace(r.GetStdout()) != "" {
-					ip = strings.TrimSpace(r.GetStdout())
+				// 本地模式下 th.Host = "localhost"，需取真实 IP 写入 /etc/hosts
+				ip := th.Host
+				if ip == "localhost" || ip == "127.0.0.1" {
+					if r, _ := hctx.Execute("hostname -I | awk '{print $1}'", false); r != nil && strings.TrimSpace(r.GetStdout()) != "" {
+						ip = strings.TrimSpace(r.GetStdout())
+					}
 				}
-			}
-			nodes = append(nodes, nodeInfo{ip: ip, hostname: newHostname})
-			ctx.Logger.Info("[%s] Hostname set to: %s (hosts entry IP: %s)", th.Host, newHostname, ip)
+				nodes = append(nodes, nodeInfo{ip: ip, hostname: newHostname})
+				ctx.Logger.Info("[%s] Hostname set to: %s (hosts entry IP: %s)", th.Host, newHostname, ip)
 			}
 
 			if len(nodes) > 0 {
@@ -118,7 +118,7 @@ func StepB023SetHostname() *runner.Step {
 	}
 }
 
-// parseHostnames Parse comma-separated hostname string
+// parseHostnames 解析逗号分隔的主机名列表
 func parseHostnames(hostnameParam string) []string {
 	if hostnameParam == "" {
 		return []string{}

@@ -7,7 +7,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB009ApplySysctl Apply sysctl config
+// StepB009ApplySysctl 应用 sysctl 配置
 func StepB009ApplySysctl() *runner.Step {
 	return &runner.Step{
 		ID:          "B-009",
@@ -19,8 +19,8 @@ func StepB009ApplySysctl() *runner.Step {
 		PreCheck: func(ctx *runner.StepContext) error {
 			configFile := ctx.GetParamString("os_sysctl_file", "/etc/sysctl.d/yashandb.conf")
 			result, _ := ctx.Execute(fmt.Sprintf("test -f %s", configFile), false)
-			if result.GetExitCode() != 0 {
-				return fmt.Errorf("sysctl config file not found")
+			if result == nil || result.GetExitCode() != 0 {
+				return runner.SkipPrecheckDryRunWhenUpstreamArtifactMissing(ctx, fmt.Errorf("sysctl config file not found"))
 			}
 			return nil
 		},

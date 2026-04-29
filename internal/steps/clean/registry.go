@@ -14,12 +14,12 @@ func GetAllSteps() []*runner.Step {
 // GetDBCleanSteps returns detailed DB cleanup steps
 func GetDBCleanSteps() []*runner.Step {
 	return []*runner.Step{
-		StepCleanDB001QueryYACDisks(),      // 查询 YAC 磁盘信息（在删除前）
-		StepCleanDB002StopProcesses(),      // 停止进程
-		StepCleanDB003RemoveDirectories(),  // 删除目录
-		StepCleanDB004RemoveConfig(),       // 删除配置文件
-		StepCleanDB005CleanYACDisks(),      // 清理 YAC 共享磁盘
-		StepCleanDB006FinalCheck(),         // 最终检查
+		StepCleanDB001QueryYACDisks(),     // 查询 YAC 磁盘信息（在删除前）
+		StepCleanDB002StopProcesses(),     // 停止进程
+		StepCleanDB003RemoveDirectories(), // 删除目录
+		StepCleanDB004RemoveConfig(),      // 删除配置文件
+		StepCleanDB005CleanYACDisks(),     // 清理 YAC 共享磁盘
+		StepCleanDB006FinalCheck(),        // 最终检查
 	}
 }
 

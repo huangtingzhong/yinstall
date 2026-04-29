@@ -22,7 +22,7 @@ func StepG005ConfigurePorts() *runner.Step {
 			deployFile := ctx.GetParamString("ycm_deploy_file", "/opt/ycm/etc/deploy.yml")
 			result, _ := ctx.Execute(fmt.Sprintf("test -f %s", deployFile), false)
 			if result == nil || result.GetExitCode() != 0 {
-				return fmt.Errorf("deploy config not found: %s (run G-004 first)", deployFile)
+				return runner.SkipPrecheckDryRunWhenUpstreamArtifactMissing(ctx, fmt.Errorf("deploy config not found: %s (run G-004 first)", deployFile))
 			}
 			return nil
 		},
@@ -90,7 +90,7 @@ func StepG005ConfigurePorts() *runner.Step {
 				cmd := fmt.Sprintf("grep '%s' %s | grep -E '(^|[^0-9])%d([^0-9]|$)'", p.key, deployFile, portVal)
 				result, _ := ctx.Execute(cmd, false)
 				if result != nil && result.GetExitCode() == 0 {
-					ctx.Logger.Info("✓ %s = %d", p.key, portVal)
+					ctx.Logger.Info("OK: %s = %d", p.key, portVal)
 				} else {
 					ctx.Logger.Warn("Port %s may not be correctly set to %d in %s", p.key, portVal, deployFile)
 				}

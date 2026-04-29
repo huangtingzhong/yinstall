@@ -6,7 +6,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB028VerifyMultipath Verify multipath devices (YAC)
+// StepB028VerifyMultipath 校验 multipath 设备状态（YAC）
 func StepB028VerifyMultipath() *runner.Step {
 	return &runner.Step{
 		ID:          "B-028",

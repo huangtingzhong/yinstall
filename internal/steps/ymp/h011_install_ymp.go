@@ -28,7 +28,7 @@ func StepH011InstallYMP() *runner.Step {
 
 			result, _ := ctx.Execute(fmt.Sprintf("test -f %s", ympSh), false)
 			if result == nil || result.GetExitCode() != 0 {
-				return fmt.Errorf("ymp.sh not found at %s, extract YMP first (H-006)", ympSh)
+				return runner.SkipPrecheckDryRunWhenUpstreamArtifactMissing(ctx, fmt.Errorf("ymp.sh not found at %s, extract YMP first (H-006)", ympSh))
 			}
 
 			dbPackage := ctx.GetParamString("ymp_db_package", "")
@@ -53,19 +53,23 @@ func StepH011InstallYMP() *runner.Step {
 			if result != nil && result.GetExitCode() == 0 {
 				if !ctx.IsForceStep() {
 					ctx.Logger.Warn("YMP already installed in %s (db directory exists)", installDir)
-					ctx.Logger.Warn("To reinstall, use: --force H-011")
-					return fmt.Errorf("skip: YMP already installed in %s, use --force H-011 to reinstall", installDir)
+					ctx.Logger.Warn("To reinstall, use: -f H-011")
+					return fmt.Errorf("skip: YMP already installed in %s, use -f H-011 to reinstall", installDir)
 				}
-				// Force 模式：清理旧安装留下的 env 文件
+				// PreCheck must be read-only: only report what would be cleaned in Action.
 				ympUser := ctx.GetParamString("ymp_user", "ymp")
 				ympEnvFile := fmt.Sprintf("/home/%s/.yasboot/ymp.env", ympUser)
 				result, _ = ctx.Execute(fmt.Sprintf("test -f %s", ympEnvFile), false)
 				if result != nil && result.GetExitCode() == 0 {
-					ctx.Logger.Info("Force reinstall detected, removing existing ymp.env: %s", ympEnvFile)
-					if _, err := ctx.ExecuteWithCheck(fmt.Sprintf("rm -f %s", ympEnvFile), true); err != nil {
-						return fmt.Errorf("failed to remove existing ymp.env: %w", err)
-					}
-					ctx.Logger.Info("✓ Existing ymp.env removed")
+					ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+						StepID:      "H-011",
+						StepName:    "Run YMP Install",
+						Host:        ctx.Executor.Host(),
+						Severity:    runner.PrecheckSeverityInfo,
+						Code:        "PC.YMP.FORCE.REMOVE_ENV",
+						Message:     fmt.Sprintf("force reinstall detected: apply will remove existing ymp.env: %s", ympEnvFile),
+						Remediation: "ensure this is expected; back up the file first if you need to keep it",
+					})
 				}
 			}
 
@@ -76,6 +80,20 @@ func StepH011InstallYMP() *runner.Step {
 			installDir := ctx.GetParamString("ymp_install_dir", "/opt/ymp")
 			ympUser := ctx.GetParamString("ymp_user", "ymp")
 			dbPackage := ctx.GetParamString("ymp_db_package", "")
+			isForce := ctx.IsForceStep()
+
+			// Force reinstall: cleanup old ymp.env here (write op must not be in PreCheck).
+			if isForce {
+				ympEnvFile := fmt.Sprintf("/home/%s/.yasboot/ymp.env", ympUser)
+				r, _ := ctx.Execute(fmt.Sprintf("test -f %s", ympEnvFile), false)
+				if r != nil && r.GetExitCode() == 0 {
+					ctx.Logger.Info("Force reinstall detected, removing existing ymp.env: %s", ympEnvFile)
+					if _, err := ctx.ExecuteWithCheck(fmt.Sprintf("rm -f %s", ympEnvFile), true); err != nil {
+						return fmt.Errorf("failed to remove existing ymp.env: %w", err)
+					}
+					ctx.Logger.Info("OK: Existing ymp.env removed")
+				}
+			}
 
 			// 校验数据库模式
 			dbMode := ctx.GetParamString("ymp_db_mode", "yashandb")
@@ -147,7 +165,7 @@ func StepH011InstallYMP() *runner.Step {
 					if _, err := ctx.ExecuteWithCheck(sedCmd, true); err != nil {
 						ctx.Logger.Warn("Failed to set server.port in application.properties: %v", err)
 					} else {
-						ctx.Logger.Info("✓ server.port=%d in %s", port, appPropsFile)
+						ctx.Logger.Info("OK: server.port=%d in %s", port, appPropsFile)
 					}
 				}
 
@@ -165,7 +183,7 @@ func StepH011InstallYMP() *runner.Step {
 						)
 						ctx.Execute(sedCmd, true)
 					}
-					ctx.Logger.Info("✓ DB ports configured in %s (YASDB_PORT=%d)", dbPropsFile, dbPort)
+					ctx.Logger.Info("OK: DB ports configured in %s (YASDB_PORT=%d)", dbPropsFile, dbPort)
 				}
 			}
 
@@ -181,7 +199,7 @@ func StepH011InstallYMP() *runner.Step {
 					if _, err := ctx.ExecuteWithCheck(setModeCmd, true); err != nil {
 						return fmt.Errorf("failed to set YASDB_MODE=mysql in db.properties: %w", err)
 					}
-					ctx.Logger.Info("✓ YASDB_MODE set to mysql in %s", dbPropsFile)
+					ctx.Logger.Info("OK: YASDB_MODE set to mysql in %s", dbPropsFile)
 				} else {
 					return fmt.Errorf("db.properties not found at %s, cannot set YASDB_MODE", dbPropsFile)
 				}
@@ -215,7 +233,7 @@ func StepH011InstallYMP() *runner.Step {
 						ctx.Executor.Host(),
 						ctx.CurrentStepID,
 						"",
-						fmt.Sprintf("su - %s -c 'sh %s install --db %s --path %s'", ympUser, ympSh, dbPath, icDir),
+						fmt.Sprintf("sh %s install --db %s --path %s", ympSh, dbPath, icDir),
 						result.GetStdout(),
 						result.GetStderr(),
 						result.GetExitCode(),
@@ -251,7 +269,7 @@ func StepH011InstallYMP() *runner.Step {
 					if _, err := ctx.ExecuteWithCheck(configurePortCmd, true); err != nil {
 						ctx.Logger.Warn("Failed to configure YMP Web service port in application.properties: %v", err)
 					} else {
-						ctx.Logger.Info("✓ YMP Web service port configured to %d", port)
+						ctx.Logger.Info("OK: YMP Web service port configured to %d", port)
 					}
 				} else {
 					ctx.Logger.Warn("application.properties not found at %s, port configuration skipped", appPropsFile)
@@ -270,7 +288,7 @@ func StepH011InstallYMP() *runner.Step {
 					if _, err := ctx.ExecuteWithCheck(configureDBPortCmd, true); err != nil {
 						ctx.Logger.Warn("Failed to configure database port in db.properties: %v", err)
 					} else {
-						ctx.Logger.Info("✓ Database port configured to %d in db.properties", dbPort)
+						ctx.Logger.Info("OK: Database port configured to %d in db.properties", dbPort)
 					}
 				} else {
 					ctx.Logger.Warn("db.properties not found at %s, port configuration skipped", dbPropsFile)
@@ -287,7 +305,7 @@ func StepH011InstallYMP() *runner.Step {
 					if _, err := ctx.ExecuteWithCheck(configureURLCmd, true); err != nil {
 						ctx.Logger.Warn("Failed to configure database URL in application.properties: %v", err)
 					} else {
-						ctx.Logger.Info("✓ Database URL configured to port %d in application.properties", dbPort)
+						ctx.Logger.Info("OK: Database URL configured to port %d in application.properties", dbPort)
 					}
 				}
 
@@ -313,7 +331,7 @@ func StepH011InstallYMP() *runner.Step {
 						if _, err := ctx.ExecuteWithCheck(configureYasomCmd, true); err != nil {
 							ctx.Logger.Warn("Failed to configure yasom port in profile.toml: %v", err)
 						} else {
-							ctx.Logger.Info("✓ yasom port configured to %d in profile.toml", yasomPort)
+							ctx.Logger.Info("OK: yasom port configured to %d in profile.toml", yasomPort)
 						}
 					}
 
@@ -325,7 +343,7 @@ func StepH011InstallYMP() *runner.Step {
 						if _, err := ctx.ExecuteWithCheck(configureYasagentCmd, true); err != nil {
 							ctx.Logger.Warn("Failed to configure yasagent port in profile.toml: %v", err)
 						} else {
-							ctx.Logger.Info("✓ yasagent port configured to %d in profile.toml", yasagentPort)
+							ctx.Logger.Info("OK: yasagent port configured to %d in profile.toml", yasagentPort)
 						}
 					}
 				} else {
@@ -354,7 +372,7 @@ func StepH011InstallYMP() *runner.Step {
 					ctx.Logger.Info("Please manually restart YMP service to apply new port configuration")
 					ctx.Logger.Info("Note: Database port may need to be reconfigured in cluster profile.toml")
 				} else {
-					ctx.Logger.Info("✓ YMP service restarted with new port configuration")
+					ctx.Logger.Info("OK: YMP service restarted with new port configuration")
 				}
 			}
 
@@ -371,13 +389,13 @@ func StepH011InstallYMP() *runner.Step {
 			if result == nil || result.GetExitCode() != 0 {
 				ctx.Logger.Warn("ymp.env not found at %s (may use alternative path)", envFile)
 			} else {
-				ctx.Logger.Info("✓ ymp.env found: %s", envFile)
+				ctx.Logger.Info("OK: ymp.env found: %s", envFile)
 			}
 
 			// 检查 YMP 进程
 			result, _ = ctx.Execute(fmt.Sprintf("ps -ef | grep -v grep | grep %s | grep ymp", ympUser), false)
 			if result != nil && result.GetExitCode() == 0 {
-				ctx.Logger.Info("✓ YMP process detected")
+				ctx.Logger.Info("OK: YMP process detected")
 			}
 
 			return nil

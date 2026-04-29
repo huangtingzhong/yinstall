@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	// OS parameters
+	// OS 子命令参数
 	osUser          string
 	osUserUID       int
 	osGroup         string
@@ -31,19 +31,20 @@ var (
 	osKernelArgsEnable bool
 	osKernelArgs       string
 
-	// Hugepages parameters
+	// Hugepages 参数
 	osHugepagesEnable bool
 
-	// Align sysctl shmmax/shmall with DB memory percent when set (standalone OS); -1 = omit (use 90%% RAM sizing)
+	// 单机 OS 下：若设置则让 sysctl 的 shmmax/shmall 与 DB memory percent 对齐；-1 表示不写（按 90%% 内存估算）
 	osDbMemoryPercent int
 
-	osYumMode       string
-	osISODevice     string
-	osISOMountpoint string
-	osYumRepoFile   string
-	osDepsPkgs           string
-	osToolsPkgs          string
+	osYumMode             string
+	osISODevice           string
+	osISOMountpoint       string
+	osYumRepoFile         string
+	osDepsPkgs            string
+	osToolsPkgs           string
 	osIgnoreInstallErrors bool
+	osZstdSourceTarball   string
 
 	osFirewallMode  string
 	osFirewallPorts string
@@ -57,29 +58,29 @@ var (
 	yacUdevGroup         string
 	yacUdevMode          string
 
-	// Local disk parameters
+	// 本地磁盘参数
 	osLocalDisks []string
 	osLocalVG    string
 	osLocalLV    string
 	osLocalMount string
 
-	// YAC disk group parameters
-	yacSystemDG      string // format: dgname:disk1,disk2,...
-	yacDataDG        string // format: dgname:disk1,disk2,...
-	yacArchDG        string // format: dgname:disk1,disk2,... (optional, defaults to datadg)
-	yacArchDGEnable  bool   // enable independent ArchDG creation
+	// YAC diskgroup 参数
+	yacSystemDG     string // 格式：dgname:disk1,disk2,...
+	yacDataDG       string // 格式：dgname:disk1,disk2,...
+	yacArchDG       string // 格式：dgname:disk1,disk2,...（可选，默认跟随 datadg）
+	yacArchDGEnable bool   // 是否启用独立 ArchDG 创建
 
-	// YAC SCAN parameters
-	yacScanIPs string // comma-separated SCAN IPs for local SCAN mode
+	// YAC SCAN 参数
+	yacScanIPs string // local SCAN 模式下逗号分隔的 SCAN IP
 
-	// YAC auto-discovery parameters
-	yacDiskPattern      string // disk path pattern for filtering (e.g., "/dev/sd[c-z]")
-	yacExcludeDisks     string // comma-separated list of disks to exclude (default: "/dev/sda,/dev/sdb")
-	yacSystemdgSizeMax  string // max size for systemdg classification (default: "10G")
-	yacAutoConfirm      bool   // skip user confirmation for auto-discovered disks
+	// YAC 自动发现磁盘参数
+	yacDiskPattern     string // 过滤磁盘路径的模式（例如 "/dev/sd[c-z]"）
+	yacExcludeDisks    string // 排除磁盘列表，逗号分隔（默认 "/dev/sda,/dev/sdb"）
+	yacSystemdgSizeMax string // systemdg 分类的最大容量阈值（默认 "10G"）
+	yacAutoConfirm     bool   // 自动发现磁盘后跳过人工确认
 
-	// YAC mode parameter
-	yacMode bool // manually enable YAC mode (auto-enabled when targets >= 2)
+	// YAC 模式开关（targets>=2 时也会自动启用）
+	yacMode bool // 手动启用 YAC 模式（targets>=2 时自动启用）
 )
 
 var osCmd = &cobra.Command{
@@ -99,7 +100,7 @@ var osCmd = &cobra.Command{
 }
 
 func init() {
-	// OS user/group parameters
+	// OS 用户/组参数
 	osCmd.Flags().StringVar(&osUser, "os-user", "yashan", "Product user name")
 	osCmd.Flags().IntVar(&osUserUID, "os-user-uid", 701, "User UID")
 	osCmd.Flags().StringVar(&osGroup, "os-group", "yashan", "Primary group name")
@@ -110,36 +111,37 @@ func init() {
 	osCmd.Flags().StringVar(&osUserPassword, "os-user-password", "aaBB11@@33$$", "User password (yashan default)")
 	osCmd.Flags().BoolVar(&osSudoersEnable, "os-sudoers-enable", true, "Enable sudoers configuration")
 
-	// Timezone/time parameters
+	// 时区/时间参数
 	osCmd.Flags().StringVar(&osTimezone, "os-timezone", "Asia/Shanghai", "System timezone")
 	osCmd.Flags().StringVar(&osNTPServer, "os-ntp-server", "", "NTP server address (empty to skip NTP configuration)")
 
-	// Kernel parameters
+	// 内核参数
 	osCmd.Flags().StringVar(&osSysctlFile, "os-sysctl-file", "/etc/sysctl.d/yashandb.conf", "Sysctl config file path")
 	osCmd.Flags().StringVar(&osLimitsFile, "os-limits-file", "/etc/security/limits.conf", "Limits config file path")
 	osCmd.Flags().BoolVar(&osKernelArgsEnable, "os-kernel-args-enable", false, "Enable kernel args configuration")
 	osCmd.Flags().StringVar(&osKernelArgs, "os-kernel-args", "transparent_hugepage=never elevator=deadline LANG=en_US.UTF-8", "Kernel boot arguments")
 
-	// Hugepages parameters
+	// Hugepages 参数
 	osCmd.Flags().BoolVar(&osHugepagesEnable, "os-hugepages-enable", false, "Enable huge pages configuration (memory size based on db-memory-percent)")
 
-	// Same name as db install: set (1-100) to size shmmax/shmall from MemTotal; omit on standalone os to use 90%% RAM for shmmax and db_memory_percent=90 for hugepages.
+	// 与 db install 同名：填 1-100 则按 MemTotal 估算 shmmax/shmall；standalone os 省略时使用 90%% RAM 作为 shmmax，且 hugepages 使用 db_memory_percent=90。
 	osCmd.Flags().IntVar(&osDbMemoryPercent, "db-memory-percent", -1, "Planned DB memory percent (1-100) for shared memory sizing; omit on standalone os to use 90%% physical RAM")
 
-	// YUM parameters
+	// YUM/repo 参数
 	osCmd.Flags().StringVar(&osYumMode, "os-yum-mode", "none", "YUM mode (online/local-iso/none)")
 	osCmd.Flags().StringVar(&osISODevice, "os-iso-device", "/dev/cdrom", "ISO device or file path")
 	osCmd.Flags().StringVar(&osISOMountpoint, "os-iso-mountpoint", "/media", "ISO mount point")
 	osCmd.Flags().StringVar(&osYumRepoFile, "os-yum-repo-file", "/etc/yum.repos.d/local.repo", "Local repo file path")
-	osCmd.Flags().StringVar(&osDepsPkgs, "os-deps-db-packages", "libzstd zlib lz4 openssl openssl-devel libnsl libaio", "DB dependency packages")
+	osCmd.Flags().StringVar(&osDepsPkgs, "os-deps-db-packages", "libzstd zlib lz4 openssl openssl-devel libaio", "DB dependency packages")
 	osCmd.Flags().StringVar(&osToolsPkgs, "os-deps-tools-packages", "zip bind-utils sysstat telnet iotop openssh-clients net-tools unzip libvncserver tigervnc-server device-mapper-multipath dstat lsof psmisc redhat-lsb-core parted xhost strace showmount expect tcl sysfsutils gdisk rsync lvm2 qperf chrony tmux bpftrace perf", "Common tools packages (empty to skip)")
 	osCmd.Flags().BoolVar(&osIgnoreInstallErrors, "os-ignore-install-errors", false, "Ignore package installation errors and continue (only show warnings)")
+	osCmd.Flags().StringVar(&osZstdSourceTarball, "os-zstd-source-tarball", "", "Explicit zstd source tarball path or filename (zstd-x.y.z.tar.gz); empty=auto-discover under local/remote software dirs (EL7 libzstd fallback)")
 
-	// Firewall parameters
+	// 防火墙参数
 	osCmd.Flags().StringVar(&osFirewallMode, "os-firewall-mode", "disable", "Firewall mode (keep/disable/open-ports)")
 	osCmd.Flags().StringVar(&osFirewallPorts, "os-firewall-ports", "", "Ports to open (comma-separated)")
 
-	// YAC multipath parameters
+	// YAC multipath 参数
 	osCmd.Flags().BoolVar(&yacMultipathEnable, "yac-multipath-enable", false, "Enable multipath configuration")
 	osCmd.Flags().StringVar(&yacMultipathPkgs, "yac-multipath-packages", "device-mapper-multipath", "Multipath packages")
 	osCmd.Flags().StringVar(&yacMultipathConf, "yac-multipath-conf", "/etc/multipath.conf", "Multipath config file")
@@ -149,30 +151,30 @@ func init() {
 	osCmd.Flags().StringVar(&yacUdevGroup, "yac-udev-group", "YASDBA", "Disk group")
 	osCmd.Flags().StringVar(&yacUdevMode, "yac-udev-mode", "0666", "Disk mode")
 
-	// Local disk parameters
+	// 本地磁盘参数
 	osCmd.Flags().StringSliceVar(&osLocalDisks, "os-local-disk", nil, "Local disks for data directory (e.g., /dev/sdb,/dev/sdc)")
 	osCmd.Flags().StringVar(&osLocalVG, "os-local-vg", "yasvg", "Volume group name")
 	osCmd.Flags().StringVar(&osLocalLV, "os-local-lv", "yaslv", "Logical volume name")
 	osCmd.Flags().StringVar(&osLocalMount, "os-local-mount", "/data", "Mount point for data directory")
 
-	// YAC disk group parameters
+	// YAC diskgroup 参数
 	osCmd.Flags().StringVar(&yacSystemDG, "yac-systemdg", "", "System diskgroup (format: dgname:/dev/sda,/dev/sdb)")
 	osCmd.Flags().StringVar(&yacDataDG, "yac-datadg", "", "Data diskgroup (format: dgname:/dev/sdc,/dev/sdd)")
 	osCmd.Flags().StringVar(&yacArchDG, "yac-archdg", "", "Archive diskgroup (format: dgname:/dev/sde, optional, defaults to datadg)")
 	osCmd.Flags().BoolVar(&yacArchDGEnable, "yac-archdg-enable", false, "Enable independent ArchDG creation (separate archive diskgroup)")
 	osCmd.Flags().StringVar(&yacScanIPs, "yac-scan-ips", "", "SCAN IP addresses for local SCAN mode (comma-separated, empty=auto-allocate)")
 
-	// YAC auto-discovery parameters
+	// YAC 自动发现磁盘参数
 	osCmd.Flags().StringVar(&yacDiskPattern, "yac-disk-pattern", "", "Disk path pattern for filtering (e.g., '/dev/sd[c-z]', empty=all disks)")
 	osCmd.Flags().StringVar(&yacExcludeDisks, "yac-exclude-disks", "/dev/sda,/dev/sdb", "Disks to exclude from auto-discovery (comma-separated)")
 	osCmd.Flags().StringVar(&yacSystemdgSizeMax, "yac-systemdg-size-max", "10G", "Max size threshold for systemdg classification")
 	osCmd.Flags().BoolVar(&yacAutoConfirm, "yac-auto-confirm", false, "Skip user confirmation for auto-discovered disks")
 
-	// YAC mode parameter
+	// YAC 模式开关
 	osCmd.Flags().BoolVar(&yacMode, "yac-mode", false, "Enable YAC mode (auto-enabled when targets >= 2)")
 }
 
-// HostInfo stores host information
+// HostInfo 保存主机信息。
 type HostInfo struct {
 	Host     string
 	Executor ssh.Executor
@@ -186,7 +188,7 @@ func runOS(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// If --targets is not specified, default to local execution.
+	// 未指定 --targets 时，默认本地执行。
 	if len(flags.Targets) == 0 {
 		flags.Local = true
 		flags.Targets = []string{"localhost"}
@@ -194,8 +196,8 @@ func runOS(cmd *cobra.Command, args []string) error {
 		flags.Local = false
 	}
 
-	// In local mode, do not inject default os-user-password unless explicitly set by user.
-	// This avoids unnecessary "login credential" parameters in local execution.
+	// 本地模式下，除非用户显式指定，否则不注入默认的 os-user-password，
+	// 避免在 local 执行时出现不必要的“登录凭据”参数。
 	if flags.Local && !cmd.Flags().Changed("os-user-password") {
 		osUserPassword = ""
 	}
@@ -214,7 +216,7 @@ func runOS(cmd *cobra.Command, args []string) error {
 	logger.Info("Starting OS preparation (RunID: %s)", rid)
 	logger.Info("Targets: %v", flags.Targets)
 
-	// Determine YAC mode: auto-enable when targets >= 2, or manually enabled
+	// 判定 YAC 模式：targets >= 2 时自动启用，或由参数手动启用
 	isYACMode := yacMode || len(flags.Targets) >= 2
 	if isYACMode {
 		logger.Info("YAC mode: enabled (%d hosts)", len(flags.Targets))
@@ -250,7 +252,7 @@ func runOS(cmd *cobra.Command, args []string) error {
 		logger.Info("  [%s] %s", s.ID, s.Name)
 	}
 
-	// Phase 1: Connectivity check
+	// 阶段 1：连通性检查
 	var hostInfos []*HostInfo
 	var connectivityStep *runner.Step
 	var otherSteps []*runner.Step
@@ -263,7 +265,7 @@ func runOS(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Track step index for console output
+	// 维护 step index（用于终端输出）
 	stepIndex := 0
 	totalSteps := len(steps)
 
@@ -295,6 +297,10 @@ func runOS(cmd *cobra.Command, args []string) error {
 			result := runner.RunStep(connectivityStep, ctx)
 			if !result.Success && !result.Skipped {
 				executor.Close()
+				if flags.Precheck {
+					// precheck 模式下继续收集其它主机的问题
+					continue
+				}
 				return fmt.Errorf("connectivity check failed for %s: %w", target, result.Error)
 			}
 
@@ -315,7 +321,7 @@ func runOS(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Phase 2: Execute steps
+	// 阶段 2：执行 steps
 	if len(otherSteps) > 0 {
 		logger.Info("======== Phase 2: Executing steps ========")
 	}
@@ -342,6 +348,7 @@ func runOS(cmd *cobra.Command, args []string) error {
 	}
 
 	var lastErr error
+	precheckFailed := false
 
 	// 执行 Global 步骤（跨节点，仅执行一次）
 	if len(globalSteps) > 0 {
@@ -369,6 +376,10 @@ func runOS(cmd *cobra.Command, args []string) error {
 			result := runner.RunStep(step, ctx)
 			if !result.Success && !result.Skipped {
 				logger.Error("Step %s failed: %v", step.ID, result.Error)
+				if flags.Precheck {
+					precheckFailed = true
+					continue
+				}
 				lastErr = result.Error
 				break
 			}
@@ -395,8 +406,8 @@ func runOS(cmd *cobra.Command, args []string) error {
 					LocalSoftwareDirs: flags.LocalSoftwareDirs,
 					RemoteSoftwareDir: flags.RemoteSoftwareDir,
 					ForceAll:          flags.ForceAll,
-				ForceSteps:        flags.ForceSteps,
-				ForceDeleteUser:   flags.ForceDeleteUser,
+					ForceSteps:        flags.ForceSteps,
+					ForceDeleteUser:   flags.ForceDeleteUser,
 					StepIndex:         stepIndex + i,
 					TotalSteps:        totalSteps,
 				}
@@ -404,6 +415,10 @@ func runOS(cmd *cobra.Command, args []string) error {
 				result := runner.RunStep(step, ctx)
 				if !result.Success && !result.Skipped {
 					logger.Error("Step %s failed: %v", step.ID, result.Error)
+					if flags.Precheck {
+						precheckFailed = true
+						continue
+					}
 					lastErr = result.Error
 					break
 				}
@@ -424,6 +439,9 @@ func runOS(cmd *cobra.Command, args []string) error {
 		logger.Info("Check debug logs at: %s", logger.DebugLogPath())
 		return lastErr
 	}
+	if flags.Precheck && precheckFailed {
+		return fmt.Errorf("precheck failed")
+	}
 
 	logger.Info("OS preparation completed successfully")
 	return nil
@@ -431,54 +449,55 @@ func runOS(cmd *cobra.Command, args []string) error {
 
 func buildOSParams(isYACMode bool, targetCount int) map[string]interface{} {
 	return map[string]interface{}{
-		"os_user":                 osUser,
-		"os_user_uid":             osUserUID,
-		"os_group":                osGroup,
-		"os_group_gid":            osGroupGID,
-		"os_dba_group":            osDBAGroup,
-		"os_dba_group_gid":        osDBAGroupGID,
-		"os_user_shell":           osUserShell,
-		"os_user_password":        osUserPassword,
-		"os_sudoers_enable":       osSudoersEnable,
-		"os_timezone":             osTimezone,
-		"os_ntp_server":           osNTPServer,
-		"os_sysctl_file":          osSysctlFile,
-		"os_limits_file":          osLimitsFile,
-		"os_kernel_args_enable":   osKernelArgsEnable,
-		"os_kernel_args":          osKernelArgs,
-		"os_hugepages_enable":     osHugepagesEnable,
-		"os_yum_mode":             osYumMode,
-		"os_iso_device":           osISODevice,
-		"os_iso_mountpoint":       osISOMountpoint,
-		"os_yum_repo_file":        osYumRepoFile,
-		"os_deps_db_packages":     osDepsPkgs,
-		"os_deps_tools_packages":  osToolsPkgs,
+		"os_user":                  osUser,
+		"os_user_uid":              osUserUID,
+		"os_group":                 osGroup,
+		"os_group_gid":             osGroupGID,
+		"os_dba_group":             osDBAGroup,
+		"os_dba_group_gid":         osDBAGroupGID,
+		"os_user_shell":            osUserShell,
+		"os_user_password":         osUserPassword,
+		"os_sudoers_enable":        osSudoersEnable,
+		"os_timezone":              osTimezone,
+		"os_ntp_server":            osNTPServer,
+		"os_sysctl_file":           osSysctlFile,
+		"os_limits_file":           osLimitsFile,
+		"os_kernel_args_enable":    osKernelArgsEnable,
+		"os_kernel_args":           osKernelArgs,
+		"os_hugepages_enable":      osHugepagesEnable,
+		"os_yum_mode":              osYumMode,
+		"os_iso_device":            osISODevice,
+		"os_iso_mountpoint":        osISOMountpoint,
+		"os_yum_repo_file":         osYumRepoFile,
+		"os_deps_db_packages":      osDepsPkgs,
+		"os_deps_tools_packages":   osToolsPkgs,
 		"os_ignore_install_errors": osIgnoreInstallErrors,
-		"os_firewall_mode":        osFirewallMode,
-		"os_firewall_ports":       osFirewallPorts,
-		"yac_mode":                isYACMode,
-		"yac_target_count":        targetCount,
-		"yac_multipath_enable":    yacMultipathEnable,
-		"yac_multipath_packages":  yacMultipathPkgs,
-		"yac_multipath_conf":      yacMultipathConf,
-		"yac_multipath_auto_wwid": yacMultipathAutoWWID,
-		"yac_udev_rules_file":     yacUdevRulesFile,
-		"yac_udev_owner":          yacUdevOwner,
-		"yac_udev_group":          yacUdevGroup,
-		"yac_udev_mode":           yacUdevMode,
-		"os_local_disks":          osLocalDisks,
-		"os_local_vg":             osLocalVG,
-		"os_local_lv":             osLocalLV,
-		"os_local_mount":          osLocalMount,
-		"yac_systemdg":            yacSystemDG,
-		"yac_datadg":              yacDataDG,
-		"yac_archdg":              yacArchDG,
-		"yac_archdg_enable":       yacArchDGEnable,
-		"yac_scan_ips":            yacScanIPs,
-		"yac_disk_pattern":        yacDiskPattern,
-		"yac_exclude_disks":       yacExcludeDisks,
-		"yac_systemdg_size_max":   yacSystemdgSizeMax,
-		"yac_auto_confirm":        yacAutoConfirm,
+		"os_zstd_source_tarball":   osZstdSourceTarball,
+		"os_firewall_mode":         osFirewallMode,
+		"os_firewall_ports":        osFirewallPorts,
+		"yac_mode":                 isYACMode,
+		"yac_target_count":         targetCount,
+		"yac_multipath_enable":     yacMultipathEnable,
+		"yac_multipath_packages":   yacMultipathPkgs,
+		"yac_multipath_conf":       yacMultipathConf,
+		"yac_multipath_auto_wwid":  yacMultipathAutoWWID,
+		"yac_udev_rules_file":      yacUdevRulesFile,
+		"yac_udev_owner":           yacUdevOwner,
+		"yac_udev_group":           yacUdevGroup,
+		"yac_udev_mode":            yacUdevMode,
+		"os_local_disks":           osLocalDisks,
+		"os_local_vg":              osLocalVG,
+		"os_local_lv":              osLocalLV,
+		"os_local_mount":           osLocalMount,
+		"yac_systemdg":             yacSystemDG,
+		"yac_datadg":               yacDataDG,
+		"yac_archdg":               yacArchDG,
+		"yac_archdg_enable":        yacArchDGEnable,
+		"yac_scan_ips":             yacScanIPs,
+		"yac_disk_pattern":         yacDiskPattern,
+		"yac_exclude_disks":        yacExcludeDisks,
+		"yac_systemdg_size_max":    yacSystemdgSizeMax,
+		"yac_auto_confirm":         yacAutoConfirm,
 	}
 }
 

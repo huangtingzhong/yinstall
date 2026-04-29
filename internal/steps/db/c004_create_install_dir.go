@@ -7,7 +7,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC001CreateInstallDir Create DB installation directory
+// StepC004CreateInstallDir 创建数据库安装/暂存目录
 func StepC004CreateInstallDir() *runner.Step {
 	return &runner.Step{
 		ID:          "C-004",
@@ -17,9 +17,80 @@ func StepC004CreateInstallDir() *runner.Step {
 		Optional:    false,
 
 		PreCheck: func(ctx *runner.StepContext) error {
-			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
+			stageDir := strings.TrimSpace(ctx.GetParamString("db_stage_dir", "/home/yashan/install"))
 			if stageDir == "" {
 				return fmt.Errorf("db_stage_dir is required")
+			}
+			user := ctx.GetParamString("os_user", "yashan")
+			group := ctx.GetParamString("os_group", "yashan")
+
+			for _, th := range ctx.HostsToRun() {
+				hctx := ctx.ForHost(th)
+				isForce := hctx.IsForceStep()
+
+				// 1) 存在性与类型检查（只读）
+				existRes, err := hctx.Execute(fmt.Sprintf("if [ -e %s ] && [ ! -d %s ]; then echo NOT_DIR; elif [ -d %s ]; then echo IS_DIR; else echo MISSING; fi",
+					stageDir, stageDir, stageDir), false)
+				if err != nil {
+					return fmt.Errorf("failed to check stage directory on %s: %w", th.Host, err)
+				}
+				kind := ""
+				if existRes != nil {
+					kind = strings.TrimSpace(existRes.GetStdout())
+				}
+				if strings.Contains(kind, "NOT_DIR") {
+					return fmt.Errorf("stage directory path exists but is not a directory on %s: %s", th.Host, stageDir)
+				}
+
+				// 2) 目录缺失则在 apply 阶段创建（全新安装时不存在是常态，不作为 warn 上报）
+				if strings.Contains(kind, "MISSING") {
+					hctx.Logger.Info("C-004 precheck: stage path %s absent (normal for fresh install); apply will mkdir and chown to %s:%s", stageDir, user, group)
+					ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+						StepID:      "C-004",
+						StepName:    "Create Install Directory",
+						Host:        th.Host,
+						Severity:    runner.PrecheckSeverityInfo,
+						Code:        "PC.DB.STAGE_DIR.ABSENT",
+						Message:     fmt.Sprintf("stage directory does not exist: %s; apply will mkdir and chown to %s:%s (expected for new install)", stageDir, user, group),
+						Remediation: "no action required for a new installation; pre-create only if you need a fixed layout or permissions before apply",
+					})
+					continue
+				}
+
+				// 3) 目录已存在：属主检查（只读）
+				ownerRes, _ := hctx.Execute(fmt.Sprintf("stat -c '%%U:%%G' %s 2>/dev/null", stageDir), false)
+				owner := ""
+				if ownerRes != nil {
+					owner = strings.TrimSpace(ownerRes.GetStdout())
+				}
+
+				// 若 force：Action 会删目录后重建
+				if isForce {
+					ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+						StepID:      "C-004",
+						StepName:    "Create Install Directory",
+						Host:        th.Host,
+						Severity:    runner.PrecheckSeverityInfo,
+						Code:        "PC.DB.STAGE_DIR.FORCE_RECREATE",
+						Message:     fmt.Sprintf("--force-steps C-004 detected; apply will rm -rf and recreate directory %s (current owner %s)", stageDir, owner),
+						Remediation: "ensure the directory does not contain important files; back up first if needed",
+					})
+					continue
+				}
+
+				// 非 force：属主不一致时在 Action 中 chown -R
+				expected := fmt.Sprintf("%s:%s", user, group)
+				if owner != "" && owner != expected {
+					ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+						StepID:      "C-004",
+						StepName:    "Create Install Directory",
+						Host:        th.Host,
+						Severity:    runner.PrecheckSeverityWarn,
+						Code:        "PC.DB.STAGE_DIR.OWNERSHIP_MISMATCH",
+						Message:     fmt.Sprintf("stage directory exists but ownership mismatches: %s current=%s expected=%s; apply will chown -R to fix", stageDir, owner, expected),
+						Remediation: "if you do not want recursive chown, fix ownership manually or use a dedicated stage directory",
+					})
+				}
 			}
 			return nil
 		},
@@ -64,7 +135,7 @@ func StepC004CreateInstallDir() *runner.Step {
 							continue
 						} else {
 							// 无法获取属主信息，报错提示使用 force
-							return fmt.Errorf("directory %s already exists on %s, use --force %s to delete and recreate", stageDir, th.Host, ctx.CurrentStepID)
+							return fmt.Errorf("directory %s already exists on %s, use -f %s to delete and recreate", stageDir, th.Host, ctx.CurrentStepID)
 						}
 					}
 				}

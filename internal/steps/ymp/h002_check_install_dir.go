@@ -20,9 +20,68 @@ func StepH002CheckInstallDir() *runner.Step {
 		Optional:    false,
 
 		PreCheck: func(ctx *runner.StepContext) error {
-			installDir := ctx.GetParamString("ymp_install_dir", "/opt/ymp")
+			installDir := strings.TrimSpace(ctx.GetParamString("ymp_install_dir", "/opt/ymp"))
 			if installDir == "" {
 				return fmt.Errorf("ymp_install_dir is required")
+			}
+			isForce := ctx.IsForceStep()
+
+			installDir = strings.TrimSuffix(installDir, "/")
+			if !strings.HasPrefix(installDir, "/") {
+				return fmt.Errorf("install directory must be an absolute path: %s", installDir)
+			}
+
+			// Directory existence/content check in precheck (read-only).
+			result, _ := ctx.Execute(fmt.Sprintf("test -d %s", installDir), false)
+			dirExists := result != nil && result.GetExitCode() == 0
+			if dirExists {
+				checkCmd := fmt.Sprintf("find %s -mindepth 1 -maxdepth 1 2>/dev/null | head -1", installDir)
+				r, _ := ctx.Execute(checkCmd, false)
+				hasContent := r != nil && r.GetExitCode() == 0 && strings.TrimSpace(r.GetStdout()) != ""
+				if hasContent {
+					if isForce {
+						ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+							StepID:      "H-002",
+							StepName:    "Check YMP Install Directory",
+							Host:        ctx.Executor.Host(),
+							Severity:    runner.PrecheckSeverityWarn,
+							Code:        "PC.YMP.INSTALL_DIR.FORCE_DELETE",
+							Message:     fmt.Sprintf("YMP install directory exists and is not empty: %s; --force-steps H-002 detected; apply will rm -rf and wipe it", installDir),
+							Remediation: "ensure the directory does not contain important files; back up first or choose a different install path",
+						})
+					} else {
+						ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+							StepID:      "H-002",
+							StepName:    "Check YMP Install Directory",
+							Host:        ctx.Executor.Host(),
+							Severity:    runner.PrecheckSeverityError,
+							Code:        "PC.YMP.INSTALL_DIR.NOT_EMPTY",
+							Message:     fmt.Sprintf("YMP install directory exists and is not empty: %s; apply will fail without force", installDir),
+							Remediation: "empty the directory or use a different path; or use --force-steps H-002 to delete and recreate (this will wipe the directory)",
+						})
+						return fmt.Errorf("installation directory %s already exists and contains files; use -f %s to delete and recreate", installDir, ctx.CurrentStepID)
+					}
+				} else {
+					ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+						StepID:      "H-002",
+						StepName:    "Check YMP Install Directory",
+						Host:        ctx.Executor.Host(),
+						Severity:    runner.PrecheckSeverityInfo,
+						Code:        "PC.YMP.INSTALL_DIR.EMPTY",
+						Message:     fmt.Sprintf("YMP install directory exists and is empty: %s", installDir),
+						Remediation: "",
+					})
+				}
+			} else {
+				ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+					StepID:      "H-002",
+					StepName:    "Check YMP Install Directory",
+					Host:        ctx.Executor.Host(),
+					Severity:    runner.PrecheckSeverityInfo,
+					Code:        "PC.YMP.INSTALL_DIR.MISSING",
+					Message:     fmt.Sprintf("YMP install directory does not exist: %s; apply will create/extract", installDir),
+					Remediation: "",
+				})
 			}
 			return nil
 		},
@@ -82,7 +141,7 @@ func StepH002CheckInstallDir() *runner.Step {
 						if dirContent != "" {
 							errorMsg += fmt.Sprintf(":\n%s", dirContent)
 						}
-						errorMsg += fmt.Sprintf("\nuse --force %s to delete and recreate", ctx.CurrentStepID)
+						errorMsg += fmt.Sprintf("\nuse -f %s to delete and recreate", ctx.CurrentStepID)
 
 						return fmt.Errorf("%s", errorMsg)
 					}
@@ -113,9 +172,8 @@ func StepH002CheckInstallDir() *runner.Step {
 				}
 			}
 
-			ctx.Logger.Info("✓ Installation directory %s is ready", installDir)
+			ctx.Logger.Info("OK: Installation directory %s is ready", installDir)
 			return nil
 		},
 	}
 }
-

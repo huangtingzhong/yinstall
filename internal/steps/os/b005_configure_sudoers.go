@@ -3,10 +3,11 @@ package os
 import (
 	"fmt"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB005ConfigureSudoers Configure sudoers (optional/dangerous)
+// StepB005ConfigureSudoers 配置 sudoers（可选/危险）
 func StepB005ConfigureSudoers() *runner.Step {
 	return &runner.Step{
 		ID:          "B-005",
@@ -54,8 +55,7 @@ func StepB005ConfigureSudoers() *runner.Step {
 
 		PostCheck: func(ctx *runner.StepContext) error {
 			user := ctx.GetParamString("os_user", "yashan")
-			cmd := fmt.Sprintf("su - %s -c 'sudo -n true' 2>/dev/null", user)
-			result, _ := ctx.Execute(cmd, true)
+			result, _ := commonos.ExecuteAsUser(ctx, user, "sudo -n true 2>/dev/null", true)
 			if result.GetExitCode() != 0 {
 				return fmt.Errorf("sudo verification failed for user %s", user)
 			}

@@ -23,7 +23,29 @@ func StepE019ShowClusterStatus() *runner.Step {
 		Optional:    false,
 
 		PreCheck: func(ctx *runner.StepContext) error {
-			// Always run this step
+			// Read-only: ensure envFile & yasboot status command can be executed (do not print full status here).
+			primaryUser := GetPrimaryOSUser(ctx)
+			envFile, err := GetPrimaryEnvFile(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to get primary environment file: %w", err)
+			}
+			if err := SyncPrimaryClusterNameFromEnvFile(ctx, envFile); err != nil {
+				return err
+			}
+			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
+			_, err = commonos.ExecuteAsUserWithEnvCheckCtx(ctx, primaryUser, envFile, fmt.Sprintf("yasboot cluster status -c %s -d", clusterName), true)
+			if err != nil {
+				return fmt.Errorf("yasboot cluster status check failed (precheck): %w", err)
+			}
+			ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+				StepID:      "E-019",
+				StepName:    "Show Cluster Status",
+				Host:        ctx.Executor.Host(),
+				Severity:    runner.PrecheckSeverityInfo,
+				Code:        "PC.STANDBY.DISPLAY.APPLY_ONLY",
+				Message:     "This step displays cluster status during apply; in --precheck it only validates envFile/yasboot availability.",
+				Remediation: "Run during apply or after installation (or run without --precheck) to view real status output.",
+			})
 			return nil
 		},
 
@@ -108,4 +130,3 @@ func StepE019ShowClusterStatus() *runner.Step {
 		},
 	}
 }
-

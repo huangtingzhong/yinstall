@@ -5,10 +5,11 @@ import (
 	"path"
 	"strings"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC009DeployDatabase Create/Deploy database
+// StepC021DeployDatabase 部署数据库集群（yasboot cluster deploy）
 func StepC021DeployDatabase() *runner.Step {
 	return &runner.Step{
 		ID:          "C-021",
@@ -27,20 +28,46 @@ func StepC021DeployDatabase() *runner.Step {
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
 			configPath := path.Join(stageDir, clusterName+".toml")
 
-			// Check cluster config exists
+			// 确认集群配置文件已存在
 			result, _ := ctx.Execute(fmt.Sprintf("test -f %s", configPath), false)
 			if result == nil || result.GetExitCode() != 0 {
-				return fmt.Errorf("cluster config not found at %s", configPath)
+				return skipPrecheckDryRunWhenUpstreamDBArtifactMissing(ctx, fmt.Errorf("cluster config not found at %s", configPath))
 			}
 
-			// Force mode: clean up existing cluster, wipe disk headers, clean password files
-			isForce := ctx.IsForceStep()
-			if isForce {
-				isYACMode := ctx.GetParamBool("yac_mode", false)
-				user := ctx.GetParamString("os_user", "yashan")
-				dataPath := ctx.GetParamString("db_data_path", "/data/yashan/yasdb_data")
-				yasbootPath := path.Join(stageDir, "bin/yasboot")
+			// PreCheck 须只读：此处不做任何清理操作。
+			if ctx.IsForceStep() {
+				ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+					StepID:      "C-021",
+					StepName:    "Deploy Database",
+					Host:        ctx.Executor.Host(),
+					Severity:    runner.PrecheckSeverityInfo,
+					Code:        "PC.DB.FORCE_MODE",
+					Message:     "Detected --force-steps C-021: apply will perform destructive cleanup (cluster clean / shared-disk header wipe / password-file removal). Precheck will not execute these actions.",
+					Remediation: "Confirm this is intended; take backups and double-check disk parameters before applying.",
+				})
+			}
 
+			// 注意：此处不要清理 .yasboot 产物！
+			// 这些文件由 C-020（Install Software）生成，部署阶段仍需要。
+			// 旧安装残留清理应仅在 C-020 的 PreCheck/Action 策略中处理。
+
+			return nil
+		},
+
+		Action: func(ctx *runner.StepContext) error {
+			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
+			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
+			adminPassword := ctx.GetParamString("db_admin_password", "")
+			user := ctx.GetParamString("os_user", "yashan")
+			isYACMode := ctx.GetParamBool("yac_mode", false)
+			isForce := ctx.IsForceStep()
+
+			yasbootPath := path.Join(stageDir, "bin/yasboot")
+			configPath := path.Join(stageDir, clusterName+".toml")
+
+			// force 模式下的破坏性清理（写操作）只能放在 Action，不能放在 PreCheck。
+			if isForce {
+				dataPath := ctx.GetParamString("db_data_path", "/data/yashan/yasdb_data")
 				ctx.Logger.Info("Force mode: cleaning up existing cluster, disk headers and password files")
 
 				// 1. Clean cluster using yasboot
@@ -49,10 +76,10 @@ func StepC021DeployDatabase() *runner.Step {
 				} else {
 					ctx.Logger.Info("Standalone mode: executing yasboot cluster clean on current node")
 				}
-				cleanCmd := fmt.Sprintf("su - %s -c '%s cluster clean -c %s -f --purge'", user, yasbootPath, clusterName)
-				result, _ := ctx.Execute(cleanCmd, true)
-				if result != nil && result.GetExitCode() != 0 {
-					ctx.Logger.Warn("yasboot cluster clean failed (may not exist): %s", result.GetStderr())
+				cleanInner := fmt.Sprintf("%s cluster clean -c %s -f --purge", yasbootPath, clusterName)
+				r, _ := commonos.ExecuteAsUser(ctx, user, cleanInner, true)
+				if r != nil && r.GetExitCode() != 0 {
+					ctx.Logger.Warn("yasboot cluster clean failed (may not exist): %s", r.GetStderr())
 				} else {
 					ctx.Logger.Info("yasboot cluster clean completed")
 				}
@@ -79,7 +106,6 @@ func StepC021DeployDatabase() *runner.Step {
 						}
 					}
 
-					// Deduplicate (archdg may share disk with datadg)
 					seen := make(map[string]bool)
 					var uniqueDisks []string
 					for _, d := range allDisks {
@@ -89,7 +115,7 @@ func StepC021DeployDatabase() *runner.Step {
 						}
 					}
 
-					if len(uniqueDisks) > 0 {
+					if len(uniqueDisks) > 0 && len(ctx.TargetHosts) > 0 {
 						firstHost := ctx.TargetHosts[0]
 						firstHctx := ctx.ForHost(firstHost)
 						ctx.Logger.Info("Wiping YFS metadata on %d shared disks from node %s (shared disks only need one node)...", len(uniqueDisks), firstHost.Host)
@@ -111,9 +137,9 @@ func StepC021DeployDatabase() *runner.Step {
 					for _, th := range ctx.TargetHosts {
 						hctx := ctx.ForHost(th)
 						findCmd := fmt.Sprintf("find %s -type f -name 'yasdb.pwd' 2>/dev/null", dataPath)
-						result, _ := hctx.Execute(findCmd, false)
-						if result != nil && result.GetStdout() != "" {
-							pwdFiles := strings.Split(strings.TrimSpace(result.GetStdout()), "\n")
+						res, _ := hctx.Execute(findCmd, false)
+						if res != nil && res.GetStdout() != "" {
+							pwdFiles := strings.Split(strings.TrimSpace(res.GetStdout()), "\n")
 							for _, pwdFile := range pwdFiles {
 								pwdFile = strings.TrimSpace(pwdFile)
 								if pwdFile != "" {
@@ -126,9 +152,9 @@ func StepC021DeployDatabase() *runner.Step {
 				} else {
 					ctx.Logger.Info("Standalone mode: cleaning password file on current node")
 					findCmd := fmt.Sprintf("find %s -type f -name 'yasdb.pwd' 2>/dev/null", dataPath)
-					result, _ := ctx.Execute(findCmd, false)
-					if result != nil && result.GetStdout() != "" {
-						pwdFiles := strings.Split(strings.TrimSpace(result.GetStdout()), "\n")
+					res, _ := ctx.Execute(findCmd, false)
+					if res != nil && res.GetStdout() != "" {
+						pwdFiles := strings.Split(strings.TrimSpace(res.GetStdout()), "\n")
 						for _, pwdFile := range pwdFiles {
 							pwdFile = strings.TrimSpace(pwdFile)
 							if pwdFile != "" {
@@ -142,48 +168,30 @@ func StepC021DeployDatabase() *runner.Step {
 				ctx.Logger.Info("Force mode cleanup completed")
 			}
 
-			// Note: Do NOT clean up .yasboot files here!
-			// These files are created by C-020 (Install Software) and are required for deployment.
-			// Cleanup of old installations should only happen in C-020 PreCheck.
-
-			return nil
-		},
-
-		Action: func(ctx *runner.StepContext) error {
-			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
-			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
-			adminPassword := ctx.GetParamString("db_admin_password", "")
-			user := ctx.GetParamString("os_user", "yashan")
-			isYACMode := ctx.GetParamBool("yac_mode", false)
-
-			yasbootPath := path.Join(stageDir, "bin/yasboot")
-			configPath := path.Join(stageDir, clusterName+".toml")
-
 			ctx.Logger.Info("Deploying database cluster: %s", clusterName)
 
-			// Build deploy command (mask password in log)
-			// YAC mode requires --yfs-force-create to force create YFS on shared storage
+			// 组装 deploy 命令（日志中掩码密码）
+			// YAC 模式需要 --yfs-force-create，以便在共享盘上强制创建 YFS
 			deployCmd := fmt.Sprintf("%s cluster deploy -t %s -p '***'", yasbootPath, configPath)
 			if isYACMode {
 				deployCmd += " --yfs-force-create"
 				ctx.Logger.Info("YAC mode detected: adding --yfs-force-create parameter")
 			}
-			ctx.Logger.Info("Command: su - %s -c '%s'", user, deployCmd)
+			ctx.Logger.Info("Command (run as %s): %s", user, deployCmd)
 
-			cmd := fmt.Sprintf("cd %s && su - %s -c '%s cluster deploy -t %s -p \"%s\"",
-				stageDir, user, yasbootPath, configPath, adminPassword)
+			inner := fmt.Sprintf("%s cluster deploy -t %s -p %s", yasbootPath, configPath, commonos.ShellSingleQuote(adminPassword))
+			cmd := fmt.Sprintf("cd %s && %s", stageDir, inner)
 			if isYACMode {
 				cmd += " --yfs-force-create"
 			}
-			cmd += "'"
 
-			result, err := ctx.Execute(cmd, true)
+			result, err := commonos.ExecuteAsUser(ctx, user, cmd, true)
 			if err != nil {
 				return fmt.Errorf("failed to deploy database: %w", err)
 			}
 
 			if result != nil && result.GetExitCode() != 0 {
-				// Show detailed error information
+				// 输出详细错误信息便于排障
 				errMsg := result.GetStderr()
 				if errMsg == "" {
 					errMsg = result.GetStdout()
@@ -208,9 +216,8 @@ func StepC021DeployDatabase() *runner.Step {
 
 			yasbootPath := path.Join(stageDir, "bin/yasboot")
 
-			// Check cluster status
-			cmd := fmt.Sprintf("su - %s -c '%s cluster status -c %s -d'", user, yasbootPath, clusterName)
-			result, _ := ctx.Execute(cmd, false)
+			// 检查集群状态输出
+			result, _ := commonos.ExecuteAsUser(ctx, user, fmt.Sprintf("%s cluster status -c %s -d", yasbootPath, clusterName), false)
 
 			if result != nil && result.GetStdout() != "" {
 				ctx.Logger.Info("Cluster status:")
@@ -220,14 +227,14 @@ func StepC021DeployDatabase() *runner.Step {
 					}
 				}
 
-				// Check expected status
+				// 校验关键状态字段
 				if isYACMode {
-					// YAC: check instance_status=open and database_status=normal
+					// YAC：期望出现 open 等正常实例状态
 					if !strings.Contains(result.GetStdout(), "open") {
 						return fmt.Errorf("instance_status is not 'open'")
 					}
 				} else {
-					// Standalone: check database_role=primary and database_status=normal
+					// 单机：期望 database_status 含 normal（尽力检查）
 					if !strings.Contains(result.GetStdout(), "normal") {
 						ctx.Logger.Warn("database_status may not be 'normal'")
 					}

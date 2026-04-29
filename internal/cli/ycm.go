@@ -130,7 +130,7 @@ func runYCM(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// If --targets is not specified, default to local execution.
+	// 未指定 --targets 时，默认本地执行。
 	if len(flags.Targets) == 0 {
 		flags.Local = true
 		flags.Targets = []string{"localhost"}
@@ -138,8 +138,8 @@ func runYCM(cmd *cobra.Command, args []string) error {
 		flags.Local = false
 	}
 
-	// In local mode, do not inject default os-user-password unless explicitly set by user.
-	// This avoids unnecessary "login credential" parameters in local execution.
+	// 本地模式下，除非用户显式指定，否则不注入默认的 os-user-password，
+	// 避免在 local 执行时出现不必要的“登录凭据”参数。
 	if flags.Local && !cmd.Flags().Changed("os-user-password") {
 		ycmOSUserPassword = ""
 	}
@@ -236,6 +236,7 @@ func runYCM(cmd *cobra.Command, args []string) error {
 
 	if connectivityStep != nil {
 		logger.Info("======== Phase 1: Connectivity check ========")
+		precheckFailed := false
 		for _, target := range flags.Targets {
 			executor, err := createExecutor(target, flags, logger, "")
 			if err != nil {
@@ -262,6 +263,10 @@ func runYCM(cmd *cobra.Command, args []string) error {
 			result := runner.RunStep(connectivityStep, ctx)
 			if !result.Success && !result.Skipped {
 				executor.Close()
+				if flags.Precheck {
+					precheckFailed = true
+					continue
+				}
 				return fmt.Errorf("connectivity check failed for %s: %w", target, result.Error)
 			}
 
@@ -270,6 +275,9 @@ func runYCM(cmd *cobra.Command, args []string) error {
 				Executor: executor,
 				OSInfo:   ctx.OSInfo,
 			})
+		}
+		if flags.Precheck && precheckFailed {
+			logger.Error("Connectivity precheck has failures; continuing to collect all issues.")
 		}
 		stepIndex++
 	} else {
@@ -305,6 +313,7 @@ func runYCM(cmd *cobra.Command, args []string) error {
 	}
 
 	var lastErr error
+	precheckFailed := false
 
 	// OS 步骤：遍历所有节点执行
 	if len(osStepsToRun) > 0 {
@@ -323,8 +332,8 @@ func runYCM(cmd *cobra.Command, args []string) error {
 					LocalSoftwareDirs: flags.LocalSoftwareDirs,
 					RemoteSoftwareDir: flags.RemoteSoftwareDir,
 					ForceAll:          flags.ForceAll,
-				ForceSteps:        flags.ForceSteps,
-				ForceDeleteUser:   flags.ForceDeleteUser,
+					ForceSteps:        flags.ForceSteps,
+					ForceDeleteUser:   flags.ForceDeleteUser,
 					StepIndex:         stepIndex + i,
 					TotalSteps:        totalSteps,
 				}
@@ -333,6 +342,10 @@ func runYCM(cmd *cobra.Command, args []string) error {
 				// 如果步骤失败（不是跳过），即使是 Optional 的也要退出
 				if !result.Success && !result.Skipped {
 					logger.Error("Step %s failed: %v", step.ID, result.Error)
+					if flags.Precheck {
+						precheckFailed = true
+						continue
+					}
 					lastErr = result.Error
 					break
 				}
@@ -362,8 +375,8 @@ func runYCM(cmd *cobra.Command, args []string) error {
 					LocalSoftwareDirs: flags.LocalSoftwareDirs,
 					RemoteSoftwareDir: flags.RemoteSoftwareDir,
 					ForceAll:          flags.ForceAll,
-				ForceSteps:        flags.ForceSteps,
-				ForceDeleteUser:   flags.ForceDeleteUser,
+					ForceSteps:        flags.ForceSteps,
+					ForceDeleteUser:   flags.ForceDeleteUser,
 					StepIndex:         stepIndex + i,
 					TotalSteps:        totalSteps,
 				}
@@ -372,6 +385,10 @@ func runYCM(cmd *cobra.Command, args []string) error {
 				// 如果步骤失败（不是跳过），即使是 Optional 的也要退出
 				if !result.Success && !result.Skipped {
 					logger.Error("Step %s failed: %v", step.ID, result.Error)
+					if flags.Precheck {
+						precheckFailed = true
+						continue
+					}
 					lastErr = result.Error
 					break
 				}
@@ -387,6 +404,9 @@ func runYCM(cmd *cobra.Command, args []string) error {
 		logger.Error("YCM installation completed with errors")
 		logger.Info("Check debug logs at: %s", logger.DebugLogPath())
 		return lastErr
+	}
+	if flags.Precheck && precheckFailed {
+		return fmt.Errorf("precheck failed")
 	}
 
 	// 输出访问信息
@@ -416,7 +436,7 @@ func buildYCMParams(flags GlobalFlags) map[string]interface{} {
 		params["os_group"] = ycmOSGroup
 	}
 
-	// Override OS ignore install errors if specified
+	// 若用户指定，则覆盖 OS ignore install errors 参数
 	params["os_ignore_install_errors"] = ycmIgnoreInstallErrors
 	// YUM 模式及 ISO 参数覆盖（与 db --os-yum-mode 对齐）
 	params["os_yum_mode"] = ycmOSYumMode

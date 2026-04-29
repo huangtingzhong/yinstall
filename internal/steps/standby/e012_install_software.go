@@ -26,7 +26,7 @@ func StepE012InstallSoftware() *runner.Step {
 			hostsAddFile := fmt.Sprintf("%s/hosts_add.toml", stageDir)
 			result, _ := ctx.Execute(fmt.Sprintf("test -f %s", hostsAddFile), false)
 			if result == nil || result.GetExitCode() != 0 {
-				return fmt.Errorf("hosts_add.toml not found, run E-011 first")
+				return runner.SkipPrecheckDryRunWhenUpstreamArtifactMissing(ctx, fmt.Errorf("hosts_add.toml not found, run E-011 first"))
 			}
 
 			return nil

@@ -9,7 +9,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC004DiskCheck Validate shared disk visibility and permissions
+// StepC012DiskCheck 校验共享盘对各节点可见性及权限
 func StepC012DiskCheck() *runner.Step {
 	return &runner.Step{
 		ID:          "C-012",
@@ -164,7 +164,7 @@ func StepC012DiskCheck() *runner.Step {
 					}
 				}
 
-				ctx.Logger.Info("✓ Multipath mapping consistency validated across all nodes")
+				ctx.Logger.Info("OK: Multipath mapping consistency validated across all nodes")
 
 				// 第四步：更新磁盘组参数（raw → /dev/mapper/）
 				ctx.Logger.Info("Updating diskgroup parameters with multipath devices...")
@@ -389,9 +389,9 @@ func StepC012DiskCheck() *runner.Step {
 					}
 
 					if disk != realDevice {
-						hctx.Logger.Info("  ✓ %s (real: %s): %s:%s, perm %s", disk, realDevice, actualUser, actualGroup, perm)
+						hctx.Logger.Info("  OK: %s (real: %s): %s:%s, perm %s", disk, realDevice, actualUser, actualGroup, perm)
 					} else {
-						hctx.Logger.Info("  ✓ %s: %s:%s, perm %s", disk, actualUser, actualGroup, perm)
+						hctx.Logger.Info("  OK: %s: %s:%s, perm %s", disk, actualUser, actualGroup, perm)
 					}
 				}
 				hctx.Logger.Info("Expected ownership: %s:%s, permissions: %s", user, group, expectedPerm)

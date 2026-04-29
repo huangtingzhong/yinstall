@@ -8,8 +8,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// yashanCharacterSetCanonical maps normalized keys (uppercase, no hyphen) to
-// the exact CHARACTER_SET value written in yashandb.toml (YashanDB supported sets).
+// yashanCharacterSetCanonical：规范化键（大写、无连字符）→ 写入 yashandb.toml 的 CHARACTER_SET 精确取值（崖山支持的字符集）。
 var yashanCharacterSetCanonical = map[string]string{
 	"UTF8":    "UTF8",
 	"GBK":     "GBK",
@@ -23,7 +22,7 @@ var yashanCharacterSetCanonical = map[string]string{
 
 const yashanCharacterSetList = "UTF8, GBK, ASCII, GB18030, BINARY, LATIN1, UTF8MB3, UTF8MB4"
 
-// normalizeCharacterSetKey trims, uppercases, and removes hyphens for lookup (e.g. UTF-8 -> UTF8).
+// normalizeCharacterSetKey 去空白、转大写并去掉连字符，供查表（如 UTF-8 → UTF8）。
 func normalizeCharacterSetKey(raw string) string {
 	s := strings.TrimSpace(raw)
 	s = strings.ToUpper(s)
@@ -43,7 +42,7 @@ func canonicalYashanCharacterSet(raw string) (string, error) {
 	return c, nil
 }
 
-// StepC006SetCharacterSet Set character set in cluster config
+// StepC015SetCharacterSet 在集群 TOML 中设置字符集
 func StepC015SetCharacterSet() *runner.Step {
 	return &runner.Step{
 		ID:          "C-015",
@@ -76,13 +75,13 @@ func StepC015SetCharacterSet() *runner.Step {
 
 			ctx.Logger.Info("Setting character set to: %s", charset)
 
-			// Modify config file
+			// 修改集群配置中的 CHARACTER_SET
 			cmd := fmt.Sprintf(`sed -i 's/CHARACTER_SET.*/CHARACTER_SET = "%s"/' %s`, charset, configPath)
 			if _, err := ctx.ExecuteWithCheck(cmd, false); err != nil {
 				return fmt.Errorf("failed to set character set: %w", err)
 			}
 
-			// Verify change
+			// 复查配置行
 			result, _ := ctx.Execute(fmt.Sprintf("grep CHARACTER_SET %s", configPath), false)
 			if result != nil {
 				ctx.Logger.Info("Config updated: %s", result.GetStdout())

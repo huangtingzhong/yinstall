@@ -7,7 +7,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC007TuneYFSParams Tune YFS parameters for YAC
+// StepC019TuneYFSParams 为 YAC 集群调优 YFS 参数
 func StepC019TuneYFSParams() *runner.Step {
 	return &runner.Step{
 		ID:          "C-019",
@@ -54,7 +54,7 @@ func StepC019TuneYFSParams() *runner.Step {
 			ctx.Logger.Info("  SHM_POOL_SIZE: %s", shmPoolSize)
 			ctx.Logger.Info("  MAXINSTANCES: %d", maxInstances)
 
-			// Apply tuning parameters
+			// 应用调优参数
 			cmds := []string{
 				fmt.Sprintf(`sed -i 's/au_size.*/au_size = "%s"/' %s`, auSize, configPath),
 				fmt.Sprintf(`sed -i 's/REDO_FILE_SIZE.*/REDO_FILE_SIZE = "%s"/' %s`, redoFileSize, configPath),
@@ -68,7 +68,7 @@ func StepC019TuneYFSParams() *runner.Step {
 				}
 			}
 
-			// Add MAXINSTANCES if not exists
+			// 若不存在则追加 MAXINSTANCES
 			result, _ := ctx.Execute(fmt.Sprintf("grep -q MAXINSTANCES %s", configPath), false)
 			if result == nil || result.GetExitCode() != 0 {
 				cmd := fmt.Sprintf(`sed -i '/^\[db\]/a MAXINSTANCES = %d' %s`, maxInstances, configPath)

@@ -6,7 +6,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB012WriteKernelArgs Write kernel boot args (optional)
+// StepB012WriteKernelArgs 写入内核启动参数（可选）
 func StepB012WriteKernelArgs() *runner.Step {
 	return &runner.Step{
 		ID:          "B-012",

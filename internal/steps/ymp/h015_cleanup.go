@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -26,7 +27,7 @@ func StepH015Cleanup() *runner.Step {
 				return fmt.Errorf("skip: cleanup not requested (use --ymp-cleanup flag to enable)")
 			}
 
-			ctx.Logger.Warn("⚠ YMP cleanup requested - this will remove installation files")
+			ctx.Logger.Warn("WARNING: YMP cleanup requested - this will remove installation files")
 			return nil
 		},
 
@@ -37,7 +38,7 @@ func StepH015Cleanup() *runner.Step {
 			// 先停止 YMP 进程
 			ympSh := path.Join(installDir, "yashan-migrate-platform", "bin", "ymp.sh")
 			ctx.Logger.Info("Stopping YMP service...")
-			ctx.Execute(fmt.Sprintf("su - %s -c 'sh %s stop' 2>/dev/null", ympUser, ympSh), true)
+			_, _ = commonos.ExecuteAsUser(ctx, ympUser, fmt.Sprintf("sh %s stop 2>/dev/null", ympSh), true)
 
 			// 清理安装产物
 			cleanupPaths := []string{
@@ -64,7 +65,7 @@ func StepH015Cleanup() *runner.Step {
 			if result != nil && result.GetExitCode() == 0 {
 				return fmt.Errorf("YMP directory still exists: %s", ympDir)
 			}
-			ctx.Logger.Info("✓ Cleanup verified: %s removed", ympDir)
+			ctx.Logger.Info("OK: Cleanup verified: %s removed", ympDir)
 			return nil
 		},
 	}

@@ -20,6 +20,19 @@ func StepH012VerifyProcess() *runner.Step {
 		Optional:    false,
 
 		PreCheck: func(ctx *runner.StepContext) error {
+			r, _ := ctx.Execute("command -v ps >/dev/null 2>&1", false)
+			if r == nil || r.GetExitCode() != 0 {
+				return fmt.Errorf("ps command not found")
+			}
+			ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+				StepID:      "H-012",
+				StepName:    "Verify YMP Process",
+				Host:        ctx.Executor.Host(),
+				Severity:    runner.PrecheckSeverityInfo,
+				Code:        "PC.YMP.VERIFY.APPLY_ONLY",
+				Message:     "This step verifies processes after apply; in --precheck it only checks command availability (it does not require processes to already exist).",
+				Remediation: "Run after installation completes (or run without --precheck) to perform the real verification.",
+			})
 			return nil
 		},
 
@@ -49,7 +62,7 @@ func StepH012VerifyProcess() *runner.Step {
 			result, _ := ctx.Execute("ps -ef | grep -v grep | grep ymp | wc -l", false)
 			if result != nil {
 				count := strings.TrimSpace(result.GetStdout())
-				ctx.Logger.Info("✓ YMP process count: %s", count)
+				ctx.Logger.Info("OK: YMP process count: %s", count)
 			}
 			return nil
 		},

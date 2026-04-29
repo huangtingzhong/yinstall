@@ -9,7 +9,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// DiskInfo represents disk information collected from a node
+// DiskInfo 表示从单个节点采集到的磁盘信息
 type DiskInfo struct {
 	Path string // 磁盘路径，如 /dev/sdc
 	WWID string // 全局唯一标识符
@@ -17,7 +17,7 @@ type DiskInfo struct {
 	Node string // 节点主机名
 }
 
-// StepB021AutoDiscoverSharedDisks Auto discover shared disks in YAC mode
+// StepB021AutoDiscoverSharedDisks YAC 模式下自动发现各节点共享磁盘
 // 当 yac_systemdg、yac_datadg、yac_archdg 都未配置时，自动发现共享磁盘
 func StepB021AutoDiscoverSharedDisks() *runner.Step {
 	return &runner.Step{

@@ -8,12 +8,12 @@ import (
 	"path"
 	"strings"
 
-	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/common/file"
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC004ExtractPackage 解压数据库安装包步骤
+// StepC007ExtractPackage 解压数据库安装包步骤
 func StepC007ExtractPackage() *runner.Step {
 	return &runner.Step{
 		ID:          "C-007",
@@ -76,7 +76,7 @@ func StepC007ExtractPackage() *runner.Step {
 						return fmt.Errorf("failed to cleanup stage directory %s before extraction: %w", stageDir, err)
 					}
 				} else {
-					return fmt.Errorf("stage directory %s is not empty; please clean it first or re-run with --force-steps C-007 (or global -f) to auto-clean before extraction", stageDir)
+					return fmt.Errorf("stage directory %s is not empty; please clean it first or re-run with --force-steps C-007 (or global -F) to auto-clean before extraction", stageDir)
 				}
 			}
 

@@ -7,7 +7,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC013ConfigAutostartService Configure systemd service for database autostart
+// StepC027ConfigAutostartService 配置 systemd 服务以实现数据库开机自启
 func StepC027ConfigAutostartService() *runner.Step {
 	return &runner.Step{
 		ID:          "C-027",
@@ -24,7 +24,7 @@ func StepC027ConfigAutostartService() *runner.Step {
 				}
 				result, _ := hctx.Execute(fmt.Sprintf("test -x %s", commonos.ScriptPath), false)
 				if result == nil || result.GetExitCode() != 0 {
-					return fmt.Errorf("yashan_monit.sh not found or not executable on %s, run C-026 first", th.Host)
+					return runner.SkipPrecheckDryRunWhenUpstreamArtifactMissing(ctx, fmt.Errorf("yashan_monit.sh not found or not executable on %s, run C-026 first", th.Host))
 				}
 			}
 			return nil

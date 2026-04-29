@@ -7,7 +7,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC010SetEnvVars Set environment variables
+// StepC024SetEnvVars 配置数据库用户相关环境变量
 func StepC024SetEnvVars() *runner.Step {
 	return &runner.Step{
 		ID:          "C-024",

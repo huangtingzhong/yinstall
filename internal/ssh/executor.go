@@ -222,7 +222,8 @@ func (e *LocalExecutor) Execute(command string, sudo bool) (*ExecResult, error) 
 
 	var cmd *exec.Cmd
 	if sudo && os.Getuid() != 0 {
-		cmd = exec.Command("sudo", "bash", "-c", command)
+		// Use non-interactive sudo to avoid hanging on password prompts.
+		cmd = exec.Command("sudo", "-n", "bash", "-c", command)
 	} else {
 		cmd = exec.Command("bash", "-c", command)
 	}
@@ -373,7 +374,8 @@ func (e *SSHExecutor) Execute(command string, sudo bool) (*ExecResult, error) {
 	escapedCmd := strings.ReplaceAll(command, "'", "'\"'\"'")
 	var actualCmd string
 	if sudo && e.config.User != "root" {
-		actualCmd = fmt.Sprintf("sudo bash -c '%s'", escapedCmd)
+		// Use non-interactive sudo to avoid hanging on password prompts.
+		actualCmd = fmt.Sprintf("sudo -n bash -c '%s'", escapedCmd)
 	} else {
 		actualCmd = fmt.Sprintf("bash -c '%s'", escapedCmd)
 	}

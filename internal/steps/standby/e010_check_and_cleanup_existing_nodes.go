@@ -153,7 +153,38 @@ func StepE010CheckAndCleanupExistingNodes() *runner.Step {
 		Tags:        []string{"standby", "check", "cleanup"},
 
 		PreCheck: func(ctx *runner.StepContext) error {
-			// Always run this check
+			// Read-only: detect whether targets already exist in cluster and report.
+			targets := ctx.GetParamStringSlice("standby_targets")
+			if len(targets) == 0 {
+				return fmt.Errorf("standby_targets is required")
+			}
+			primaryUser := GetPrimaryOSUser(ctx)
+			envFile, err := GetPrimaryEnvFile(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to get primary environment file: %w", err)
+			}
+			if err := SyncPrimaryClusterNameFromEnvFile(ctx, envFile); err != nil {
+				return err
+			}
+			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
+			ipToHostID := primaryClusterIPToHostID(ctx, primaryUser, envFile, clusterName, false)
+			for _, target := range targets {
+				target = strings.TrimSpace(target)
+				if target == "" {
+					continue
+				}
+				if hostID, exists := ipToHostID[target]; exists {
+					ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+						StepID:      "E-010",
+						StepName:    "Check and Cleanup Existing Nodes",
+						Host:        ctx.Executor.Host(),
+						Severity:    runner.PrecheckSeverityWarn,
+						Code:        "PC.STANDBY.EXISTS_IN_CLUSTER",
+						Message:     fmt.Sprintf("standby target already exists in cluster: %s (hostid=%s); apply will run 'yasboot host remove' to clean it up", target, hostID),
+						Remediation: "confirm this host should be re-added as standby; otherwise adjust --targets/standby_targets",
+					})
+				}
+			}
 			return nil
 		},
 
@@ -223,7 +254,7 @@ func StepE010CheckAndCleanupExistingNodes() *runner.Step {
 						time.Sleep(hostRemoveWaitOnRemoving)
 						refreshed := primaryClusterIPToHostID(ctx, primaryUser, envFile, clusterName, false)
 						if _, still := refreshed[targetIP]; !still {
-							ctx.Logger.Info("after re-query, target IP %s is no longer in cluster IP map — treating async removal as done; continuing", targetIP)
+							ctx.Logger.Info("after re-query, target IP %s is no longer in cluster IP map - treating async removal as done; continuing", targetIP)
 							removedByAsync = true
 							err = nil
 							break

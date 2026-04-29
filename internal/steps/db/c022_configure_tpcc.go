@@ -9,8 +9,8 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC022ConfigureTPCC Configure TPCC optimization parameters
-// This step runs after C-021 (Deploy Database) to configure database parameters for TPCC workload.
+// StepC022ConfigureTPCC 配置 TPCC 相关数据库参数
+// 在 C-021（Deploy Database）之后执行，用于压测/TPCC 场景的参数优化。
 func StepC022ConfigureTPCC() *runner.Step {
 	return &runner.Step{
 		ID:          "C-022",
@@ -29,7 +29,7 @@ func StepC022ConfigureTPCC() *runner.Step {
 			yasbootPath := path.Join(stageDir, "bin", "yasboot")
 			result, err := ctx.Execute(fmt.Sprintf("test -f %s", yasbootPath), false)
 			if err != nil || result == nil || result.GetExitCode() != 0 {
-				return fmt.Errorf("yasboot not found at %s, database may not be deployed yet", yasbootPath)
+				return skipPrecheckDryRunWhenUpstreamDBArtifactMissing(ctx, fmt.Errorf("yasboot not found at %s, database may not be deployed yet", yasbootPath))
 			}
 
 			return nil

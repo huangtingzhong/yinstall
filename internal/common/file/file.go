@@ -3,7 +3,7 @@ package file
 import (
 	"fmt"
 	"os"
-	"path"         // remote (Linux) path operations — always uses '/'
+	"path"          // remote (Linux) path operations - always uses '/'
 	"path/filepath" // local (OS-native) path operations
 	"regexp"
 	"sort"
@@ -180,6 +180,7 @@ func remoteSearchDirs(ctx *runner.StepContext, remoteDir string) []string {
 // 软件包格式（linux 段常见两种写法，均支持）：
 //   - x86: yashandb-23.4.7.100-linux-x86_64.tar.gz 或 ...-linux-x86-64.tar.gz
 //   - arm: yashandb-23.4.7.100-linux-aarch64.tar.gz 或 ...-linux-aarch-64.tar.gz
+//
 // 返回找到的软件包路径（远程或本地）
 func FindLatestDBPackage(
 	ctx *runner.StepContext,
@@ -239,6 +240,7 @@ func FindLatestDBPackage(
 // 软件包格式（linux 段常见两种写法，均支持）：
 //   - x86: yashandb-cloud-manager-23.5.3.2-linux-x86_64.tar.gz 或 ...-linux-x86-64.tar.gz
 //   - arm: yashandb-cloud-manager-23.5.3.2-linux-aarch64.tar.gz 或 ...-linux-aarch-64.tar.gz
+//
 // 返回找到的软件包路径（远程或本地）
 func FindLatestYCMPackage(
 	ctx *runner.StepContext,
@@ -298,6 +300,7 @@ func FindLatestYCMPackage(
 // 软件包格式（linux 段常见两种写法，均支持）：
 //   - x86: yashan-migrate-platform-23.5.3.2-linux-x86_64.zip 或 ...-linux-x86-64.zip
 //   - arm: yashan-migrate-platform-23.5.3.2-linux-aarch64.zip 或 ...-linux-aarch-64.zip
+//
 // 返回找到的软件包路径（远程或本地）
 func FindLatestYMPPackage(
 	ctx *runner.StepContext,
@@ -352,6 +355,85 @@ func FindLatestYMPPackage(
 	}
 
 	latest := findLatestVersion(localPackages, re)
+	return filepath.Base(latest), nil
+}
+
+// FindZstdSourceTarball 在本地/远端软件目录中查找 zstd 源码包（.tar.gz），供 RHEL7 等无 libzstd RPM 时编译安装。
+// 优先 zstd-1.5.7.tar.gz；否则取 zstd-x.y.z.tar.gz 中版本号最高者。explicit 非空时作为固定路径或文件名（与 FindAndDistribute 规则一致）。
+func FindZstdSourceTarball(
+	ctx *runner.StepContext,
+	localDirs []string,
+	remoteDir string,
+	explicit string,
+) (string, error) {
+	explicit = strings.TrimSpace(explicit)
+	if explicit != "" {
+		norm := filepath.ToSlash(explicit)
+		base := path.Base(norm)
+		if !strings.HasPrefix(base, "zstd-") || !strings.HasSuffix(base, ".tar.gz") {
+			return "", fmt.Errorf("os_zstd_source_tarball must be a zstd-*.tar.gz path or filename, got: %s", explicit)
+		}
+		if strings.Contains(norm, "/") {
+			return norm, nil
+		}
+		return base, nil
+	}
+
+	pattern := `zstd-(\d+\.\d+\.\d+)\.tar\.gz`
+	re := regexp.MustCompile(`^` + pattern + `$`)
+
+	// 远端：先找 1.5.7，再列全部匹配并取最高版本
+	shellQuote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+	for _, dir := range remoteSearchDirs(ctx, remoteDir) {
+		pref := path.Join(dir, "zstd-1.5.7.tar.gz")
+		r, _ := ctx.Execute(fmt.Sprintf("test -f %s && echo ok", shellQuote(pref)), false)
+		if r != nil && strings.Contains(strings.TrimSpace(r.GetStdout()), "ok") {
+			return pref, nil
+		}
+	}
+	var remotePackages []string
+	for _, dir := range remoteSearchDirs(ctx, remoteDir) {
+		result, _ := ctx.Execute(fmt.Sprintf("ls -1 %s/zstd-*.tar.gz 2>/dev/null || true", dir), false)
+		if result != nil && result.GetStdout() != "" {
+			for _, f := range strings.Split(strings.TrimSpace(result.GetStdout()), "\n") {
+				f = strings.TrimSpace(f)
+				if f != "" && re.MatchString(path.Base(f)) {
+					remotePackages = append(remotePackages, f)
+				}
+			}
+		}
+	}
+	if len(remotePackages) > 0 {
+		return findLatestVersion(remotePackages, regexp.MustCompile(pattern)), nil
+	}
+
+	var localPackages []string
+	for _, dir := range localDirs {
+		matches, err := filepath.Glob(filepath.Join(dir, "zstd-*.tar.gz"))
+		if err != nil {
+			continue
+		}
+		for _, m := range matches {
+			if re.MatchString(filepath.Base(m)) {
+				localPackages = append(localPackages, m)
+			}
+		}
+	}
+	if len(localPackages) == 0 {
+		remoteDirs := remoteSearchDirs(ctx, remoteDir)
+		return "", fmt.Errorf("no zstd source tarball (zstd-x.y.z.tar.gz, prefer zstd-1.5.7.tar.gz) in remote dirs %v or local dirs %v", remoteDirs, localDirs)
+	}
+	prefer := ""
+	for _, m := range localPackages {
+		if filepath.Base(m) == "zstd-1.5.7.tar.gz" {
+			prefer = m
+			break
+		}
+	}
+	if prefer != "" {
+		return filepath.Base(prefer), nil
+	}
+	latest := findLatestVersion(localPackages, regexp.MustCompile(pattern))
 	return filepath.Base(latest), nil
 }
 

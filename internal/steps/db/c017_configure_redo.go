@@ -21,7 +21,7 @@ func fmtUnitSuffix(s string) bool {
 	return false
 }
 
-// StepC017ConfigureRedo Configure REDO file parameters in yashandb.toml
+// StepC017ConfigureRedo 在 yashandb.toml 中配置 REDO 文件相关参数
 func StepC017ConfigureRedo() *runner.Step {
 	return &runner.Step{
 		ID:          "C-017",
@@ -31,6 +31,34 @@ func StepC017ConfigureRedo() *runner.Step {
 		Optional:    false,
 
 		PreCheck: func(ctx *runner.StepContext) error {
+			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
+			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
+			configPath := path.Join(stageDir, clusterName+".toml")
+
+			// 集群配置是否存在
+			res, _ := ctx.Execute(fmt.Sprintf("test -f %s", configPath), false)
+			if res == nil || res.GetExitCode() != 0 {
+				return skipPrecheckDryRunWhenUpstreamDBArtifactMissing(ctx, fmt.Errorf("cluster config not found at %s", configPath))
+			}
+
+			redoFileNum := ctx.GetParamInt("db_redo_file_num", 0)
+			redoFileSize := ctx.GetParamString("db_redo_file_size", "")
+			if redoFileNum < 0 {
+				return fmt.Errorf("invalid db_redo_file_num: %d", redoFileNum)
+			}
+			if redoFileSize != "" && !fmtUnitSuffix(redoFileSize) {
+				redoFileSize = redoFileSize + "M"
+				ctx.SetResult("db_redo_file_size_normalized", redoFileSize)
+				ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+					StepID:      "C-017",
+					StepName:    "Configure REDO Parameters",
+					Host:        ctx.Executor.Host(),
+					Severity:    runner.PrecheckSeverityInfo,
+					Code:        "PC.DB.REDO.SIZE_UNIT",
+					Message:     fmt.Sprintf("redo file size has no unit; apply will append 'M' (MB): %s", redoFileSize),
+					Remediation: "specify a unit explicitly if desired, e.g. 128M or 4G",
+				})
+			}
 			return nil
 		},
 
@@ -42,6 +70,11 @@ func StepC017ConfigureRedo() *runner.Step {
 			// 获取用户指定的参数
 			redoFileNum := ctx.GetParamInt("db_redo_file_num", 0)
 			redoFileSize := ctx.GetParamString("db_redo_file_size", "")
+			if v, ok := ctx.Results["db_redo_file_size_normalized"]; ok {
+				if s, ok := v.(string); ok && s != "" {
+					redoFileSize = s
+				}
+			}
 
 			// 如果 redoFileSize 没有单位后缀，自动添加 "M" (MB)
 			if redoFileSize != "" && !fmtUnitSuffix(redoFileSize) {

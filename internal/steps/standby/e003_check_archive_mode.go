@@ -69,34 +69,21 @@ func StepE003CheckArchiveMode() *runner.Step {
 			}
 
 			if !isArchiveMode {
-				ctx.Logger.Error("╔════════════════════════════════════════════════════════════════╗")
-				ctx.Logger.Error("║  ERROR: Primary database is NOT running in archive mode!      ║")
-				ctx.Logger.Error("║                                                                ║")
-				ctx.Logger.Error("║  Archive mode is REQUIRED for standby database creation.      ║")
-				ctx.Logger.Error("║                                                                ║")
-				ctx.Logger.Error("║  To enable archive mode on primary database:                  ║")
-				ctx.Logger.Error("║  1. Connect to primary database as SYS:                       ║")
-				ctx.Logger.Error("║     yasql sys/<password>@%s                         ║", clusterName)
-				ctx.Logger.Error("║                                                                ║")
-				ctx.Logger.Error("║  2. Shutdown database:                                         ║")
-				ctx.Logger.Error("║     SHUTDOWN IMMEDIATE;                                        ║")
-				ctx.Logger.Error("║                                                                ║")
-				ctx.Logger.Error("║  3. Start in mount mode:                                       ║")
-				ctx.Logger.Error("║     STARTUP MOUNT;                                             ║")
-				ctx.Logger.Error("║                                                                ║")
-				ctx.Logger.Error("║  4. Enable archive mode:                                       ║")
-				ctx.Logger.Error("║     ALTER DATABASE ARCHIVELOG;                                 ║")
-				ctx.Logger.Error("║                                                                ║")
-				ctx.Logger.Error("║  5. Open database:                                             ║")
-				ctx.Logger.Error("║     ALTER DATABASE OPEN;                                       ║")
-				ctx.Logger.Error("║                                                                ║")
-				ctx.Logger.Error("║  6. Verify archive mode:                                       ║")
-				ctx.Logger.Error("║     SELECT log_mode FROM v$database;                            ║")
-				ctx.Logger.Error("╚════════════════════════════════════════════════════════════════╝")
+				ctx.Logger.Error("================================================================")
+				ctx.Logger.Error("ERROR: Primary database is NOT running in archive mode.")
+				ctx.Logger.Error("Archive mode is REQUIRED for standby database creation.")
+				ctx.Logger.Error("To enable archive mode on the primary:")
+				ctx.Logger.Error("  1. Connect as SYS: yasql sys/<password>@%s", clusterName)
+				ctx.Logger.Error("  2. SHUTDOWN IMMEDIATE;")
+				ctx.Logger.Error("  3. STARTUP MOUNT;")
+				ctx.Logger.Error("  4. ALTER DATABASE ARCHIVELOG;")
+				ctx.Logger.Error("  5. ALTER DATABASE OPEN;")
+				ctx.Logger.Error("  6. Verify: SELECT log_mode FROM v$database;")
+				ctx.Logger.Error("================================================================")
 				return fmt.Errorf("primary database is not in archive mode")
 			}
 
-			ctx.Logger.Info("✓ Primary database is running in archive mode")
+			ctx.Logger.Info("OK: Primary database is running in archive mode")
 			return nil
 		},
 

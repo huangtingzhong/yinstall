@@ -10,7 +10,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC005GenConfig Generate DB configuration files
+// StepC014GenConfig 生成 hosts.toml 与集群 TOML 等配置文件
 func StepC014GenConfig() *runner.Step {
 	return &runner.Step{
 		ID:          "C-014",
@@ -22,11 +22,11 @@ func StepC014GenConfig() *runner.Step {
 		PreCheck: func(ctx *runner.StepContext) error {
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 
-			// Check yasboot exists
+			// 确认 yasboot 可执行文件存在
 			yasbootPath := path.Join(stageDir, "bin/yasboot")
 			result, _ := ctx.Execute(fmt.Sprintf("test -x %s", yasbootPath), false)
 			if result == nil || result.GetExitCode() != 0 {
-				return fmt.Errorf("yasboot not found at %s", yasbootPath)
+				return skipPrecheckDryRunWhenUpstreamDBArtifactMissing(ctx, fmt.Errorf("yasboot not found at %s", yasbootPath))
 			}
 
 			return nil
@@ -59,14 +59,14 @@ func StepC014GenConfig() *runner.Step {
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
 
-			// Check hosts.toml exists
+			// 确认 hosts.toml 已生成
 			hostsPath := path.Join(stageDir, "hosts.toml")
 			result, _ := ctx.Execute(fmt.Sprintf("test -f %s", hostsPath), false)
 			if result == nil || result.GetExitCode() != 0 {
 				return fmt.Errorf("hosts.toml not found at %s", hostsPath)
 			}
 
-			// Check cluster config exists
+			// 确认集群 TOML 已生成
 			clusterPath := path.Join(stageDir, clusterName+".toml")
 			result, _ = ctx.Execute(fmt.Sprintf("test -f %s", clusterPath), false)
 			if result == nil || result.GetExitCode() != 0 {
@@ -79,9 +79,9 @@ func StepC014GenConfig() *runner.Step {
 	}
 }
 
-// checkKernelShmMeetsDBRequirements verifies kernel.shmmax / kernel.shmall against the same
-// sizing rules as OS step B-008. Fails (unless force) when the host cannot satisfy the planned
-// database memory percent (or standalone-OS max-RAM policy when os_sysctl_shm_use_max_ram_only).
+// checkKernelShmMeetsDBRequirements 校验 kernel.shmmax / kernel.shmall 是否满足与 OS 步骤 B-008
+// 一致的估算规则。若主机无法满足规划的数据库内存百分比（或 standalone OS 下 max-RAM 策略，
+// 取决于 os_sysctl_shm_use_max_ram_only），则失败（除非 force）。
 func checkKernelShmMeetsDBRequirements(ctx *runner.StepContext) error {
 	if ctx.DryRun {
 		return nil
@@ -113,10 +113,10 @@ func checkKernelShmMeetsDBRequirements(ctx *runner.StepContext) error {
 		msg := fmt.Sprintf("host %s: %s (shmmax=%d shmall=%d, MemTotal=%d kB, db_memory_percent=%d, os_sysctl_shm_use_max_ram_only=%v)",
 			th.Host, reason, curShmmax, curShmall, memKB, dbPct, useMaxRAM)
 		if ctx.IsForceStep() {
-			sub.Logger.Warn("C-014: %s — continuing because step is forced", msg)
+			sub.Logger.Warn("C-014: %s - continuing because step is forced", msg)
 			continue
 		}
-		return fmt.Errorf("C-014: %s — fix sysctl (e.g. re-run OS preparation) or use --force-steps C-014 to override", msg)
+		return fmt.Errorf("C-014: %s - fix sysctl (e.g. re-run OS preparation) or use --force-steps C-014 to override", msg)
 	}
 	return nil
 }
@@ -174,8 +174,7 @@ func genStandaloneConfig(ctx *runner.StepContext, yasbootPath, clusterName, user
 	memoryPercent := ctx.GetParamInt("db_memory_percent", 50)
 	dbMode := ctx.GetParamString("db_mode", "")
 
-	// Get target IP (assuming single target)
-	// In real implementation, get from context
+	// 单机：取本机首个 IP（hostname -I）
 	result, _ := ctx.Execute("hostname -I | awk '{print $1}'", false)
 	ip := "127.0.0.1"
 	if result != nil && result.GetStdout() != "" {
@@ -191,7 +190,7 @@ func genStandaloneConfig(ctx *runner.StepContext, yasbootPath, clusterName, user
 	ctx.Logger.Info("  Begin port: %d", beginPort)
 	ctx.Logger.Info("  Memory limit: %d%%", memoryPercent)
 
-	// Build gen-config command (execute as yashan user); password escaped for su -c '...'
+	// 组装 package se gen（以产品用户执行；密码已按 Shell 规则转义）
 	genCmd := fmt.Sprintf(`cd %s && %s package se gen --cluster %s --recommend-param \
 -u %s -p %s --ip %s --port %d \
 --install-path %s \
@@ -201,7 +200,7 @@ func genStandaloneConfig(ctx *runner.StepContext, yasbootPath, clusterName, user
 --memory-limit %d \
 --node 1`,
 		stageDir, yasbootPath, clusterName,
-		user, commonos.ShellEscapeForSuC(password), ip, ctx.YasbootRemoteSSHPort(22),
+		user, commonos.ShellSingleQuote(password), ip, ctx.YasbootRemoteSSHPort(22),
 		installPath, dataPath, logPath,
 		beginPort, memoryPercent)
 
@@ -210,15 +209,13 @@ func genStandaloneConfig(ctx *runner.StepContext, yasbootPath, clusterName, user
 	}
 
 	extra := ctx.GetParamString("yasboot_extra_args", "")
-	genCmd = commonos.YasbootAppendExtraArgs(genCmd, extra, true)
+	genCmd = commonos.YasbootAppendExtraArgs(genCmd, extra, false)
 	if strings.TrimSpace(extra) != "" {
 		ctx.Logger.Info("yasboot package se gen: appending extra args: %s", strings.TrimSpace(extra))
 	}
 
-	// Execute as yashan user
-	cmd := fmt.Sprintf("su - %s -c '%s'", user, genCmd)
-
-	if _, err := ctx.ExecuteWithCheck(cmd, true); err != nil {
+	// 以产品用户执行
+	if _, err := commonos.ExecuteAsUserWithCheck(ctx, user, genCmd, true); err != nil {
 		return fmt.Errorf("failed to generate config: %w", err)
 	}
 
@@ -236,11 +233,11 @@ func genYACConfig(ctx *runner.StepContext, yasbootPath, clusterName, user, passw
 	datadgStr := ctx.GetParamString("yac_datadg", "")
 	dbMode := ctx.GetParamString("db_mode", "")
 
-	// Parse diskgroups (yasboot uses --system-data and --data with comma-separated disk paths only)
+	// 解析 diskgroup：yasboot 仅接受逗号分隔盘路径填入 --system-data / --data
 	systemdg, _ := parseYACDiskGroup(systemdgStr)
 	datadg, _ := parseYACDiskGroup(datadgStr)
 
-	// Get target IPs and node count: YAC uses all nodes from params; standalone uses current host
+	// 目标 IP 与节点数：YAC 使用 params 中 target_ips；否则退化为当前主机探测值
 	ips := "127.0.0.1"
 	nodeCount := 1
 	if targetIPs := ctx.GetParamStringSlice("target_ips"); len(targetIPs) > 0 {
@@ -262,12 +259,12 @@ func genYACConfig(ctx *runner.StepContext, yasbootPath, clusterName, user, passw
 	ctx.Logger.Info("  Data DG: %s", datadgStr)
 	ctx.Logger.Info("  Memory limit: %d%%", memoryPercent)
 
-	// yasboot package ce gen: --system-data and --data are comma-separated disk paths; no arch in gen
+	// yasboot package ce gen：--system-data 与 --data 为逗号分隔盘路径；gen 阶段不含 arch
 	systemDisks := formatDiskList(systemdg)
 	dataDisks := formatDiskList(datadg)
 	diskFoundPath := ctx.GetParamString("yac_disk_found_path", "/dev/mapper/")
 
-	// Build gen-config command (execute as yashan user)
+	// 组装 package ce gen（以产品用户执行）
 	var genCmd string
 	if accessMode == "scan" {
 		scanName := ctx.GetParamString("yac_scanname", "")
@@ -294,7 +291,7 @@ func genYACConfig(ctx *runner.StepContext, yasbootPath, clusterName, user, passw
 			systemDisks, dataDisks)
 	} else {
 		vips := ctx.GetParamStringSlice("yac_vips")
-		// yasboot expects VIP in format 'ip/netmask[/interface]', e.g. 10.10.10.127/24
+		// yasboot 期望 VIP 形如 ip/前缀长度，例如 10.10.10.127/24（可选带网卡）
 		vipNetmask := publicNetwork
 		if vipNetmask == "" {
 			vipNetmask = interCIDR
@@ -328,7 +325,7 @@ func genYACConfig(ctx *runner.StepContext, yasbootPath, clusterName, user, passw
 --system-data %s \
 --data %s`,
 			stageDir, yasbootPath, clusterName,
-			user, commonos.ShellEscapeForSuC(password), ips, ctx.YasbootRemoteSSHPort(22),
+			user, commonos.ShellSingleQuote(password), ips, ctx.YasbootRemoteSSHPort(22),
 			installPath, dataPath, logPath,
 			beginPort, memoryPercent, nodeCount,
 			interCIDR, publicNetwork, vipStr,
@@ -341,15 +338,13 @@ func genYACConfig(ctx *runner.StepContext, yasbootPath, clusterName, user, passw
 	}
 
 	extra := ctx.GetParamString("yasboot_extra_args", "")
-	genCmd = commonos.YasbootAppendExtraArgs(genCmd, extra, true)
+	genCmd = commonos.YasbootAppendExtraArgs(genCmd, extra, false)
 	if strings.TrimSpace(extra) != "" {
 		ctx.Logger.Info("yasboot package ce gen: appending extra args: %s", strings.TrimSpace(extra))
 	}
 
-	// Execute as yashan user
-	cmd := fmt.Sprintf("su - %s -c '%s'", user, genCmd)
-
-	if _, err := ctx.ExecuteWithCheck(cmd, true); err != nil {
+	// 以产品用户执行
+	if _, err := commonos.ExecuteAsUserWithCheck(ctx, user, genCmd, true); err != nil {
 		return fmt.Errorf("failed to generate YAC config: %w", err)
 	}
 

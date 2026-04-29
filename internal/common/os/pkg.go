@@ -23,6 +23,31 @@ func IsPackageInstalled(ctx *runner.StepContext, pkg, pkgManager string) bool {
 	return result != nil && result.GetExitCode() == 0
 }
 
+// libzstdSourceSatisfiedRHEL7 判断 EL7 系列是否已通过源码安装获得 libzstd（仓库常无 libzstd RPM）
+func libzstdSourceSatisfiedRHEL7(ctx *runner.StepContext) bool {
+	r1, _ := ctx.Execute("command -v zstd >/dev/null 2>&1", false)
+	if r1 == nil || r1.GetExitCode() != 0 {
+		return false
+	}
+	r2, _ := ctx.Execute("test -f /usr/local/lib/libzstd.so.1 -o -f /usr/local/lib/libzstd.so -o -f /usr/local/lib64/libzstd.so.1 -o -f /usr/local/lib64/libzstd.so", false)
+	return r2 != nil && r2.GetExitCode() == 0
+}
+
+// IsDepPackageSatisfied 判断依赖包是否已满足（含 EL7 上 libzstd 的源码安装等价路径）
+func IsDepPackageSatisfied(ctx *runner.StepContext, pkg, pkgManager string) bool {
+	pkg = strings.TrimSpace(pkg)
+	if pkg == "" {
+		return false
+	}
+	if IsPackageInstalled(ctx, pkg, pkgManager) {
+		return true
+	}
+	if pkg == "libzstd" && ctx.OSInfo != nil && IsRHEL7(ctx.OSInfo) {
+		return libzstdSourceSatisfiedRHEL7(ctx)
+	}
+	return false
+}
+
 // FilterUninstalledPackages returns only packages that are not yet installed
 func FilterUninstalledPackages(ctx *runner.StepContext, packages, pkgManager string) []string {
 	pkgList := strings.Fields(packages)
@@ -34,7 +59,7 @@ func FilterUninstalledPackages(ctx *runner.StepContext, packages, pkgManager str
 			continue
 		}
 
-		if !IsPackageInstalled(ctx, pkg, pkgManager) {
+		if !IsDepPackageSatisfied(ctx, pkg, pkgManager) {
 			uninstalled = append(uninstalled, pkg)
 		} else {
 			ctx.Logger.Info("  Package '%s' already installed", pkg)

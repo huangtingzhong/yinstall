@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"strings"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC011VerifyInstall Verify database installation
+// StepC025VerifyInstall 验证安装结果与连通性
 func StepC025VerifyInstall() *runner.Step {
 	return &runner.Step{
 		ID:          "C-025",
@@ -17,7 +18,7 @@ func StepC025VerifyInstall() *runner.Step {
 		Optional:    false,
 
 		PreCheck: func(ctx *runner.StepContext) error {
-			// Always run verification
+			// 本步必须执行（不做跳过条件）
 			return nil
 		},
 
@@ -38,15 +39,19 @@ func StepC025VerifyInstall() *runner.Step {
 
 				// 如果没有存储的环境变量文件，使用默认的 .bashrc
 				if envFile == "" {
-					envFile = fmt.Sprintf("/home/%s/.bashrc", user)
-					hctx.Logger.Info("Using default environment file: %s", envFile)
+					beginPort := hctx.GetParamInt("db_begin_port", 1688)
+					homeDir, err := commonos.GetUserHomeDir(hctx, user)
+					if err != nil {
+						homeDir = fmt.Sprintf("/home/%s", user)
+					}
+					envFile = commonos.DetermineEnvFile(homeDir, beginPort)
+					hctx.Logger.Info("Using derived environment file: %s", envFile)
 				}
 
 				hctx.Logger.Info("Verifying database installation...")
 
 				hctx.Logger.Info("Step 1: Checking cluster status...")
-				cmd := fmt.Sprintf("su - %s -c 'source %s && yasboot cluster status -c %s -d'", user, envFile, clusterName)
-				result, _ := hctx.Execute(cmd, false)
+				result, _ := commonos.ExecuteAsUserWithEnv(hctx, user, envFile, fmt.Sprintf("yasboot cluster status -c %s -d", clusterName), false)
 				if result != nil && result.GetExitCode() == 0 {
 					hctx.Logger.Info("Cluster status: OK")
 					for _, line := range strings.Split(result.GetStdout(), "\n") {
@@ -62,13 +67,11 @@ func StepC025VerifyInstall() *runner.Step {
 				}
 
 				hctx.Logger.Info("Step 2: Checking database connectivity...")
-				cmd = fmt.Sprintf("su - %s -c 'source %s && yasql / as sysdba -c \"SELECT 1 FROM dual;\"'", user, envFile)
-				result, _ = hctx.Execute(cmd, false)
+				result, _ = commonos.ExecuteAsUserWithEnv(hctx, user, envFile, `yasql / as sysdba -c "SELECT 1 FROM dual;"`, false)
 				if result != nil && result.GetExitCode() == 0 {
 					hctx.Logger.Info("Database connectivity: OK")
 				} else {
-					cmd = fmt.Sprintf("su - %s -c 'source %s && echo \"SELECT 1 FROM dual;\" | yasql / as sysdba'", user, envFile)
-					result, _ = hctx.Execute(cmd, false)
+					result, _ = commonos.ExecuteAsUserWithEnv(hctx, user, envFile, `echo "SELECT 1 FROM dual;" | yasql / as sysdba`, false)
 					if result != nil && result.GetExitCode() == 0 {
 						hctx.Logger.Info("Database connectivity: OK")
 					} else {

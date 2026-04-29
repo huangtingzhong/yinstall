@@ -7,41 +7,31 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// filterSteps filters steps based on include/exclude flags and tags.
+// filterSteps 根据 include/exclude 的 step 参数过滤要执行的 steps。
 //
-// Order and precedence:
-//  1. --include-steps (-s): narrows to the listed step IDs (ranges supported). Omitted = all steps.
-//  2. --exclude-steps: removes listed IDs from the current set. If both include and exclude list the same ID,
-//     exclude wins (step is not run). Parsed against the same catalog as step 1.
-//  3. --include-tags: narrows to steps that have at least one listed tag.
-//  4. --exclude-tags: removes steps that have any listed tag.
+// 顺序与优先级：
+//  1. --include-steps (-s)：将集合收窄到指定 step IDs（支持范围）；未指定表示全部 steps。
+//  2. --exclude-steps (-e)：从当前集合移除指定 IDs；若 include 与 exclude 同时包含同一 ID，则以 exclude 为准（不执行）。
+//     解析时使用与步骤目录相同的 catalog。
 func filterSteps(allSteps []*runner.Step, flags GlobalFlags) []*runner.Step {
 	var stepsToRun []*runner.Step
 
-	// 1. Handle include-steps (ranges supported)
+	// 1) 处理 include-steps（支持范围）
 	if len(flags.IncludeSteps) > 0 {
 		included, err := parseStepRanges(allSteps, flags.IncludeSteps)
 		if err != nil {
-			// If parsing fails, fall back to exact match (backward compatibility or error)
-			// For now, let's log error and return nil or panic?
-			// Since we can't easily return error here without changing signature,
-			// and existing code expects []*runner.Step.
-			// Let's print error to stderr and return empty list to stop execution if possible,
-			// or just log and ignore invalid ranges.
-			// Better: parseStepRanges should return error, and we should handle it.
-			// But the original filterSteps didn't return error.
-			// We can panic or print error.
+			// 若解析失败：这里无法返回 error（函数签名历史原因），因此打印错误并返回 nil（停止执行）。
 			fmt.Printf("Error parsing include-steps: %v\n", err)
 			return nil
 		}
 		stepsToRun = included
 	} else {
-		// Default: all steps
+		// 默认：全部 steps
 		stepsToRun = make([]*runner.Step, len(allSteps))
 		copy(stepsToRun, allSteps)
 	}
 
-	// 2. Handle exclude-steps (ranges supported). Runs after include-steps: same ID in both → excluded (not run).
+	// 2) 处理 exclude-steps（支持范围）。在 include-steps 之后执行：同一 ID 同时出现 → 以 exclude 为准（不执行）。
 	if len(flags.ExcludeSteps) > 0 {
 		excluded, err := parseStepRanges(allSteps, flags.ExcludeSteps)
 		if err != nil {
@@ -66,84 +56,37 @@ func filterSteps(allSteps []*runner.Step, flags GlobalFlags) []*runner.Step {
 		stepsToRun = retained
 	}
 
-	// 3. Handle include-tags
-	if len(flags.IncludeTags) > 0 {
-		var tagged []*runner.Step
-		for _, step := range stepsToRun {
-			matched := false
-			for _, targetTag := range flags.IncludeTags {
-				for _, stepTag := range step.Tags {
-					if stepTag == targetTag {
-						matched = true
-						break
-					}
-				}
-				if matched {
-					break
-				}
-			}
-			if matched {
-				tagged = append(tagged, step)
-			}
-		}
-		stepsToRun = tagged
-	}
-
-	// 4. Handle exclude-tags
-	if len(flags.ExcludeTags) > 0 {
-		var retained []*runner.Step
-		for _, step := range stepsToRun {
-			excluded := false
-			for _, targetTag := range flags.ExcludeTags {
-				for _, stepTag := range step.Tags {
-					if stepTag == targetTag {
-						excluded = true
-						break
-					}
-				}
-				if excluded {
-					break
-				}
-			}
-			if !excluded {
-				retained = append(retained, step)
-			}
-		}
-		stepsToRun = retained
-	}
-
 	return stepsToRun
 }
 
-// parseStepRanges parses a list of range specs (e.g. "c001", "c001-c003", "c005-")
-// and returns the matching steps from allSteps.
-// It assumes allSteps is sorted in execution order.
+// parseStepRanges 解析一组范围描述（例如 "c001"、"c001-c003"、"c005-"），并从 allSteps 中返回匹配的 steps。
+// 假设 allSteps 已按执行顺序排序。
 func parseStepRanges(allSteps []*runner.Step, specs []string) ([]*runner.Step, error) {
-	// Use a map to deduplicate steps
+	// 用 map 去重
 	selectedMap := make(map[string]bool)
 	var selectedSteps []*runner.Step
 
-	// Create a map of ID to index for range calculation
+	// 构建 ID→index 的映射，用于范围计算
 	idToIndex := make(map[string]int)
-	// Also case-insensitive map
+	// 同时构建大小写不敏感映射
 	idMapLower := make(map[string]string)
 	for i, step := range allSteps {
 		idToIndex[step.ID] = i
 		idMapLower[strings.ToLower(step.ID)] = step.ID
 	}
 
-	// Helper to resolve ID (case-insensitive)
+	// 辅助函数：解析 ID（大小写不敏感）
 	resolveID := func(input string) (string, bool) {
-		// 1. Try exact match
+		// 1) 精确匹配
 		if _, ok := idToIndex[input]; ok {
 			return input, true
 		}
-		// 2. Try case-insensitive match
+		// 2) 大小写不敏感匹配
 		if realID, ok := idMapLower[strings.ToLower(input)]; ok {
 			return realID, true
 		}
-		// 3. Try normalizing separators/format if needed（如 c005 -> C-005）
-		// Simple heuristic: insert hyphen after first letter if it's a letter followed by digits
+		// 3) 规范化分隔符/格式（如 c005 -> C-005）
+		// 简单启发：字母后跟数字时，在首字母后插入 '-'
 		normalized := normalizeStepID(input)
 		if realID, ok := idMapLower[strings.ToLower(normalized)]; ok {
 			return realID, true
@@ -153,9 +96,7 @@ func parseStepRanges(allSteps []*runner.Step, specs []string) ([]*runner.Step, e
 	}
 
 	for _, spec := range specs {
-		// Split by comma in case user passed "c001,c002" as single string (cobra does this for StringSlice)
-		// But specs is already []string from StringSliceVar.
-		// Handling split just in case.
+		// 兼容：用户可能把 "c001,c002" 作为单个字符串传入（某些场景下 cobra 的 StringSlice 会出现）
 		parts := strings.Split(spec, ",")
 		for _, part := range parts {
 			part = strings.TrimSpace(part)
@@ -163,61 +104,24 @@ func parseStepRanges(allSteps []*runner.Step, specs []string) ([]*runner.Step, e
 				continue
 			}
 
-			// Check for range syntax matches
-			// 1. "start-end"
-			// 2. "start-"
-			// 3. "-end"
-			// 4. "single"
+			// 范围语法：
+			// 1) "start-end"
+			// 2) "start-"
+			// 3) "-end"
+			// 4) "single"
 
 			if strings.Contains(part, "-") {
-				// Potential range. But wait, step IDs themselves might contain hyphens (e.g. C-006).
-				// We need to distinguish between ID hyphen and range separator.
-				// However, if we follow the rule:
-				// c005-c006 -> range
-				// c005 -> single
-				// c005- -> range
-				// -c006 -> range
-				//
-				// Ambiguity: C-006 is a valid ID. "C-006" contains "-".
-				// "C-006-C-007" -> is it "C-006" to "C-007"? Yes.
-				// "C-006-" -> "C-006" to end? Yes.
-				//
-				// Logic: Split by "-" is risky if IDs have hyphens.
-				// But we know standard IDs are like X-NNN.
-				// Let's allow users to likely use concise IDs like c005.
-				// If they use full IDs C-006, we have C-006-C-007. Two hyphens?
-				//
-				// Let's try to parse intelligently.
-				// If the string starts with "-", it's "-end"
-				// If ends with "-", it's "start-"
-				// unique separator?
-				//
-				// Best approach: check if the string *is* a valid ID first.
-				// "C-006" -> yes. Treat as single.
-				// "C-006-C-007" -> not a valid ID. Treat as range check.
-				// "c005" -> maybe valid (case insensitive). check first.
+				// 注意：step ID 本身可能包含 '-'（例如 C-006），需要区分 ID 内部连字符与范围分隔符。
+				// 策略：先判断是否能解析为单个合法 ID；若不是，再按范围解析。
 
-				// 1. Check if it's a single valid ID (exact or loose)
+				// 1) 若是单个合法 ID（精确/宽松），直接加入
 				if id, ok := resolveID(part); ok {
-					// It's a single step
+					// 单个 step
 					addStep(allSteps, idToIndex, selectedMap, &selectedSteps, id)
 					continue
 				}
 
-				// 2. Parse as range
-				// Need to find the split point.
-				// If we have "start-end", and start/end might contain hyphens.
-				// Try to match longest possible valid IDs?
-				// Or assume the range separator is the *last* hyphen? or *first*?
-				// "C-006-C-007". Middle one.
-				// "c005-c006". Middle one.
-				//
-				// Let's try checking prefix and suffix.
-				// Iterate through all possible split points?
-				// Or use a more specific separator if possible? No, user input.
-				//
-				// Heuristic for "start-end":
-				// Attempt to split at every '-' index. If left and right are valid IDs (or empty), then it's a range.
+				// 2) 按范围解析：遍历 '-' 位置尝试切分，若左右两边都能解析为合法 ID（或为空），则认定为范围。
 
 				isRange := false
 				for i := 0; i < len(part); i++ {
@@ -225,7 +129,7 @@ func parseStepRanges(allSteps []*runner.Step, specs []string) ([]*runner.Step, e
 						prefix := part[:i]
 						suffix := part[i+1:]
 
-						// Check "start-"
+						// 检查 "start-"
 						if suffix == "" {
 							if startID, ok := resolveID(prefix); ok {
 								addRange(allSteps, idToIndex, selectedMap, &selectedSteps, idToIndex[startID], len(allSteps)-1)
@@ -234,7 +138,7 @@ func parseStepRanges(allSteps []*runner.Step, specs []string) ([]*runner.Step, e
 							}
 						}
 
-						// Check "-end"
+						// 检查 "-end"
 						if prefix == "" {
 							if endID, ok := resolveID(suffix); ok {
 								addRange(allSteps, idToIndex, selectedMap, &selectedSteps, 0, idToIndex[endID])
@@ -243,7 +147,7 @@ func parseStepRanges(allSteps []*runner.Step, specs []string) ([]*runner.Step, e
 							}
 						}
 
-						// Check "start-end"
+						// 检查 "start-end"
 						startID, ok1 := resolveID(prefix)
 						endID, ok2 := resolveID(suffix)
 						if ok1 && ok2 {
@@ -260,7 +164,7 @@ func parseStepRanges(allSteps []*runner.Step, specs []string) ([]*runner.Step, e
 
 				return nil, fmt.Errorf("invalid step or range: %s", part)
 			} else {
-				// No hyphen, must be single step
+				// 不含连字符：只能是单个 step
 				if id, ok := resolveID(part); ok {
 					addStep(allSteps, idToIndex, selectedMap, &selectedSteps, id)
 				} else {
@@ -270,10 +174,10 @@ func parseStepRanges(allSteps []*runner.Step, specs []string) ([]*runner.Step, e
 		}
 	}
 
-	// Re-sort selected steps by index to maintain execution order
-	// (Though simple append might have mixed order if user did "c005,c001")
-	// For installation, order strictly matters. We should probably return them in the order they appear in allSteps.
-	// Filter allSteps based on selectedMap.
+	// 重新按 index 排序，保持执行顺序
+	//（直接 append 可能会打乱顺序，例如用户传入 "c005,c001"）
+	// 安装场景下顺序很关键，应当按 allSteps 中的出现顺序返回。
+	// 做法：遍历 allSteps，并根据 selectedMap 过滤。
 	var finalSteps []*runner.Step
 	for _, step := range allSteps {
 		if selectedMap[step.ID] {
@@ -304,9 +208,9 @@ func addRange(allSteps []*runner.Step, idToIndex map[string]int, selectedMap map
 	}
 }
 
-// normalizeStepID attempts to format "c005" to "C-005"
+// normalizeStepID 尝试将 "c005" 规范化为 "C-005"
 func normalizeStepID(input string) string {
-	// If it's like [letter][digit][digit][digit], add hyphen
+	// 若形如 [letter][digit][digit][digit]，则添加连字符
 	if len(input) == 4 {
 		return fmt.Sprintf("%s-%s", strings.ToUpper(input[:1]), input[1:])
 	}

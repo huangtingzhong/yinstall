@@ -93,12 +93,12 @@ func StepG001InstallDeps() *runner.Step {
 					continue
 				}
 				if commonos.IsPackageInstalled(ctx, pkg, pkgManager) {
-					ctx.Logger.Info("✓ Package verified: %s", pkg)
+					ctx.Logger.Info("OK: Package verified: %s", pkg)
 				} else {
 					// libnsl 等库可能包名与 rpm 名不完全一致，用 ldconfig 补充检查
 					result, _ := ctx.Execute(fmt.Sprintf("ldconfig -p 2>/dev/null | grep -i %s", pkg), false)
 					if result != nil && result.GetExitCode() == 0 {
-						ctx.Logger.Info("✓ Library verified via ldconfig: %s", pkg)
+						ctx.Logger.Info("OK: Library verified via ldconfig: %s", pkg)
 					} else {
 						ctx.Logger.Warn("Package may not be installed: %s (non-critical)", pkg)
 					}

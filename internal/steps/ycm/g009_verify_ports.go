@@ -20,6 +20,20 @@ func StepG009VerifyPorts() *runner.Step {
 		Optional:    false,
 
 		PreCheck: func(ctx *runner.StepContext) error {
+			// Read-only capability check: ss/netstat exists.
+			r, _ := ctx.Execute("which ss 2>/dev/null || which netstat 2>/dev/null", false)
+			if r == nil || r.GetExitCode() != 0 {
+				return fmt.Errorf("neither ss nor netstat command found")
+			}
+			ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+				StepID:      "G-009",
+				StepName:    "Verify YCM Port Listening",
+				Host:        ctx.Executor.Host(),
+				Severity:    runner.PrecheckSeverityInfo,
+				Code:        "PC.YCM.VERIFY.APPLY_ONLY",
+				Message:     "This step verifies port listening after apply; in --precheck it only checks that probing commands exist (it does not require ports to be listening).",
+				Remediation: "Run after installation completes (or run without --precheck) to perform the real verification.",
+			})
 			return nil
 		},
 
@@ -37,7 +51,7 @@ func StepG009VerifyPorts() *runner.Step {
 				return fmt.Errorf("YCM is not listening on port %d", ycmPort)
 			}
 
-			ctx.Logger.Info("✓ YCM is listening on port %d", ycmPort)
+			ctx.Logger.Info("OK: YCM is listening on port %d", ycmPort)
 			ctx.Logger.Info("  %s", strings.TrimSpace(result.GetStdout()))
 
 			// 可选：检查其他端口（非阻塞）
@@ -58,7 +72,7 @@ func StepG009VerifyPorts() *runner.Step {
 				cmd = fmt.Sprintf("ss -tlnp 2>/dev/null | grep -E ':%d([^0-9]|$)' || netstat -tlnp 2>/dev/null | grep -E ':%d([^0-9]|$)'", portVal, portVal)
 				result, _ = ctx.Execute(cmd, false)
 				if result != nil && result.GetExitCode() == 0 && strings.TrimSpace(result.GetStdout()) != "" {
-					ctx.Logger.Info("✓ %s listening on port %d", p.name, portVal)
+					ctx.Logger.Info("OK: %s listening on port %d", p.name, portVal)
 				} else {
 					ctx.Logger.Warn("  %s not yet listening on port %d (may start later)", p.name, portVal)
 				}

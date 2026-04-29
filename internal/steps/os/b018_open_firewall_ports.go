@@ -7,7 +7,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB018OpenFirewallPorts Open firewall ports (optional)
+// StepB018OpenFirewallPorts 放行指定防火墙端口（可选）
 func StepB018OpenFirewallPorts() *runner.Step {
 	return &runner.Step{
 		ID:          "B-018",

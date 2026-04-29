@@ -8,7 +8,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB029WriteUdevRules Write udev rules (YAC)
+// StepB029WriteUdevRules 写入 udev 规则（YAC）
 func StepB029WriteUdevRules() *runner.Step {
 	return &runner.Step{
 		ID:          "B-029",

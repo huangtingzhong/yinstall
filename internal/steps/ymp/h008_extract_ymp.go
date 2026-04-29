@@ -84,7 +84,7 @@ func StepH008ExtractYMP() *runner.Step {
 			if result == nil || result.GetExitCode() != 0 {
 				return fmt.Errorf("ymp.sh not found at %s", ympSh)
 			}
-			ctx.Logger.Info("✓ YMP directory verified: %s", ympSh)
+			ctx.Logger.Info("OK: YMP directory verified: %s", ympSh)
 			return nil
 		},
 	}

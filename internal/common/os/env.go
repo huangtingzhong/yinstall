@@ -243,4 +243,4 @@ func VerifyYasboot(ctx *runner.StepContext, user string) (string, bool) {
 		return strings.TrimSpace(result.GetStdout()), true
 	}
 	return "", false
-} 
+}

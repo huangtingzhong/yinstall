@@ -8,7 +8,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB016ConfigureChrony Configure chrony (optional)
+// StepB016ConfigureChrony 配置 chrony 时间同步（可选）
 func StepB016ConfigureChrony() *runner.Step {
 	return &runner.Step{
 		ID:          "B-016",
@@ -23,22 +23,22 @@ func StepB016ConfigureChrony() *runner.Step {
 				return fmt.Errorf("os_ntp_server not set")
 			}
 
-			// Ensure chrony is installed
+			// 确认 chrony 已安装
 			result, _ := ctx.Execute("which chronyd 2>/dev/null || rpm -q chrony", false)
 			if result.GetExitCode() != 0 {
 				return fmt.Errorf("chronyd not installed")
 			}
 
-			// Validate server value: IP format or resolvable domain
+			// 校验 server：合法 IP 或可解析域名
 			if net.ParseIP(ntpServer) == nil {
-				// Domain name: must be resolvable
+				// 域名必须可解析
 				if _, err := ctx.ExecuteWithCheck(fmt.Sprintf("getent hosts '%s' >/dev/null 2>&1", ntpServer), false); err != nil {
 					return fmt.Errorf("ntp server domain not resolvable: %s", ntpServer)
 				}
 			}
 
-			// Validate NTP port reachability (UDP/123)
-			// Prefer bash /dev/udp which is commonly available; treat non-zero as unreachable.
+			// 校验 NTP 端口可达性（UDP/123）
+			// 优先用 bash 的 /dev/udp（常见可用）；非零退出视为不可达。
 			portCheck := fmt.Sprintf("timeout 3 bash -lc \"echo > /dev/udp/%s/123\" >/dev/null 2>&1", ntpServer)
 			if _, err := ctx.ExecuteWithCheck(portCheck, false); err != nil {
 				return fmt.Errorf("ntp server udp/123 not reachable: %s", ntpServer)

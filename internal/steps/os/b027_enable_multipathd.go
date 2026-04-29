@@ -7,7 +7,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB027EnableMultipathd Enable multipathd (YAC)
+// StepB027EnableMultipathd 启用 multipathd 服务（YAC）
 func StepB027EnableMultipathd() *runner.Step {
 	return &runner.Step{
 		ID:          "B-027",

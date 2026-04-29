@@ -69,7 +69,7 @@ func StepG003SetOwnership() *runner.Step {
 				// 去掉可能的换行符再比较
 				ctx.Logger.Warn("Owner of %s is '%s', expected '%s'", ycmDir, owner, user)
 			}
-			ctx.Logger.Info("✓ YCM directory ownership verified")
+			ctx.Logger.Info("OK: YCM directory ownership verified")
 			return nil
 		},
 	}

@@ -8,7 +8,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB025CollectWWID Collect WWID (YAC multipath)
+// StepB025CollectWWID 采集共享盘 WWID（供 multipath 配置）
 // 当检测到非多路径磁盘需要配置多路径时，此步骤为必需步骤
 // 如果获取 WWID 失败，将退出脚本执行
 func StepB025CollectWWID() *runner.Step {
@@ -32,7 +32,7 @@ func StepB025CollectWWID() *runner.Step {
 				// 如果已经是多路径磁盘，跳过 WWID 收集
 				hasMultipathDisks := ctx.GetParamBool("yac_has_multipath_disks", false)
 				if hasMultipathDisks {
-					return fmt.Errorf("multipath disks detected, WWID collection not needed (use --force B-025 to force collection)")
+					return fmt.Errorf("multipath disks detected, WWID collection not needed (use -f B-025 to force collection)")
 				}
 				return nil
 			}
@@ -49,7 +49,7 @@ func StepB025CollectWWID() *runner.Step {
 				return nil
 			}
 
-			return fmt.Errorf("multipath not enabled and not required (use --force B-025 to force collection)")
+			return fmt.Errorf("multipath not enabled and not required (use -f B-025 to force collection)")
 		},
 
 		Action: func(ctx *runner.StepContext) error {

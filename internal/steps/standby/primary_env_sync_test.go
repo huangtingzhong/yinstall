@@ -14,10 +14,10 @@ type stubExecResult struct {
 	exit   int
 }
 
-func (s *stubExecResult) GetStdout() string            { return s.stdout }
-func (s *stubExecResult) GetStderr() string            { return "" }
-func (s *stubExecResult) GetExitCode() int             { return s.exit }
-func (s *stubExecResult) GetDuration() time.Duration   { return 0 }
+func (s *stubExecResult) GetStdout() string          { return s.stdout }
+func (s *stubExecResult) GetStderr() string          { return "" }
+func (s *stubExecResult) GetExitCode() int           { return s.exit }
+func (s *stubExecResult) GetDuration() time.Duration { return 0 }
 
 type stubExecutor struct {
 	catStdout string
@@ -29,8 +29,8 @@ func (e *stubExecutor) Execute(cmd string, sudo bool) (runner.ExecResult, error)
 	}
 	return &stubExecResult{exit: 0}, nil
 }
-func (e *stubExecutor) Host() string                        { return "stub" }
-func (e *stubExecutor) Close() error                        { return nil }
+func (e *stubExecutor) Host() string                              { return "stub" }
+func (e *stubExecutor) Close() error                              { return nil }
 func (e *stubExecutor) Upload(localPath, remotePath string) error { return nil }
 
 func testLogger(t *testing.T) *logging.Logger {

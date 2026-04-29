@@ -8,7 +8,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB003CreateUser Create product user
+// StepB003CreateUser 创建产品用户（os-user）
 func StepB003CreateUser() *runner.Step {
 	return &runner.Step{
 		ID:          "B-003",
@@ -59,10 +59,10 @@ func StepB003CreateUser() *runner.Step {
 					}
 				} else {
 					if existingUID != expectedUID {
-						return fmt.Errorf("user '%s' already exists with UID %s, but expected UID %s (use -f --force-delete-user to recreate)", user, existingUID, expectedUID)
+						return fmt.Errorf("user '%s' already exists with UID %s, but expected UID %s (use -f B-003 --force-delete-user to recreate)", user, existingUID, expectedUID)
 					}
 					if existingGroup != group {
-						return fmt.Errorf("user '%s' already exists with primary group '%s', but expected group '%s' (use -f --force-delete-user to recreate)", user, existingGroup, group)
+						return fmt.Errorf("user '%s' already exists with primary group '%s', but expected group '%s' (use -f B-003 --force-delete-user to recreate)", user, existingGroup, group)
 					}
 				}
 			}
@@ -78,7 +78,7 @@ func StepB003CreateUser() *runner.Step {
 							return err
 						}
 					} else {
-						return fmt.Errorf("UID %d is already used by user '%s', cannot create user '%s' (use -f --force-delete-user to recreate)", uid, existingUser, user)
+						return fmt.Errorf("UID %d is already used by user '%s', cannot create user '%s' (use -f B-003 --force-delete-user to recreate)", uid, existingUser, user)
 					}
 				}
 			}

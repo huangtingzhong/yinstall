@@ -11,7 +11,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB006ConfigureUmask Configure umask for product user
+// StepB006ConfigureUmask 为产品用户配置 umask
 func StepB006ConfigureUmask() *runner.Step {
 	return &runner.Step{
 		ID:          "B-006",
@@ -79,7 +79,7 @@ func StepB006ConfigureUmask() *runner.Step {
 				return fmt.Errorf("expected umask %s, found: %s", umaskValue, output)
 			}
 
-			ctx.Logger.Info("✓ umask %s verified in %s", umaskValue, bashrc)
+			ctx.Logger.Info("OK: umask %s verified in %s", umaskValue, bashrc)
 			return nil
 		},
 	}

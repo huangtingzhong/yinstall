@@ -60,7 +60,7 @@ func StepH003CreateUser() *runner.Step {
 			if result == nil || result.GetExitCode() != 0 {
 				return fmt.Errorf("user %s does not exist after creation", user)
 			}
-			ctx.Logger.Info("✓ User %s verified", user)
+			ctx.Logger.Info("OK: User %s verified", user)
 			return nil
 		},
 	}

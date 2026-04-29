@@ -35,7 +35,7 @@ func StepG007Deploy() *runner.Step {
 				fmt.Sprintf("%s/ycm-init", installDir),
 				fmt.Sprintf("%s/yashan-migrate-platform/ycm-init", installDir),
 			}
-			
+
 			for _, path := range possiblePaths {
 				result, _ := ctx.Execute(fmt.Sprintf("test -f %s", path), false)
 				if result != nil && result.GetExitCode() == 0 {
@@ -44,18 +44,18 @@ func StepG007Deploy() *runner.Step {
 					break
 				}
 			}
-			
+
 			if ycmInit == "" {
-				return fmt.Errorf("ycm-init not found in any of: %v", possiblePaths)
+				return runner.SkipPrecheckDryRunWhenUpstreamArtifactMissing(ctx, fmt.Errorf("ycm-init not found in any of: %v", possiblePaths))
 			}
-			
+
 			// 将找到的路径保存到参数中，供 Action 使用
 			ctx.Params["ycm_init_path"] = ycmInit
 
 			// 检查 deploy.yml
 			result, _ := ctx.Execute(fmt.Sprintf("test -f %s", deployFile), false)
 			if result == nil || result.GetExitCode() != 0 {
-				return fmt.Errorf("deploy config not found: %s", deployFile)
+				return runner.SkipPrecheckDryRunWhenUpstreamArtifactMissing(ctx, fmt.Errorf("deploy config not found: %s", deployFile))
 			}
 
 			// 如果使用 yashandb 模式，检查必要参数
@@ -78,7 +78,7 @@ func StepG007Deploy() *runner.Step {
 			deployFile := ctx.GetParamString("ycm_deploy_file", "/opt/ycm/etc/deploy.yml")
 			driver := ctx.GetParamString("ycm_db_driver", "sqlite3")
 			ycmInit := ctx.GetParamString("ycm_init_path", "")
-			
+
 			if ycmInit == "" {
 				return fmt.Errorf("ycm_init_path not set in parameters")
 			}
@@ -159,7 +159,7 @@ func StepG007Deploy() *runner.Step {
 			// 简单检查进程是否存在
 			result, _ = ctx.Execute(fmt.Sprintf("ps -ef | grep '%s' | grep -v grep | head -3", ycmDirPattern), false)
 			if result != nil && result.GetExitCode() == 0 && strings.TrimSpace(result.GetStdout()) != "" {
-				ctx.Logger.Info("✓ YCM processes detected after deployment")
+				ctx.Logger.Info("OK: YCM processes detected after deployment")
 			} else {
 				ctx.Logger.Warn("No YCM processes detected yet (may still be starting)")
 			}

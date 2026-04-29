@@ -11,28 +11,26 @@ import (
 
 var (
 	// 全局参数
-	runID        string
-	dryRun       bool
-	precheck     bool
-	includeSteps []string
-	excludeSteps []string
-	includeTags  []string
-	excludeTags  []string
-	forceAll     bool     // -f 无参数时为 true，强制执行所有步骤
-	forceSteps   []string // 强制执行的步骤（会删除已存在的资源）
-	forceDeleteUser bool  // --force-delete-user: 允许 -f 时删除并重建已存在的用户/组
-	logDir       string
+	runID           string
+	dryRun          bool
+	precheck        bool
+	includeSteps    []string
+	excludeSteps    []string
+	forceAll        bool     // -f 无参数时为 true，强制执行所有步骤
+	forceSteps      []string // 强制执行的步骤（会删除已存在的资源）
+	forceDeleteUser bool     // --force-delete-user: 允许 -f 时删除并重建已存在的用户/组
+	logDir          string
 
 	// SSH 参数
-	targets     []string
-	sshPort     int
+	targets []string
+	sshPort int
 	// yasbootSshPort 为 0 时表示与 sshPort 一致（传给 yasboot package se/ce gen、config node gen 等的 --port）
 	yasbootSshPort int
-	sshUser     string
-	sshAuth     string
-	sshPassword string
-	sshKeyPath  string
-	useSudo     bool
+	sshUser        string
+	sshAuth        string
+	sshPassword    string
+	sshKeyPath     string
+	useSudo        bool
 
 	// 软件目录参数
 	localSoftwareDirs []string // 本地软件目录（控制端）
@@ -76,7 +74,7 @@ func Execute() error {
 	return rootCmd.Execute()
 }
 
-// SetAppVersion updates the application version at runtime
+// SetAppVersion 在运行时更新应用版本号。
 func SetAppVersion(version string) {
 	AppVersion = version
 	rootCmd.Version = version
@@ -88,12 +86,10 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Skip each step's Action and PostCheck after PreCheck (connectivity/SSH and out-of-band checks may still run)")
 	rootCmd.PersistentFlags().BoolVar(&precheck, "precheck", false, "Only run checks, no changes")
 	rootCmd.PersistentFlags().StringSliceVarP(&includeSteps, "include-steps", "s", nil, "Only execute these steps (default: all; e.g. -s B-005,B-017). Trailing hyphen is a range (E-011- = E-011 through last); use E-011 for a single step. If --exclude-steps also lists a step, exclude wins")
-	rootCmd.PersistentFlags().StringSliceVar(&excludeSteps, "exclude-steps", nil, "Skip these steps (applied after --include-steps; same ID in both flags is skipped)")
-	rootCmd.PersistentFlags().StringSliceVar(&includeTags, "include-tags", nil, "Only execute steps with these tags")
-	rootCmd.PersistentFlags().StringSliceVar(&excludeTags, "exclude-tags", nil, "Skip steps with these tags")
-	rootCmd.PersistentFlags().BoolVarP(&forceAll, "force", "f", false, "Force execute all steps (skip pre-check guards); or use --force-steps to specify individual steps")
-	rootCmd.PersistentFlags().StringSliceVar(&forceSteps, "force-steps", nil, "Force execute specific steps (e.g. --force-steps B-002,B-003)")
-	rootCmd.PersistentFlags().BoolVar(&forceDeleteUser, "force-delete-user", false, "Allow -f / --force-steps to delete and recreate existing users and groups (dangerous)")
+	rootCmd.PersistentFlags().StringSliceVarP(&excludeSteps, "exclude-steps", "e", nil, "Skip these steps (applied after --include-steps; same ID in both flags is skipped)")
+	rootCmd.PersistentFlags().BoolVarP(&forceAll, "force", "F", false, "Force execute all steps (skip pre-check guards); or use -f/--force-steps to specify individual steps")
+	rootCmd.PersistentFlags().StringSliceVarP(&forceSteps, "force-steps", "f", nil, "Force execute specific steps (e.g. -f B-002,B-003)")
+	rootCmd.PersistentFlags().BoolVar(&forceDeleteUser, "force-delete-user", false, "Allow -F/--force or -f/--force-steps to delete and recreate existing users and groups (dangerous)")
 	rootCmd.PersistentFlags().StringVar(&logDir, "log-dir", defaultLogDir(), "Log directory")
 	rootCmd.PersistentFlags().BoolVarP(&listSteps, "list-steps", "l", false, "List step catalog for the subcommand (IDs, order, descriptions) and exit")
 
@@ -103,13 +99,13 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&yasbootSshPort, "yasboot-ssh-port", 0, "SSH port passed to yasboot remote operations (--port; 0 = same as --ssh-port)")
 	rootCmd.PersistentFlags().StringVarP(&sshUser, "ssh-user", "u", "root", "SSH user")
 	rootCmd.PersistentFlags().StringVar(&sshAuth, "ssh-auth", "password", "SSH auth method (password|key)")
-	rootCmd.PersistentFlags().StringVar(&sshPassword, "ssh-password", "", "SSH password")
-	rootCmd.PersistentFlags().StringVar(&sshKeyPath, "ssh-key-path", defaultSSHKeyPath(), "SSH private key path")
+	rootCmd.PersistentFlags().StringVarP(&sshPassword, "ssh-password", "P", "", "SSH password")
+	rootCmd.PersistentFlags().StringVar(&sshKeyPath, "ssh-key-path", defaultSSHKeyPath(), sshKeyPathFlagUsage())
 	rootCmd.PersistentFlags().BoolVar(&useSudo, "sudo", true, "Use sudo for privileged operations")
 
 	// 软件目录参数
-	rootCmd.PersistentFlags().StringSliceVar(&localSoftwareDirs, "local-software-dirs", defaultLocalSoftwareDirs(), "Local software directories (control plane)")
-	rootCmd.PersistentFlags().StringVar(&remoteSoftwareDir, "remote-software-dir", "/data/yashan/soft", "Remote software directory (target host)")
+	rootCmd.PersistentFlags().StringSliceVarP(&localSoftwareDirs, "local-software-dirs", "L", defaultLocalSoftwareDirs(), "Local software directories (control plane)")
+	rootCmd.PersistentFlags().StringVarP(&remoteSoftwareDir, "remote-software-dir", "R", "/data/yashan/soft", "Remote software directory (target host)")
 
 	// 添加子命令
 	rootCmd.AddCommand(osCmd)
@@ -125,9 +121,24 @@ func defaultLogDir() string {
 	return "logs"
 }
 
+// defaultSSHKeyPath 返回当前运行环境、当前系统用户下的默认私钥路径。
+// Windows: 一般为 <UserProfile>\.ssh\id_rsa；macOS/Linux: <home>/.ssh/id_rsa（随用户与 OS 变化；与 cross-compile 目标机无关，由运行本进程时的系统决定）。
 func defaultSSHKeyPath() string {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
 	return filepath.Join(home, ".ssh", "id_rsa")
+}
+
+// sshKeyPathFlagUsage 为 --ssh-key-path 提供按平台区分的说明；具体解析后的路径见 help 末尾 Cobra 输出的 (default "…")。
+func sshKeyPathFlagUsage() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "SSH private key path; implicit default is UserProfile\\.ssh\\id_rsa for the current Windows user"
+	default:
+		return "SSH private key path; implicit default is $HOME/.ssh/id_rsa for the current user (macOS/Linux)"
+	}
 }
 
 // defaultLocalSoftwareDirs 返回默认本地软件目录列表。
@@ -141,10 +152,10 @@ func defaultLocalSoftwareDirs() []string {
 	}
 	var downloadsYashan string
 	if runtime.GOOS == "windows" {
-		// Windows: C:\Users\<user>\Downloads\yashan
+		// Windows：C:\Users\<user>\Downloads\yashan
 		downloadsYashan = filepath.Join(home, "Downloads", "yashan")
 	} else {
-		// macOS / Linux: ~/Downloads/yashan
+		// macOS / Linux：~/Downloads/yashan
 		downloadsYashan = filepath.Join(home, "Downloads", "yashan")
 	}
 	// 仅当目录存在时才加入，避免无效路径干扰查找
@@ -156,26 +167,24 @@ func defaultLocalSoftwareDirs() []string {
 
 // GetGlobalFlags 获取全局参数
 type GlobalFlags struct {
-	RunID             string
-	DryRun            bool
-	Precheck          bool
-	IncludeSteps      []string
-	ExcludeSteps      []string
-	IncludeTags       []string
-	ExcludeTags       []string
-	ForceAll          bool
-	ForceSteps        []string
-	ForceDeleteUser   bool
-	LogDir            string
-	Targets           []string
-	SSHPort           int
-	YasbootSSHPort    int // 传给 yasboot 的远端 SSH 端口；与 SSHPort 相同时即未单独指定 --yasboot-ssh-port（0 已解析）
-	SSHUser           string
-	SSHAuth           string
-	SSHPassword       string
-	SSHKeyPath        string
-	// Local indicates whether to use local executor (no SSH).
-	// It is not exposed as a CLI flag anymore; commands derive it from whether --targets is specified.
+	RunID           string
+	DryRun          bool
+	Precheck        bool
+	IncludeSteps    []string
+	ExcludeSteps    []string
+	ForceAll        bool
+	ForceSteps      []string
+	ForceDeleteUser bool
+	LogDir          string
+	Targets         []string
+	SSHPort         int
+	YasbootSSHPort  int // 传给 yasboot 的远端 SSH 端口；与 SSHPort 相同时即未单独指定 --yasboot-ssh-port（0 已解析）
+	SSHUser         string
+	SSHAuth         string
+	SSHPassword     string
+	SSHKeyPath      string
+	// Local 表示是否使用本地执行器（不走 SSH）。
+	// 它不再作为 CLI flag 暴露；各子命令会根据是否指定 --targets 来推导该值。
 	Local             bool
 	UseSudo           bool
 	LocalSoftwareDirs []string
@@ -194,8 +203,6 @@ func GetGlobalFlags() GlobalFlags {
 		Precheck:          precheck,
 		IncludeSteps:      includeSteps,
 		ExcludeSteps:      excludeSteps,
-		IncludeTags:       includeTags,
-		ExcludeTags:       excludeTags,
 		ForceAll:          forceAll,
 		ForceSteps:        forceSteps,
 		ForceDeleteUser:   forceDeleteUser,

@@ -8,9 +8,8 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC008CleanStaleBashrc removes stale source lines from .bashrc and ~/.port* files
-// that reference non-existent files, preventing errors when running
-// `su - yashan` in subsequent steps.
+// StepC008CleanStaleBashrc 清理 .bashrc 与 ~/.port* 中引用已不存在文件的 source 行，
+// 避免后续步骤执行 `su - yashan` 时报错。
 func StepC008CleanStaleBashrc() *runner.Step {
 	return &runner.Step{
 		ID:          "C-008",
@@ -41,9 +40,9 @@ func StepC008CleanStaleBashrc() *runner.Step {
 					continue
 				}
 
-				// Collect all files to scan:
-				// 1. ~/.bashrc (default port 1688)
-				// 2. ~/.port* (non-default ports)
+				// 收集待扫描文件：
+				// 1) ~/.bashrc（默认端口 1688 常用）
+				// 2) ~/.port*（非默认端口场景）
 				var filesToScan []string
 
 				bashrc := fmt.Sprintf("%s/.bashrc", homeDir)
@@ -52,7 +51,7 @@ func StepC008CleanStaleBashrc() *runner.Step {
 					filesToScan = append(filesToScan, bashrc)
 				}
 
-				// Find all ~/.port* files
+				// 枚举 ~/.port* 文件
 				portResult, _ := hctx.Execute(fmt.Sprintf("ls %s/.port* 2>/dev/null", homeDir), false)
 				if portResult != nil && portResult.GetStdout() != "" {
 					for _, f := range strings.Split(strings.TrimSpace(portResult.GetStdout()), "\n") {
@@ -82,25 +81,25 @@ func StepC008CleanStaleBashrc() *runner.Step {
 	}
 }
 
-// cleanStaleEntriesFromFile scans a single env file and removes entries
-// that reference non-existent files/directories. Returns count of removed entries.
+// cleanStaleEntriesFromFile 扫描单个 env 文件，删除指向不存在路径的 source/export 行。
+// 返回删除的行数。
 func cleanStaleEntriesFromFile(hctx *runner.StepContext, host, envFile string) int {
 	cleaned := 0
 
-	// Find all `source ...yasboot...bashrc` lines pointing to missing files
+	// 查找仍引用缺失文件的 `source .../.yasboot/...bashrc` 行
 	cmd := fmt.Sprintf("grep -n 'source.*\\.yasboot/.*_yasdb_home/conf/.*\\.bashrc' %s 2>/dev/null", envFile)
 	result, _ := hctx.Execute(cmd, false)
 	if result != nil && result.GetStdout() != "" {
 		lines := strings.Split(strings.TrimSpace(result.GetStdout()), "\n")
 		for _, line := range lines {
-			// Extract the file path from `source /path/to/file`
+			// 从 `source /path/to/file` 提取路径
 			parts := strings.SplitN(line, "source ", 2)
 			if len(parts) < 2 {
 				continue
 			}
 			sourcePath := strings.TrimSpace(parts[1])
 
-			// Check if the referenced file exists
+			// 被引用文件是否存在
 			checkResult, _ := hctx.Execute(fmt.Sprintf("test -f %s", sourcePath), false)
 			if checkResult != nil && checkResult.GetExitCode() == 0 {
 				continue
@@ -114,7 +113,7 @@ func cleanStaleEntriesFromFile(hctx *runner.StepContext, host, envFile string) i
 		}
 	}
 
-	// Clean stale YASCS_HOME if the path doesn't exist
+	// 若 YASCS_HOME 指向目录不存在，则清理该行
 	cmd = fmt.Sprintf("grep -oP 'export YASCS_HOME=\\K.*' %s 2>/dev/null", envFile)
 	result, _ = hctx.Execute(cmd, false)
 	if result != nil && result.GetStdout() != "" {

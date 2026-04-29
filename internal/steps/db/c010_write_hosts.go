@@ -8,7 +8,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC010WriteHosts writes VIP and SCAN entries to /etc/hosts on all nodes
+// StepC010WriteHosts 在所有节点将 VIP 与 SCAN 条目写入 /etc/hosts
 func StepC010WriteHosts() *runner.Step {
 	return &runner.Step{
 		ID:          "C-010",

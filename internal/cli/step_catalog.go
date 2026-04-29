@@ -59,33 +59,33 @@ func osStepsB001Only() []*runner.Step {
 	return nil
 }
 
-// PrintOSStepCatalog lists OS baseline steps (yinstall os).
+// PrintOSStepCatalog 打印 OS 基线 steps（yinstall os）。
 func PrintOSStepCatalog() {
-	fmt.Fprintln(os.Stdout, "yinstall os — step catalog (execution order)")
-	fmt.Fprintln(os.Stdout, "Use global filters: -s/--include-steps, --exclude-steps, --include-tags, --exclude-tags")
+	fmt.Fprintln(os.Stdout, "yinstall os - step catalog (execution order)")
+	fmt.Fprintln(os.Stdout, "Use global filters: -s/--include-steps, -e/--exclude-steps")
 	printStepSection("OS baseline steps", ossteps.GetAllSteps())
 	fmt.Fprintln(os.Stdout, "")
 }
 
-// PrintDBStepCatalog lists steps for yinstall db (OS prefix + DB).
+// PrintDBStepCatalog 打印 yinstall db 的 steps（OS 前置 + DB）。
 func PrintDBStepCatalog(skipOS bool) {
-	fmt.Fprintln(os.Stdout, "yinstall db — step catalog (typical execution order)")
+	fmt.Fprintln(os.Stdout, "yinstall db - step catalog (typical execution order)")
 	if skipOS {
 		printStepSection("OS (only when --skip-os: connectivity)", osStepsB001Only())
 	} else {
 		printStepSection("OS baseline (when --skip-os=false, default)", ossteps.GetAllSteps())
 	}
 	printStepSection("Database installation", dbsteps.GetAllSteps())
-	fmt.Fprintln(os.Stdout, "Note: combined list may be filtered by -s/--include-steps, --exclude-steps (wins over -s for same ID), tags, or --skip-os.")
+	fmt.Fprintln(os.Stdout, "Note: combined list may be filtered by -s/--include-steps, -e/--exclude-steps (wins over -s for same ID), or --skip-os.")
 	fmt.Fprintln(os.Stdout, "")
 }
 
-// PrintStandbyStepCatalog lists OS prefix + standby steps, matching the default allSteps layout
-// (skipOS=true → B-001 only; skipOS=false → full OS baseline), then E-001…E-019.
-// Actual execution is phased (primary / per-standby / primary); see standby command docs.
+// PrintStandbyStepCatalog 打印 OS 前置 + standby steps，与默认 allSteps 布局一致：
+// （skipOS=true → 仅 B-001；skipOS=false → 完整 OS 基线），然后是 E-001…E-019。
+// 实际执行是分阶段的（primary / per-standby / primary）；详见 standby 命令说明。
 func PrintStandbyStepCatalog(skipOS bool) {
-	fmt.Fprintln(os.Stdout, "yinstall standby — step catalog")
-	fmt.Fprintln(os.Stdout, "Layout matches combined step list before -s/--exclude-steps filters. Runtime order is phased (see logs: Phase 1–6+).")
+	fmt.Fprintln(os.Stdout, "yinstall standby - step catalog")
+	fmt.Fprintln(os.Stdout, "Layout matches combined step list before -s/-e filters. Runtime order is phased (see logs: Phase 1-6+).")
 	if skipOS {
 		printStepSection("OS (default --skip-os=true: B-001 on each standby)", osStepsB001Only())
 	} else {
@@ -96,9 +96,9 @@ func PrintStandbyStepCatalog(skipOS bool) {
 	fmt.Fprintln(os.Stdout, "")
 }
 
-// PrintYCMStepCatalog lists YCM install steps and OS prefix.
+// PrintYCMStepCatalog 打印 YCM 安装 steps 与 OS 前置 steps。
 func PrintYCMStepCatalog(skipOS bool) {
-	fmt.Fprintln(os.Stdout, "yinstall ycm — step catalog (typical execution order)")
+	fmt.Fprintln(os.Stdout, "yinstall ycm - step catalog (typical execution order)")
 	if skipOS {
 		printStepSection("OS (only when --skip-os: connectivity)", osStepsB001Only())
 	} else {
@@ -108,9 +108,9 @@ func PrintYCMStepCatalog(skipOS bool) {
 	fmt.Fprintln(os.Stdout, "")
 }
 
-// PrintYMPStepCatalog lists YMP install steps and minimal OS prefix.
+// PrintYMPStepCatalog 打印 YMP 安装 steps 与最小 OS 前置 steps。
 func PrintYMPStepCatalog(skipOS bool) {
-	fmt.Fprintln(os.Stdout, "yinstall ymp — step catalog (typical execution order)")
+	fmt.Fprintln(os.Stdout, "yinstall ymp - step catalog (typical execution order)")
 	if skipOS {
 		printStepSection("OS (only when --skip-os: connectivity)", osStepsB001Only())
 	} else {
@@ -120,9 +120,9 @@ func PrintYMPStepCatalog(skipOS bool) {
 	fmt.Fprintln(os.Stdout, "")
 }
 
-// PrintCleanStepCatalog lists clean command steps.
+// PrintCleanStepCatalog 打印 clean 命令的 steps。
 func PrintCleanStepCatalog() {
-	fmt.Fprintln(os.Stdout, "yinstall clean — step catalog")
+	fmt.Fprintln(os.Stdout, "yinstall clean - step catalog")
 	printStepSection("Top-level clean (orchestration)", clean.GetAllSteps())
 	printStepSection("DB detailed substeps (--type db with --detailed-steps)", clean.GetDBCleanSteps())
 	fmt.Fprintln(os.Stdout, "For --type ycm / ymp, only the matching top-level step runs, then its internal actions.")

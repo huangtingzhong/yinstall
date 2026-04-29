@@ -8,7 +8,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB001CheckConnectivity Check target host connectivity
+// StepB001CheckConnectivity 检查目标主机连通性与基础环境
 func StepB001CheckConnectivity() *runner.Step {
 	return &runner.Step{
 		ID:          "B-001",
@@ -18,13 +18,9 @@ func StepB001CheckConnectivity() *runner.Step {
 		Optional:    false,
 
 		PreCheck: func(ctx *runner.StepContext) error {
-			return nil
-		},
-
-		Action: func(ctx *runner.StepContext) error {
 			host := ctx.Executor.Host()
 
-			// 1. 检查是否能执行基本命令（证明 SSH 连接正常）
+			// 1) 基础 SSH 命令
 			result, err := ctx.ExecuteWithCheck("echo 'connection_ok'", false)
 			if err != nil {
 				return fmt.Errorf("SSH connection failed to %s: %w", host, err)
@@ -33,7 +29,7 @@ func StepB001CheckConnectivity() *runner.Step {
 				return fmt.Errorf("unexpected response from %s", host)
 			}
 
-			// 2. 获取主机名
+			// 2) 主机名
 			result, _ = ctx.Execute("hostname", false)
 			hostname := ""
 			if result != nil {
@@ -41,11 +37,11 @@ func StepB001CheckConnectivity() *runner.Step {
 			}
 			ctx.SetResult("hostname", hostname)
 
-			// 3. 检测操作系统信息（使用公共函数）
+			// 3) OS 探测
 			osInfo := commonos.DetectOSInfo(ctx)
 			ctx.OSInfo = osInfo
 
-			// 4. 检查是否有 root 权限或 sudo 权限
+			// 4) 权限 / sudo 能力（只读探测）
 			result, _ = ctx.Execute("id -u", false)
 			uid := ""
 			if result != nil {
@@ -53,17 +49,24 @@ func StepB001CheckConnectivity() *runner.Step {
 			}
 			isRoot := uid == "0"
 			ctx.SetResult("is_root", isRoot)
-
 			if !isRoot {
 				result, _ = ctx.Execute("sudo -n true 2>/dev/null && echo 'sudo_ok'", false)
 				hasSudo := result != nil && strings.Contains(result.GetStdout(), "sudo_ok")
 				ctx.SetResult("has_sudo", hasSudo)
 				if !hasSudo {
-					ctx.Logger.Warn("User is not root and sudo requires password")
+					ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+						StepID:      "B-001",
+						StepName:    "Check Connectivity",
+						Host:        host,
+						Severity:    runner.PrecheckSeverityWarn,
+						Code:        "PC.OS.SUDO",
+						Message:     "Current user is not root and passwordless sudo is not available; subsequent sudo-required steps may fail",
+						Remediation: "Run as root, or configure passwordless sudo (sudoers NOPASSWD) for the login user",
+					})
 				}
 			}
 
-			// 5. 获取内存信息
+			// 5) 内存信息（尽力而为）
 			totalMem := ""
 			result, _ = ctx.Execute("free -h 2>/dev/null | grep Mem | awk '{print $2}'", false)
 			if result != nil {
@@ -71,13 +74,58 @@ func StepB001CheckConnectivity() *runner.Step {
 			}
 			ctx.SetResult("total_memory", totalMem)
 
-			// 6. 获取 CPU 核心数
+			// 6) CPU 核数（尽力而为）
 			cpuCores := ""
 			result, _ = ctx.Execute("nproc 2>/dev/null || grep -c processor /proc/cpuinfo", false)
 			if result != nil {
 				cpuCores = strings.TrimSpace(result.GetStdout())
 			}
 			ctx.SetResult("cpu_cores", cpuCores)
+
+			// 7) 基础工具链是否存在（供后续步骤使用）
+			commands := []string{"cat", "grep", "awk", "sed"}
+			for _, cmd := range commands {
+				res, _ := ctx.Execute(fmt.Sprintf("command -v %s >/dev/null 2>&1", cmd), false)
+				if res == nil || res.GetExitCode() != 0 {
+					return fmt.Errorf("required command '%s' not found", cmd)
+				}
+			}
+
+			return nil
+		},
+
+		Action: func(ctx *runner.StepContext) error {
+			host := ctx.Executor.Host()
+			hostname := ctx.GetParamString("hostname", "")
+			if v, ok := ctx.Results["hostname"]; ok {
+				if s, ok := v.(string); ok {
+					hostname = s
+				}
+			}
+			osInfo := ctx.OSInfo
+			if osInfo == nil {
+				// 兜底：正常情况下 PreCheck 已填充 OSInfo
+				osInfo = commonos.DetectOSInfo(ctx)
+				ctx.OSInfo = osInfo
+			}
+			totalMem := ""
+			if v, ok := ctx.Results["total_memory"]; ok {
+				if s, ok := v.(string); ok {
+					totalMem = s
+				}
+			}
+			cpuCores := ""
+			if v, ok := ctx.Results["cpu_cores"]; ok {
+				if s, ok := v.(string); ok {
+					cpuCores = s
+				}
+			}
+			isRoot := false
+			if v, ok := ctx.Results["is_root"]; ok {
+				if b, ok := v.(bool); ok {
+					isRoot = b
+				}
+			}
 
 			// 输出主机信息
 			ctx.Logger.Info("Host: %s", host)
@@ -116,14 +164,6 @@ func StepB001CheckConnectivity() *runner.Step {
 		},
 
 		PostCheck: func(ctx *runner.StepContext) error {
-			// 验证基本命令可用
-			commands := []string{"cat", "grep", "awk", "sed"}
-			for _, cmd := range commands {
-				result, err := ctx.Execute(fmt.Sprintf("which %s", cmd), false)
-				if err != nil || result == nil || result.GetExitCode() != 0 {
-					return fmt.Errorf("required command '%s' not found", cmd)
-				}
-			}
 			return nil
 		},
 	}

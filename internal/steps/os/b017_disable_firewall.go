@@ -7,7 +7,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB017DisableFirewall Disable firewall (optional/dangerous)
+// StepB017DisableFirewall 关闭或调整防火墙（可选/危险）
 func StepB017DisableFirewall() *runner.Step {
 	return &runner.Step{
 		ID:          "B-017",

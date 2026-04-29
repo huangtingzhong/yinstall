@@ -2,8 +2,8 @@ package db
 
 import (
 	"fmt"
-	"path"         // remote (Linux) path
-	"path/filepath" // local (OS-native) path — for filepath.IsAbs on Windows
+	"path"          // 远端（Linux）路径拼接
+	"path/filepath" // 本地操作系统路径（Windows 上 filepath.IsAbs 等）
 	"regexp"
 	"strings"
 
@@ -12,7 +12,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC029ExecuteCustomSQL Execute custom SQL script
+// StepC029ExecuteCustomSQL 执行自定义 SQL 脚本
 func StepC029ExecuteCustomSQL() *runner.Step {
 	return &runner.Step{
 		ID:          "C-029",
@@ -92,13 +92,13 @@ func StepC029ExecuteCustomSQL() *runner.Step {
 //
 // 工具支持在 Windows/Linux/macOS 控制端运行，目标端始终为 Linux。
 // 路径语义：
-//   - remote:/path 或 r:/path   — 明确指定远端 Linux 路径，直接使用
-//   - local:/path 或 l:/path    — 明确指定本地文件，上传后使用
-//   - /absolute/path            — 以 '/' 开头，视为远端 Linux 绝对路径，先检查远端，
-//                                  不存在则尝试从本地上传
-//   - C:\...（Windows 本地绝对）  — filepath.IsAbs 为 true 但不以 '/' 开头，
-//                                  直接从本地上传
-//   - relative/path             — 相对路径，从本地软件目录查找并上传
+//   - remote:/path 或 r:/path    -  明确指定远端 Linux 路径，直接使用
+//   - local:/path 或 l:/path     -  明确指定本地文件，上传后使用
+//   - /absolute/path             -  以 '/' 开头，视为远端 Linux 绝对路径，先检查远端，
+//     不存在则尝试从本地上传
+//   - C:\...（Windows 本地绝对）   -  filepath.IsAbs 为 true 但不以 '/' 开头，
+//     直接从本地上传
+//   - relative/path              -  相对路径，从本地软件目录查找并上传
 func resolveScriptPath(ctx *runner.StepContext, scriptPath string) (string, error) {
 	scriptPath = strings.TrimSpace(scriptPath)
 	if scriptPath == "" {

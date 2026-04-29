@@ -49,7 +49,7 @@ func StepG004CheckDeployConfig() *runner.Step {
 				ctx.Logger.Info("Deploy config contents (first 20 lines):\n%s", result.GetStdout())
 			}
 
-			ctx.Logger.Info("✓ Deploy config file exists and is readable: %s", deployFile)
+			ctx.Logger.Info("OK: Deploy config file exists and is readable: %s", deployFile)
 			return nil
 		},
 

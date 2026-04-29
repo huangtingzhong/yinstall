@@ -64,7 +64,7 @@ func RunConnectivityAndYACPrecheck(hosts []HostExec, params map[string]interface
 	logger.ConsoleWithType("C-001", "Check Connectivity and YAC Prerequisites", firstHost, "start", "", "", 0)
 	logger.Info("Running connectivity and YAC prerequisites check...")
 
-	// 1. Network: quick connectivity check on each host
+	// 1. 网络：在各主机上做快速连通性检查
 	for _, h := range hosts {
 		result, err := c001Exec(h, logger, "echo 'connection_ok'", false)
 		if err != nil {
@@ -79,14 +79,20 @@ func RunConnectivityAndYACPrecheck(hosts []HostExec, params map[string]interface
 	user := getParamString(params, "os_user", "yashan")
 
 	if !isYACMode {
-		// Standalone: check product user exists on the single host
+		// 单机：若 --skip-os，产品用户须已存在；若包含 OS 基线（未 skip），用户由 B-003 创建，
+		// 全局预检在 Phase 2 开头执行时早于 B-003 的 apply，故不在此强制要求用户已存在（与 B-010/C-006 预检策略一致）。
+		skipOS := getParamBool(params, "db_skip_os", false)
 		h := hosts[0]
-		ru, _ := c001Exec(h, logger, fmt.Sprintf("id -u %s 2>/dev/null", user), false)
-		uid := strings.TrimSpace(execStdout(ru))
-		if uid == "" {
-			return fmt.Errorf("user %s does not exist on node %s; please create the user first or run OS preparation", user, h.Host)
+		if skipOS {
+			ru, _ := c001Exec(h, logger, fmt.Sprintf("id -u %s 2>/dev/null", user), false)
+			uid := strings.TrimSpace(execStdout(ru))
+			if uid == "" {
+				return fmt.Errorf("user %s does not exist on node %s; with --skip-os create the user first or run OS preparation", user, h.Host)
+			}
+			logger.Info("Standalone (--skip-os): product user %s exists on %s (UID=%s)", user, h.Host, uid)
+		} else {
+			logger.Info("Standalone with OS baseline: deferring product user existence to step order (B-003 creates user before DB steps that need it)")
 		}
-		logger.Info("Standalone: product user %s exists on %s (UID=%s)", user, h.Host, uid)
 		logger.ConsoleWithType("C-001", "Check Connectivity and YAC Prerequisites", firstHost, "success", "", "", time.Duration(0))
 		return nil
 	}
@@ -191,6 +197,20 @@ func getParamString(params map[string]interface{}, key, def string) string {
 		return def
 	}
 	return s
+}
+
+func getParamBool(params map[string]interface{}, key string, def bool) bool {
+	if params == nil {
+		return def
+	}
+	v, ok := params[key]
+	if !ok || v == nil {
+		return def
+	}
+	if b, ok := v.(bool); ok {
+		return b
+	}
+	return def
 }
 
 func execStdout(result ExecResultForC001) string {

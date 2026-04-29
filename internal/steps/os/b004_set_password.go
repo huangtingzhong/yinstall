@@ -7,7 +7,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB004SetUserPassword Set user password (optional)
+// StepB004SetUserPassword 设置产品用户密码（可选）
 func StepB004SetUserPassword() *runner.Step {
 	return &runner.Step{
 		ID:          "B-004",

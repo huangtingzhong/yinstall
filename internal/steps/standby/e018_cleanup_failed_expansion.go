@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -21,12 +22,12 @@ func StepE018CleanupFailedExpansion() *runner.Step {
 		Optional:    true,
 
 		PreCheck: func(ctx *runner.StepContext) error {
-			// This step requires explicit --force-steps E-018 (or global -f) or --standby-cleanup-on-failure
+			// This step requires explicit --force-steps E-018 (or global -F) or --standby-cleanup-on-failure
 			cleanupOnFailure := ctx.GetParamBool("standby_cleanup_on_failure", false)
 			isForce := ctx.IsForceStep()
 
 			if !cleanupOnFailure && !isForce {
-				return fmt.Errorf("cleanup step requires --force-steps E-018 (or global -f) or --standby-cleanup-on-failure flag")
+				return fmt.Errorf("cleanup step requires --force-steps E-018 (or global -F) or --standby-cleanup-on-failure flag")
 			}
 
 			return nil
@@ -35,13 +36,19 @@ func StepE018CleanupFailedExpansion() *runner.Step {
 		Action: func(ctx *runner.StepContext) error {
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
 			user := ctx.GetParamString("os_user", "yashan")
+			beginPort := ctx.GetParamInt("db_begin_port", 1688)
+
+			homeDir, err := commonos.GetUserHomeDir(ctx, user)
+			if err != nil {
+				homeDir = fmt.Sprintf("/home/%s", user)
+			}
+			envFile := commonos.DetermineEnvFile(homeDir, beginPort)
 
 			ctx.Logger.Info("WARNING: Starting cleanup of failed expansion")
 			ctx.Logger.Info("This operation will remove standby nodes from the cluster")
 
 			// Get cluster status to find node IDs
-			cmd := fmt.Sprintf("su - %s -c 'yasboot cluster status -c %s -d'", user, clusterName)
-			result, err := ctx.Execute(cmd, true)
+			result, err := commonos.ExecuteAsUserWithEnv(ctx, user, envFile, fmt.Sprintf("yasboot cluster status -c %s -d", clusterName), true)
 			if err != nil {
 				return fmt.Errorf("failed to get cluster status: %w", err)
 			}

@@ -70,8 +70,7 @@ func StepCleanDB001QueryYACDisks() *runner.Step {
 			}
 
 			// 切换到数据库用户执行 ycsctl query disk
-			cmd := fmt.Sprintf("su - %s -c '%s query disk'", osUser, ycsctlPath)
-			result, err := ctx.Execute(cmd, true)
+			result, err := commonos.ExecuteAsUser(ctx, osUser, fmt.Sprintf("%s query disk", ycsctlPath), true)
 			if err != nil || result == nil || result.GetExitCode() != 0 {
 				ctx.Logger.Warn("Failed to execute ycsctl query disk: %v", err)
 				if result != nil {
@@ -268,7 +267,7 @@ func StepCleanDB003RemoveDirectories() *runner.Step {
 				{"YASDB_LOG", yasdbLog},
 			} {
 				if !isSafePath(p.path) {
-					return fmt.Errorf("unsafe path for %s: '%s' — refusing to proceed", p.name, p.path)
+					return fmt.Errorf("unsafe path for %s: '%s' - refusing to proceed", p.name, p.path)
 				}
 			}
 

@@ -22,6 +22,37 @@ func StepG002ExtractPackage() *runner.Step {
 
 		PreCheck: func(ctx *runner.StepContext) error {
 			pkgPath := ctx.GetParamString("ycm_package", "")
+			installDir := strings.TrimSpace(ctx.GetParamString("ycm_install_dir", "/opt"))
+			if installDir == "" {
+				return fmt.Errorf("ycm_install_dir is required")
+			}
+
+			// Directory checks should be visible in precheck (read-only).
+			// We do not create directories in PreCheck.
+			for _, th := range ctx.HostsToRun() {
+				hctx := ctx.ForHost(th)
+				res, _ := hctx.Execute(fmt.Sprintf("if [ -e %s ] && [ ! -d %s ]; then echo NOT_DIR; elif [ -d %s ]; then echo IS_DIR; else echo MISSING; fi",
+					installDir, installDir, installDir), false)
+				kind := ""
+				if res != nil {
+					kind = strings.TrimSpace(res.GetStdout())
+				}
+				if strings.Contains(kind, "NOT_DIR") {
+					return fmt.Errorf("ycm_install_dir exists but is not a directory on %s: %s", th.Host, installDir)
+				}
+				if strings.Contains(kind, "MISSING") {
+					ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+						StepID:      "G-002",
+						StepName:    "Extract YCM Package",
+						Host:        th.Host,
+						Severity:    runner.PrecheckSeverityInfo,
+						Code:        "PC.YCM.INSTALL_DIR.MISSING",
+						Message:     fmt.Sprintf("YCM install directory does not exist: %s; apply will mkdir -p and extract", installDir),
+						Remediation: "you may pre-create the directory and set permissions, or let apply create it",
+					})
+				}
+			}
+
 			if pkgPath == "" {
 				// 尝试自动查找最新版本的 YCM 软件包
 				ctx.Logger.Info("ycm_package not specified, searching for latest yashandb-cloud-manager package...")
@@ -107,10 +138,10 @@ func StepG002ExtractPackage() *runner.Step {
 			if result == nil || result.GetExitCode() != 0 {
 				ctx.Logger.Warn("ycm-init not found at %s, checking in ycm subdir", ycmInit)
 			} else {
-				ctx.Logger.Info("✓ ycm-init found at %s", ycmInit)
+				ctx.Logger.Info("OK: ycm-init found at %s", ycmInit)
 			}
 
-			ctx.Logger.Info("✓ YCM directory exists: %s", ycmDir)
+			ctx.Logger.Info("OK: YCM directory exists: %s", ycmDir)
 			return nil
 		},
 	}

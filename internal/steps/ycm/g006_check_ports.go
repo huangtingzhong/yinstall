@@ -25,6 +25,30 @@ func StepG006CheckPorts() *runner.Step {
 			if result == nil || result.GetExitCode() != 0 {
 				return fmt.Errorf("neither ss nor netstat command found")
 			}
+			// Also check all ports in precheck (read-only) so --precheck can surface issues.
+			ports := []struct {
+				name     string
+				paramKey string
+				defVal   int
+			}{
+				{"YCM Web", "ycm_port", 9060},
+				{"Prometheus", "ycm_prometheus_port", 9061},
+				{"Loki HTTP", "ycm_loki_http_port", 9062},
+				{"Loki gRPC", "ycm_loki_grpc_port", 9063},
+				{"YasDB Exporter", "ycm_yasdb_exporter_port", 9064},
+			}
+			var usedPorts []string
+			for _, p := range ports {
+				portVal := ctx.GetParamInt(p.paramKey, p.defVal)
+				cmd := fmt.Sprintf("ss -tlnp 2>/dev/null | grep -E ':%d([^0-9]|$)' || netstat -tlnp 2>/dev/null | grep -E ':%d([^0-9]|$)'", portVal, portVal)
+				r, _ := ctx.Execute(cmd, false)
+				if r != nil && r.GetExitCode() == 0 && strings.TrimSpace(r.GetStdout()) != "" {
+					usedPorts = append(usedPorts, fmt.Sprintf("%d(%s)", portVal, p.name))
+				}
+			}
+			if len(usedPorts) > 0 {
+				return fmt.Errorf("the following ports are already in use: %s", strings.Join(usedPorts, ", "))
+			}
 			return nil
 		},
 
@@ -55,7 +79,7 @@ func StepG006CheckPorts() *runner.Step {
 					ctx.Logger.Warn("Port %d (%s) is in use: %s", portVal, p.name, strings.TrimSpace(result.GetStdout()))
 					usedPorts = append(usedPorts, fmt.Sprintf("%d(%s)", portVal, p.name))
 				} else {
-					ctx.Logger.Info("✓ Port %d (%s) is free", portVal, p.name)
+					ctx.Logger.Info("OK: Port %d (%s) is free", portVal, p.name)
 				}
 			}
 

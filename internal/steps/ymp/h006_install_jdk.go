@@ -140,7 +140,7 @@ func StepH006InstallJDK() *runner.Step {
 			if ver == "" {
 				return fmt.Errorf("java -version returned empty output")
 			}
-			ctx.Logger.Info("✓ JDK verified: %s", ver)
+			ctx.Logger.Info("OK: JDK verified: %s", ver)
 			return nil
 		},
 	}

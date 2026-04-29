@@ -6,7 +6,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC003SetDirOwnership Set directory ownership
+// StepC006SetDirOwnership 设置数据库相关目录属主
 func StepC006SetDirOwnership() *runner.Step {
 	return &runner.Step{
 		ID:          "C-006",
@@ -18,9 +18,17 @@ func StepC006SetDirOwnership() *runner.Step {
 		PreCheck: func(ctx *runner.StepContext) error {
 			user := ctx.GetParamString("os_user", "yashan")
 
-			// Check user exists
+			// 确认 OS 用户存在。全量安装时 B-003 早于 C-006；--precheck/--dry-run 不执行 Action，用户可能尚未创建（与 B-010 一致）。
+			// 若 --skip-os，则不会跑 B-003，此时用户必须已存在。
 			result, _ := ctx.Execute(fmt.Sprintf("id %s", user), false)
 			if result == nil || result.GetExitCode() != 0 {
+				if ctx.Precheck || ctx.DryRun {
+					if ctx.GetParamBool("db_skip_os", false) {
+						return fmt.Errorf("user %s does not exist (--skip-os: create the user first or run OS preparation without --skip-os)", user)
+					}
+					ctx.Logger.Info("C-006: user %s not found yet; skipping strict precheck (B-003 will create user before apply runs C-006)", user)
+					return nil
+				}
 				return fmt.Errorf("user %s does not exist", user)
 			}
 			return nil

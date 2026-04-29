@@ -21,12 +21,12 @@ type archiveDestHit struct {
 
 // clusterStatusRow yasboot cluster status -d 表格中的一行（按表头列名解析）。
 type clusterStatusRow struct {
-	Hostid           string
-	Nodeid           string
-	InstanceStatus   string
-	ListenAddress    string
-	DatabaseStatus   string
-	DatabaseRole     string
+	Hostid         string
+	Nodeid         string
+	InstanceStatus string
+	ListenAddress  string
+	DatabaseStatus string
+	DatabaseRole   string
 }
 
 var archiveNodeIDRE = regexp.MustCompile(`(?i)NODE_ID\s*=\s*(\S+)`)
@@ -278,7 +278,7 @@ func StepE008CheckArchiveDest() *runner.Step {
 			}
 
 			if len(archiveHits) == 0 {
-				ctx.Logger.Info("✓ No standby targets found in archive destination configuration")
+				ctx.Logger.Info("OK: No standby targets found in archive destination configuration")
 				return nil
 			}
 
@@ -299,7 +299,7 @@ func StepE008CheckArchiveDest() *runner.Step {
 				if csRes != nil {
 					detail = YasbootCombinedOutput(csRes.GetStdout(), csRes.GetStderr())
 				}
-				ctx.Logger.Error("yasboot cluster status cross-check failed (exit=%d, err=%v); archive already references target IP — aborting conservatively", exit, csErr)
+				ctx.Logger.Error("yasboot cluster status cross-check failed (exit=%d, err=%v); archive already references target IP - aborting conservatively", exit, csErr)
 				return fmt.Errorf("archive destination references standby target(s) but cluster status check failed (exit=%d): %v\n%s", exit, csErr, strings.TrimSpace(detail))
 			}
 			if strings.TrimSpace(csStdout) == "" {
@@ -326,12 +326,12 @@ func StepE008CheckArchiveDest() *runner.Step {
 				}
 				row, hasRow := byNode[nodeID]
 				if !hasRow {
-					ctx.Logger.Warn("archive NODE_ID=%s has no matching nodeid row in yasboot cluster status (possible stale metadata); target IP=%s — not blocking expansion; clean up archive if needed",
+					ctx.Logger.Warn("archive NODE_ID=%s has no matching nodeid row in yasboot cluster status (possible stale metadata); target IP=%s - not blocking expansion; clean up archive if needed",
 						nodeID, hit.target)
 					continue
 				}
 				if !instanceStatusIsOpen(row.InstanceStatus) {
-					ctx.Logger.Warn("archive references target %s (NODE_ID=%s) but cluster instance_status=%q (not open); treating as abnormal/not ready — not blocking expansion; hostid=%s listen=%s db_status=%q role=%q",
+					ctx.Logger.Warn("archive references target %s (NODE_ID=%s) but cluster instance_status=%q (not open); treating as abnormal/not ready - not blocking expansion; hostid=%s listen=%s db_status=%q role=%q",
 						hit.target, nodeID, row.InstanceStatus, row.Hostid, row.ListenAddress, row.DatabaseStatus, row.DatabaseRole)
 					continue
 				}
@@ -344,30 +344,23 @@ func StepE008CheckArchiveDest() *runner.Step {
 			}
 
 			if len(foundTargets) > 0 {
-				ctx.Logger.Error("╔════════════════════════════════════════════════════════════════╗")
-				ctx.Logger.Error("║  ERROR: Standby targets already configured in archive destination! ║")
-				ctx.Logger.Error("║  (cluster status: matching nodeid has instance_status=open)   ║")
-				ctx.Logger.Error("║                                                                ║")
-				ctx.Logger.Error("║  The following standby target(s) are already configured:      ║")
+				ctx.Logger.Error("================================================================")
+				ctx.Logger.Error("ERROR: Standby targets already configured in archive destination.")
+				ctx.Logger.Error("(cluster status: matching nodeid has instance_status=open)")
+				ctx.Logger.Error("Standby target(s) already configured:")
 				for _, target := range foundTargets {
-					ctx.Logger.Error("║    - %s", target)
+					ctx.Logger.Error("  - %s", target)
 				}
-				ctx.Logger.Error("║                                                                ║")
-				ctx.Logger.Error("║  Archive destination configuration:                            ║")
+				ctx.Logger.Error("Archive destination configuration:")
 				for _, dest := range allArchiveDests {
-					ctx.Logger.Error("║    %s", dest)
+					ctx.Logger.Error("  %s", dest)
 				}
-				ctx.Logger.Error("║                                                                ║")
-				ctx.Logger.Error("║  Action required:                                                ║")
-				ctx.Logger.Error("║  1. If you want to reconfigure standby, first remove the        ║")
-				ctx.Logger.Error("║     existing archive destination configuration.                 ║")
-				ctx.Logger.Error("║                                                                ║")
-				ctx.Logger.Error("║  2. Or use a different standby target IP address.              ║")
-				ctx.Logger.Error("╚════════════════════════════════════════════════════════════════╝")
+				ctx.Logger.Error("Action: remove existing archive destination configuration, or use a different standby IP.")
+				ctx.Logger.Error("================================================================")
 				return fmt.Errorf("standby targets %v already configured in archive destination (cluster instance open)", foundTargets)
 			}
 
-			ctx.Logger.Info("✓ archive referenced target(s) but cluster status shows instance not open or missing nodeid row — not blocking as already-configured standby")
+			ctx.Logger.Info("OK: archive referenced target(s) but cluster status shows instance not open or missing nodeid row - not blocking as already-configured standby")
 			return nil
 		},
 

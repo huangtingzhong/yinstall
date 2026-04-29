@@ -7,7 +7,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB024InstallMultipath Install multipath software (YAC)
+// StepB024InstallMultipath 安装 multipath 相关软件（device-mapper-multipath）
 // 注意：在 YAC 模式下，多路径软件已在 B-015 安装，此步骤会跳过
 // 此步骤仅用于非 YAC 模式但显式启用多路径的场景
 func StepB024InstallMultipath() *runner.Step {

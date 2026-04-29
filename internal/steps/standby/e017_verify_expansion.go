@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -19,19 +20,52 @@ func StepE017VerifyExpansion() *runner.Step {
 		Tags:        []string{"standby", "verify"},
 
 		PreCheck: func(ctx *runner.StepContext) error {
+			// Read-only capability checks: commands used in Action should exist.
+			r, _ := ctx.Execute("command -v ps >/dev/null 2>&1", false)
+			if r == nil || r.GetExitCode() != 0 {
+				return fmt.Errorf("ps command not found")
+			}
+			// pgrep is used
+			r, _ = ctx.Execute("command -v pgrep >/dev/null 2>&1", false)
+			if r == nil || r.GetExitCode() != 0 {
+				ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+					StepID:      "E-017",
+					StepName:    "Verify Expansion",
+					Host:        ctx.Executor.Host(),
+					Severity:    runner.PrecheckSeverityWarn,
+					Code:        "PC.STANDBY.PGREP.MISSING",
+					Message:     "pgrep is not available; the apply-time verification step cannot perform full process checks.",
+					Remediation: "Install the procps package (or provide an equivalent tool).",
+				})
+			}
+			ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+				StepID:      "E-017",
+				StepName:    "Verify Expansion",
+				Host:        ctx.Executor.Host(),
+				Severity:    runner.PrecheckSeverityInfo,
+				Code:        "PC.STANDBY.VERIFY.APPLY_ONLY",
+				Message:     "This step is for post-apply verification (connectivity/process/cluster status). In --precheck, it only checks command availability.",
+				Remediation: "Run it after expansion is complete (or run without --precheck) to perform real verification.",
+			})
 			return nil
 		},
 
 		Action: func(ctx *runner.StepContext) error {
 			user := ctx.GetParamString("os_user", "yashan")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
+			beginPort := ctx.GetParamInt("db_begin_port", 1688)
+
+			homeDir, err := commonos.GetUserHomeDir(ctx, user)
+			if err != nil {
+				homeDir = fmt.Sprintf("/home/%s", user)
+			}
+			envFile := commonos.DetermineEnvFile(homeDir, beginPort)
 
 			ctx.Logger.Info("Verifying standby expansion")
 
 			// Test yasql connectivity
 			ctx.Logger.Info("Testing database connectivity...")
-			cmd := fmt.Sprintf("su - %s -c 'echo \"SELECT 1 FROM DUAL;\" | yasql / as sysdba'", user)
-			result, err := ctx.Execute(cmd, true)
+			result, err := commonos.ExecuteAsUserWithEnv(ctx, user, envFile, `echo "SELECT 1 FROM DUAL;" | yasql / as sysdba`, true)
 			if err != nil {
 				ctx.Logger.Warn("Database connectivity test failed: %v", err)
 			} else if result.GetExitCode() == 0 {
@@ -41,8 +75,7 @@ func StepE017VerifyExpansion() *runner.Step {
 			}
 
 			// Check yasboot availability
-			cmd = fmt.Sprintf("su - %s -c 'which yasboot'", user)
-			result, _ = ctx.Execute(cmd, true)
+			result, _ = commonos.ExecuteAsUserWithEnv(ctx, user, envFile, "command -v yasboot", true)
 			if result != nil && result.GetExitCode() == 0 {
 				ctx.Logger.Info("yasboot found: %s", strings.TrimSpace(result.GetStdout()))
 			} else {
@@ -78,8 +111,7 @@ func StepE017VerifyExpansion() *runner.Step {
 
 			// Get cluster status
 			ctx.Logger.Info("Final cluster status:")
-			cmd = fmt.Sprintf("su - %s -c 'yasboot cluster status -c %s -d' 2>/dev/null || echo 'status check failed'", user, clusterName)
-			result, _ = ctx.Execute(cmd, true)
+			result, _ = commonos.ExecuteAsUserWithEnv(ctx, user, envFile, fmt.Sprintf("yasboot cluster status -c %s -d 2>/dev/null || echo 'status check failed'", clusterName), true)
 			if result != nil && result.GetStdout() != "" {
 				for _, line := range strings.Split(result.GetStdout(), "\n") {
 					if line != "" {

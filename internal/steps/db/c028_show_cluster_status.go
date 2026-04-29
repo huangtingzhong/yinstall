@@ -5,10 +5,11 @@ import (
 	"os"
 	"strings"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC014ShowClusterStatus Display cluster status at the end of installation
+// StepC028ShowClusterStatus 安装流程末尾展示集群状态
 func StepC028ShowClusterStatus() *runner.Step {
 	return &runner.Step{
 		ID:          "C-028",
@@ -18,7 +19,7 @@ func StepC028ShowClusterStatus() *runner.Step {
 		Optional:    false,
 
 		PreCheck: func(ctx *runner.StepContext) error {
-			// Always run this step
+			// 本步始终执行
 			return nil
 		},
 
@@ -40,14 +41,18 @@ func StepC028ShowClusterStatus() *runner.Step {
 
 			// 如果没有存储的环境变量文件，使用默认的 .bashrc
 			if envFile == "" {
-				envFile = fmt.Sprintf("/home/%s/.bashrc", user)
+				beginPort := hctx.GetParamInt("db_begin_port", 1688)
+				homeDir, err := commonos.GetUserHomeDir(hctx, user)
+				if err != nil {
+					homeDir = fmt.Sprintf("/home/%s", user)
+				}
+				envFile = commonos.DetermineEnvFile(homeDir, beginPort)
 			}
 
 			hctx.Logger.Info("Displaying cluster status for cluster: %s", clusterName)
 
 			// 执行 yasboot cluster status 命令
-			cmd := fmt.Sprintf("su - %s -c 'source %s && yasboot cluster status -c %s -d'", user, envFile, clusterName)
-			result, _ := hctx.Execute(cmd, false)
+			result, _ := commonos.ExecuteAsUserWithEnv(hctx, user, envFile, fmt.Sprintf("yasboot cluster status -c %s -d", clusterName), false)
 
 			if result != nil && result.GetExitCode() == 0 {
 				output := result.GetStdout()

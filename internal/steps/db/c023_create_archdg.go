@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"strings"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC023CreateArchDG Create independent archive diskgroup after deployment
+// StepC023CreateArchDG 部署完成后创建独立的归档磁盘组（ArchDG）
 func StepC023CreateArchDG() *runner.Step {
 	return &runner.Step{
 		ID:          "C-023",
@@ -74,8 +75,7 @@ func StepC023CreateArchDG() *runner.Step {
 			firstCtx := ctx.ForHost(firstHost)
 
 			yasqlCmd := buildYasqlCmd(installPath, clusterName, dataPath, createSQL)
-			cmd := fmt.Sprintf("su - %s -c '%s'", user, yasqlCmd)
-			result, err := firstCtx.ExecuteWithCheck(cmd, true)
+			result, err := commonos.ExecuteAsUserWithCheck(firstCtx, user, yasqlCmd, true)
 			if err != nil {
 				stdout := ""
 				if result != nil {
@@ -94,8 +94,7 @@ func StepC023CreateArchDG() *runner.Step {
 			ctx.Logger.Info("Setting archive destination to +ARCH...")
 
 			alterCmd := buildYasqlCmd(installPath, clusterName, dataPath, alterSQL)
-			cmd = fmt.Sprintf("su - %s -c '%s'", user, alterCmd)
-			result, err = firstCtx.Execute(cmd, true)
+			result, err = commonos.ExecuteAsUser(firstCtx, user, alterCmd, true)
 			if err != nil || (result != nil && result.GetExitCode() != 0) {
 				ctx.Logger.Warn("Failed to set archive destination (can be set manually later): %s", alterSQL)
 			} else {
@@ -116,8 +115,7 @@ func StepC023CreateArchDG() *runner.Step {
 
 			checkSQL := "SELECT name, state, total_mb, free_mb FROM v\\$yfs_diskgroup WHERE name = 'ARCH';"
 			yasqlCmd := buildYasqlCmd(installPath, clusterName, dataPath, checkSQL)
-			cmd := fmt.Sprintf("su - %s -c '%s'", user, yasqlCmd)
-			result, _ := firstCtx.Execute(cmd, true)
+			result, _ := commonos.ExecuteAsUser(firstCtx, user, yasqlCmd, true)
 
 			if result != nil && strings.Contains(strings.ToUpper(result.GetStdout()), "ARCH") {
 				ctx.Logger.Info("Archive diskgroup ARCH verified:")
@@ -134,8 +132,8 @@ func StepC023CreateArchDG() *runner.Step {
 	}
 }
 
-// buildYasqlCmd builds a yasql command with explicit PATH using install path.
-// This avoids relying on .bashrc which may not be configured yet at C-023 time.
+// buildYasqlCmd 基于安装路径拼接 yasql 命令并显式设置 PATH。
+// 避免依赖 .bashrc（C-023 阶段可能尚未配置好环境）。
 func buildYasqlCmd(installPath, clusterName, dataPath, sql string) string {
 	escapedSQL := strings.ReplaceAll(sql, "$", "\\$")
 	return fmt.Sprintf(

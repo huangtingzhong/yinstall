@@ -78,7 +78,7 @@ func StepH007ValidateJDK() *runner.Step {
 			if versionOutput == "" {
 				versionOutput = strings.TrimSpace(result.GetStderr())
 			}
-			ctx.Logger.Info("✓ JDK validated: %s", versionOutput)
+			ctx.Logger.Info("OK: JDK validated: %s", versionOutput)
 			return nil
 		},
 	}

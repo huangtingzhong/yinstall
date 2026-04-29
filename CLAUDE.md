@@ -79,7 +79,7 @@ Each installation type has a registry function that returns ordered steps:
 - Each subcommand:
   - Defines its own flags
   - Builds a step list from the registry
-  - Filters steps based on `--include-steps`, `--exclude-steps`, `--include-tags`, `--exclude-tags`
+  - Filters steps based on `--include-steps` (`-s`), `--exclude-steps` (`-e`)
   - Executes steps sequentially with error handling
 
 ### SSH & Local Execution
@@ -115,11 +115,9 @@ Each installation type has a registry function that returns ordered steps:
 4. Pass it to steps via `ctx.Params` or `ctx.GetParam*()`
 
 ### Filtering Steps
-- `--include-steps B-001,B-002` or `--include-steps B-001-B-005` (range syntax)
-- `--exclude-steps B-010-B-015`
-- `--include-tags os,yac` (only steps with these tags)
-- `--exclude-tags dangerous`
-- `--force B-001,B-002` (force re-execute, deletes existing resources)
+- `-s` / `--include-steps B-001,B-002` or `B-001-B-005` (range syntax)
+- `-e` / `--exclude-steps B-010-B-015`
+- `-F` / `--force` (all steps) or `-f` / `--force-steps B-001,B-002` (force re-execute, deletes existing resources)
 
 ### Debugging
 - Use `--dry-run` to see what would execute without making changes

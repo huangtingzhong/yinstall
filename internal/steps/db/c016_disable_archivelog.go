@@ -23,7 +23,7 @@ func StepC016DisableArchivelog() *runner.Step {
 
 			result, _ := ctx.Execute(fmt.Sprintf("test -f %s", configPath), false)
 			if result == nil || result.GetExitCode() != 0 {
-				return fmt.Errorf("cluster config not found at %s (run C-014 first)", configPath)
+				return skipPrecheckDryRunWhenUpstreamDBArtifactMissing(ctx, fmt.Errorf("cluster config not found at %s (run C-014 first)", configPath))
 			}
 			return nil
 		},

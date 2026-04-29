@@ -10,7 +10,7 @@ import (
 	"github.com/yinstall/internal/logging"
 )
 
-// netResultAdapter adapts ExecResultForC001 to commonos.NetExecResult
+// netResultAdapter 将 ExecResultForC001 适配为 commonos.NetExecResult
 type netResultAdapter struct{ r ExecResultForC001 }
 
 func (a *netResultAdapter) GetExitCode() int {
@@ -27,7 +27,7 @@ func (a *netResultAdapter) GetStdout() string {
 	return a.r.GetStdout()
 }
 
-// netExecutorAdapter adapts ExecutorForC001 to commonos.NetExecutor
+// netExecutorAdapter 将 ExecutorForC001 适配为 commonos.NetExecutor
 type netExecutorAdapter struct {
 	e    ExecutorForC001
 	host string
@@ -49,8 +49,8 @@ func newNetAdapter(h HostExec) *netExecutorAdapter {
 	return &netExecutorAdapter{e: h.Executor, host: h.Host}
 }
 
-// RunNetworkValidation validates and/or auto-detects yac-public-network and yac-inter-cidr.
-// It writes final values back to params and returns an error if validation fails.
+// RunNetworkValidation 校验并/或自动探测 yac_public_network 与 yac_inter_cidr。
+// 将最终结果写回 params；校验失败则返回 error。
 func RunNetworkValidation(hosts []HostExec, params map[string]interface{}, logger *logging.Logger) error {
 	if len(hosts) == 0 {
 		return fmt.Errorf("no hosts for network validation")
@@ -84,8 +84,8 @@ func RunNetworkValidation(hosts []HostExec, params map[string]interface{}, logge
 	return nil
 }
 
-// detectOrValidatePublicNetwork handles public-network: auto-detect when empty, validate when set.
-// Returns the CIDR string and interface name.
+// detectOrValidatePublicNetwork 处理 public-network：为空则自动探测，非空则校验。
+// 返回 CIDR 字符串与网卡名。
 func detectOrValidatePublicNetwork(hosts []HostExec, publicNetwork string, logger *logging.Logger) (string, string, error) {
 	if publicNetwork == "" {
 		return autoDetectPublicNetwork(hosts, logger)
@@ -93,7 +93,7 @@ func detectOrValidatePublicNetwork(hosts []HostExec, publicNetwork string, logge
 	return validatePublicNetwork(hosts, publicNetwork, logger)
 }
 
-// autoDetectPublicNetwork finds the CIDR that contains all host public IPs.
+// autoDetectPublicNetwork 自动探测包含各节点业务 IP 的 public CIDR。
 func autoDetectPublicNetwork(hosts []HostExec, logger *logging.Logger) (string, string, error) {
 	firstAdapter := newNetAdapter(hosts[0])
 	info, err := commonos.GetInterfaceForIP(firstAdapter, hosts[0].Host)
@@ -116,7 +116,7 @@ func autoDetectPublicNetwork(hosts []HostExec, logger *logging.Logger) (string, 
 	return info.CIDR, info.Name, nil
 }
 
-// validatePublicNetwork checks that the user-provided public-network CIDR contains all host IPs.
+// validatePublicNetwork 校验用户提供的 public-network CIDR 是否包含所有节点 IP。
 func validatePublicNetwork(hosts []HostExec, publicNetwork string, logger *logging.Logger) (string, string, error) {
 	_, _, err := net.ParseCIDR(publicNetwork)
 	if err != nil {
@@ -149,7 +149,7 @@ func validatePublicNetwork(hosts []HostExec, publicNetwork string, logger *loggi
 	return publicNetwork, info.Name, nil
 }
 
-// detectOrValidateInterCIDR handles inter-cidr: auto-detect when empty, validate when set.
+// detectOrValidateInterCIDR 处理 inter-cidr：为空则自动探测，非空则校验。
 func detectOrValidateInterCIDR(hosts []HostExec, interCIDR, publicNetwork string, logger *logging.Logger) (string, error) {
 	if interCIDR == "" {
 		return autoDetectInterCIDR(hosts, publicNetwork, logger)
@@ -157,15 +157,15 @@ func detectOrValidateInterCIDR(hosts []HostExec, interCIDR, publicNetwork string
 	return validateInterCIDR(hosts, interCIDR, logger)
 }
 
-// autoDetectInterCIDR finds a consistent non-public network across all nodes.
-// If none found, falls back to publicNetwork.
+// autoDetectInterCIDR 在所有节点上寻找一致的“非 public”互联网段。
+// 若找不到则回退为 publicNetwork。
 func autoDetectInterCIDR(hosts []HostExec, publicNetwork string, logger *logging.Logger) (string, error) {
 	type ifaceKey struct {
 		CIDR string
 		Name string
 	}
 
-	// Collect non-public interfaces from each node
+	// 收集每个节点上的网卡信息
 	nodeIfaces := make([][]commonos.InterfaceInfo, len(hosts))
 	for i, h := range hosts {
 		adapter := newNetAdapter(h)
@@ -178,7 +178,7 @@ func autoDetectInterCIDR(hosts []HostExec, publicNetwork string, logger *logging
 		nodeIfaces[i] = ifaces
 	}
 
-	// Build candidate map: for each (CIDR, ifaceName), count how many nodes have it
+	// 构建候选：(CIDR, 网卡名) -> 出现在多少个节点
 	candidateCounts := make(map[ifaceKey]int)
 	for _, ifaces := range nodeIfaces {
 		if ifaces == nil {
@@ -194,7 +194,7 @@ func autoDetectInterCIDR(hosts []HostExec, publicNetwork string, logger *logging
 		}
 	}
 
-	// Find a candidate present on all nodes with same CIDR + same interface name
+	// 选择在所有节点都存在且 CIDR+网卡名一致的候选
 	nodeCount := len(hosts)
 	var bestCandidate ifaceKey
 	found := false
@@ -219,8 +219,7 @@ func autoDetectInterCIDR(hosts []HostExec, publicNetwork string, logger *logging
 	return publicNetwork, nil
 }
 
-// validateInterCIDR checks that the user-provided inter-cidr exists on all nodes
-// and the interface name is consistent.
+// validateInterCIDR 校验用户提供的 inter-cidr 在各节点均存在，且网卡名一致。
 func validateInterCIDR(hosts []HostExec, interCIDR string, logger *logging.Logger) (string, error) {
 	_, _, err := net.ParseCIDR(interCIDR)
 	if err != nil {
@@ -264,7 +263,7 @@ func validateInterCIDR(hosts []HostExec, interCIDR string, logger *logging.Logge
 	return interCIDR, nil
 }
 
-// sameCIDR checks if two CIDR strings represent the same network.
+// sameCIDR 判断两个 CIDR 字符串是否表示同一网段
 func sameCIDR(a, b string) bool {
 	_, netA, errA := net.ParseCIDR(a)
 	_, netB, errB := net.ParseCIDR(b)

@@ -72,8 +72,8 @@ type StepContext struct {
 	OSInfo            *OSInfo                // 操作系统信息（由 B-001 填充）
 	LocalSoftwareDirs []string               // 本地软件目录
 	RemoteSoftwareDir string                 // 远程软件目录
-	ForceAll          bool                   // 强制执行所有步骤（-f 无参数）
-	ForceSteps        []string               // 强制执行的步骤（--force-steps）
+	ForceAll          bool                   // 强制执行所有步骤（-F / --force）
+	ForceSteps        []string               // 强制执行的步骤（-f / --force-steps）
 	ForceDeleteUser   bool                   // 允许强制模式删除/重建用户和组
 	CurrentStepID     string                 // 当前步骤 ID
 	StepIndex         int                    // 当前步骤序号（从 0 开始）
@@ -100,7 +100,7 @@ func (ctx *StepContext) HostsToRun() []TargetHost {
 	return nil
 }
 
-// IsForceStep 判断当前步骤是否为强制执行（-f 全局强制 或 --force-steps 指定了当前步骤）
+// IsForceStep 判断当前步骤是否为强制执行（-F/--force 全局强制 或 -f/--force-steps 指定了当前步骤）
 func (ctx *StepContext) IsForceStep() bool {
 	if ctx.ForceAll {
 		return true
@@ -131,6 +131,27 @@ type StepResult struct {
 	EndTime   time.Time
 	Duration  time.Duration
 	Artifacts map[string]string
+}
+
+// precheckStructuredIssueCoversFailure is true when PreCheck already called ReportPrecheckIssue with the
+// same message as err (e.g. PC.DB.DIR.ALREADY_EXISTS). Then we skip emitting duplicate PC.PRECHECK.FAILED lines.
+func precheckStructuredIssueCoversFailure(ctx *StepContext, stepID string, err error) bool {
+	if ctx == nil || err == nil {
+		return false
+	}
+	msg := strings.TrimSpace(err.Error())
+	for _, iss := range ctx.GetPrecheckIssues() {
+		if iss.StepID != stepID {
+			continue
+		}
+		if iss.Code == "" || iss.Code == "PC.PRECHECK.FAILED" {
+			continue
+		}
+		if strings.TrimSpace(iss.Message) == msg {
+			return true
+		}
+	}
+	return false
 }
 
 // RunStep 执行单个步骤
@@ -165,10 +186,29 @@ func RunStep(step *Step, ctx *StepContext) *StepResult {
 				result.Skipped = true
 				result.EndTime = time.Now()
 				result.Duration = result.EndTime.Sub(result.StartTime)
-				ctx.Logger.ConsoleStep(step.ID, step.Name, ctx.StepIndex, ctx.TotalSteps, "skip", result.Duration)
+				// For --precheck: optional skip is not noise; do not print extra precheck info.
+				// Keep debug logs via LogStepEnd.
+				if !ctx.Precheck {
+					ctx.Logger.ConsoleStep(step.ID, step.Name, ctx.StepIndex, ctx.TotalSteps, "skip", result.Duration)
+				}
 				ctx.Logger.LogStepEnd(host, step.ID, step.Name, true, result.Duration, "skipped: "+err.Error())
 				return result
 			}
+			// In precheck mode we want to continue execution in the outer loop.
+			// Here we mark the step as failed, and emit a structured issue (unless PreCheck already reported the same message).
+			if ctx.Precheck && !precheckStructuredIssueCoversFailure(ctx, step.ID, err) {
+				ctx.ReportPrecheckIssue(PrecheckIssue{
+					StepID:      step.ID,
+					StepName:    step.Name,
+					Host:        host,
+					Severity:    PrecheckSeverityError,
+					Code:        "PC.PRECHECK.FAILED",
+					Message:     err.Error(),
+					Evidence:    "",
+					Remediation: "",
+				})
+			}
+
 			result.Error = fmt.Errorf("pre-check failed: %w", err)
 			result.EndTime = time.Now()
 			result.Duration = result.EndTime.Sub(result.StartTime)
@@ -182,10 +222,10 @@ func RunStep(step *Step, ctx *StepContext) *StepResult {
 	// Precheck mode only
 	if ctx.Precheck {
 		result.Success = true
-		result.Skipped = true
+		result.Skipped = true // keep legacy console semantics (skip action/postcheck)
 		result.EndTime = time.Now()
 		result.Duration = result.EndTime.Sub(result.StartTime)
-		ctx.Logger.ConsoleStep(step.ID, step.Name, ctx.StepIndex, ctx.TotalSteps, "skip", result.Duration)
+		// For --precheck: do not print "passed" noise.
 		ctx.Logger.LogStepEnd(host, step.ID, step.Name, true, result.Duration, "precheck passed")
 		return result
 	}

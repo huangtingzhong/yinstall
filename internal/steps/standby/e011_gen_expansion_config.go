@@ -12,50 +12,6 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// runYasbootOnPrimaryWithEnvFile runs "source <envFile> && <genCmd>" on the primary.
-//
-// It must NOT use commonos.ExecuteAsUserWithEnv*: that helper applies strings.ReplaceAll(..., "'", "'\"'\"'")
-// to the entire "source && gen" string, which breaks ShellEscapeForSuC password fragments (-p '\''...'\'''')
-// intended for a single su -c '...' layer (same pattern as C-014 gen-config: su - user -c '<cmd>' with no extra ReplaceAll on genCmd).
-func runYasbootOnPrimaryWithEnvFile(ctx *runner.StepContext, primaryUser, envFile, genCmd string) (runner.ExecResult, error) {
-	inner := fmt.Sprintf("source %s && %s", envFile, genCmd)
-	who, err := ctx.Execute("whoami", false)
-	if err != nil {
-		return nil, err
-	}
-	if who == nil {
-		return nil, fmt.Errorf("whoami returned nil")
-	}
-	current := strings.TrimSpace(who.GetStdout())
-	var cmd string
-	if current == primaryUser {
-		cmd = inner
-	} else {
-		cmd = fmt.Sprintf("su - %s -c '%s'", primaryUser, inner)
-	}
-	return ctx.ExecuteWithCheck(cmd, true)
-}
-
-// runYasbootOnPrimaryWithEnvFileNoCheck 同上但不校验退出码（仅用于 PostCheck 等展示性命令）。
-func runYasbootOnPrimaryWithEnvFileNoCheck(ctx *runner.StepContext, primaryUser, envFile, genCmd string) (runner.ExecResult, error) {
-	inner := fmt.Sprintf("source %s && %s", envFile, genCmd)
-	who, err := ctx.Execute("whoami", false)
-	if err != nil {
-		return nil, err
-	}
-	if who == nil {
-		return nil, fmt.Errorf("whoami returned nil")
-	}
-	current := strings.TrimSpace(who.GetStdout())
-	var cmd string
-	if current == primaryUser {
-		cmd = inner
-	} else {
-		cmd = fmt.Sprintf("su - %s -c '%s'", primaryUser, inner)
-	}
-	return ctx.Execute(cmd, true)
-}
-
 // StepE011GenExpansionConfig 生成扩容配置文件步骤
 func StepE011GenExpansionConfig() *runner.Step {
 	return &runner.Step{
@@ -115,7 +71,7 @@ func StepE011GenExpansionConfig() *runner.Step {
 
 			// Build yasboot config node gen command
 			var genCmd string
-			escapedPwd := commonos.ShellEscapeForSuC(password)
+			escapedPwd := commonos.ShellSingleQuote(password)
 			if hostID != "" {
 				ctx.Logger.Info("Using provided host-id: %s", hostID)
 				genCmd = fmt.Sprintf(
@@ -143,9 +99,9 @@ func StepE011GenExpansionConfig() *runner.Step {
 				ctx.Logger.Info("yasboot config node gen: appending extra args: %s", strings.TrimSpace(extra))
 			}
 
-			// Run with primary env sourced; use runYasbootOnPrimaryWithEnvFile (not ExecuteAsUserWithEnv*) — see helper comment.
+			// Run with primary env sourced.
 			ctx.Logger.Info("Running: yasboot config node gen ...")
-			result, err := runYasbootOnPrimaryWithEnvFile(ctx, primaryUser, envFile, genCmd)
+			result, err := commonos.ExecuteAsUserWithEnvCheck(ctx, primaryUser, envFile, genCmd, true)
 			if err != nil {
 				// If command failed and error indicates host exists, try to get host-id and retry
 				if result != nil {
@@ -157,7 +113,7 @@ func StepE011GenExpansionConfig() *runner.Step {
 
 						// Query cluster status to get host-id
 						statusCmd := fmt.Sprintf("yasboot process yasagent status -c %s", clusterName)
-						statusResult, statusErr := runYasbootOnPrimaryWithEnvFile(ctx, primaryUser, envFile, statusCmd)
+						statusResult, statusErr := commonos.ExecuteAsUserWithEnvCheck(ctx, primaryUser, envFile, statusCmd, true)
 						if statusErr == nil && statusResult != nil && statusResult.GetExitCode() == 0 {
 							// Parse status output to extract host-id for the target IP
 							statusOutput := statusResult.GetStdout()
@@ -185,7 +141,7 @@ func StepE011GenExpansionConfig() *runner.Step {
 														beginPort,
 														nodeCount)
 													genCmd = commonos.YasbootAppendExtraArgs(genCmd, ctx.GetParamString("yasboot_extra_args", ""), false)
-													result, err = runYasbootOnPrimaryWithEnvFile(ctx, primaryUser, envFile, genCmd)
+													result, err = commonos.ExecuteAsUserWithEnvCheck(ctx, primaryUser, envFile, genCmd, true)
 													if err == nil {
 														break
 													}
@@ -211,7 +167,7 @@ func StepE011GenExpansionConfig() *runner.Step {
 					}
 				}
 				if strings.Contains(strings.ToLower(result.GetStdout()), "scan failed") {
-					ctx.Logger.Warn("yasboot output contains scan failed: check standby SSH, ~/.yasboot leftovers, or yasboot --force hints; if E-012 fails next, it is often non-empty paths on standby — run yinstall clean on the standby with the same paths as install")
+					ctx.Logger.Warn("yasboot output contains scan failed: check standby SSH, ~/.yasboot leftovers, or yasboot --force hints; if E-012 fails next, it is often non-empty paths on standby - run yinstall clean on the standby with the same paths as install")
 				}
 			}
 

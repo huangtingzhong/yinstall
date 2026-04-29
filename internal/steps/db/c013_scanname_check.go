@@ -10,14 +10,14 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC005ScanNameCheck SCAN 名解析与网段校验步骤；实际逻辑由 RunScanNameResolveAndSubnetCheck 在 db 命令中调用
+// StepC013ScanNameCheck SCAN 名解析与网段校验步骤；实际逻辑由 RunScanNameResolveAndSubnetCheck 在 db 命令中调用
 func StepC013ScanNameCheck() *runner.Step {
 	return &runner.Step{
 		ID:          "C-013",
 		Name:        "Resolve SCAN Name and Check Subnet",
 		Description: "YAC scan mode: resolve SCAN name to IPs and verify same subnet as permanent IPs",
 		Tags:        []string{"db", "yac", "scan", "validation"},
-		Optional:    true, // Optional: skip in standalone or VIP mode
+		Optional:    true, // 可选：单机或 VIP 模式下跳过
 
 		PreCheck: func(ctx *runner.StepContext) error {
 			isYACMode := ctx.GetParamBool("yac_mode", false)

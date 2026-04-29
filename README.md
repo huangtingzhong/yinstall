@@ -39,7 +39,7 @@ yasinstall [command]
 
 - `--targets <IP或主机列表>`：目标主机（逗号分隔，必填，除非用 `--local`）
 - `--ssh-user`：SSH 用户（默认 root）
-- `--ssh-password`：SSH 密码
+- `--ssh-password` / `-P`：SSH 密码
 - `--ssh-port`：SSH 端口（默认 22）
 - `--ssh-auth password|key`：认证方式
 - `--ssh-key-path`：私钥路径（key 认证时）
@@ -49,14 +49,13 @@ yasinstall [command]
 
 - `--dry-run`：跳过各步骤的 Action/PostCheck（PreCheck 及 db 等命令里的全局预检查仍可能执行）
 - `--precheck`：只做检查，不做变更
-- `--include-steps` / `--exclude-steps`：只执行/跳过指定步骤
-- `--include-tags` / `--exclude-tags`：按标签过滤步骤
-- `--force <步骤ID>`：强制重新执行指定步骤（会删除已有资源）
+- `-s`/`--include-steps`、`-e`/`--exclude-steps`：只执行/跳过指定步骤
+- `-f`/`--force-steps`：强制重新执行指定步骤（会删除已有资源）；`-F`/`--force` 表示对所有步骤强制
 
 **路径与日志：**
 
-- `--local-software-dirs`：本地软件目录（默认 `./software,./pkg`）
-- `--remote-software-dir`：目标机软件目录（默认 `/data/yashan/soft`）
+- `-L`/`--local-software-dirs`：本地软件目录（默认 `./software,./pkg`）
+- `-R`/`--remote-software-dir`：目标机软件目录（默认 `/data/yashan/soft`）
 - `--log-dir`：日志目录（默认 `~/.yasinstall/logs`）
 
 ### 2.3 YMP 安装命令用法（yasinstall ymp）

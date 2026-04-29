@@ -12,7 +12,7 @@ import (
 
 // isSafePath checks that a remote Linux path is safe to rm -rf (not empty, not root-only).
 // Control plane may be Windows while targets are Linux; paths here are always remote Unix paths,
-// so we use path.Clean (forward slashes) like YMP/db steps — not filepath.Clean, which on Windows
+// so we use path.Clean (forward slashes) like YMP/db steps  -  not filepath.Clean, which on Windows
 // turns "/data/yashan/..." into "\\data\\..." and breaks depth checks when splitting on "/".
 func isSafePath(p string) bool {
 	p = strings.TrimSpace(p)
@@ -166,7 +166,7 @@ func StepCleanDB() *runner.Step {
 		Description: "Clean YashanDB installation by stopping processes and removing directories",
 		Tags:        []string{"clean", "db"},
 		// Optional: when nothing exists, treat as skip (no-op).
-		Optional:    true,
+		Optional: true,
 
 		PreCheck: func(ctx *runner.StepContext) error {
 			yasdbHome := ctx.GetParamString("yasdb_home", "/data/yashan/yasdb_home")
@@ -187,7 +187,7 @@ func StepCleanDB() *runner.Step {
 				{"YASDB_LOG", yasdbLog},
 			} {
 				if !isSafePath(p.path) {
-					return fmt.Errorf("unsafe path for %s: '%s' — refusing to proceed", p.name, p.path)
+					return fmt.Errorf("unsafe path for %s: '%s' - refusing to proceed", p.name, p.path)
 				}
 			}
 

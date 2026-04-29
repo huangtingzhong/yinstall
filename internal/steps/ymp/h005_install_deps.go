@@ -74,7 +74,7 @@ func StepH005InstallDeps() *runner.Step {
 			packages := ctx.GetParamString("ymp_deps_packages", "libaio lsof")
 			for _, pkg := range strings.Fields(packages) {
 				if commonos.IsPackageInstalled(ctx, pkg, pkgManager) {
-					ctx.Logger.Info("✓ Package verified: %s", pkg)
+					ctx.Logger.Info("OK: Package verified: %s", pkg)
 				} else {
 					ctx.Logger.Warn("Package may not be installed: %s", pkg)
 				}

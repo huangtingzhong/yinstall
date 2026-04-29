@@ -102,7 +102,7 @@ func StepH010SetupSQLPlus() *runner.Step {
 				return fmt.Errorf("LD_LIBRARY_PATH not found in %s", envFile)
 			}
 
-			ctx.Logger.Info("✓ Oracle env file verified: %s", envFile)
+			ctx.Logger.Info("OK: Oracle env file verified: %s", envFile)
 			return nil
 		},
 	}

@@ -9,7 +9,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB008WriteSysctlConfig Write sysctl config
+// StepB008WriteSysctlConfig 写入 sysctl 内核参数配置
 func StepB008WriteSysctlConfig() *runner.Step {
 	return &runner.Step{
 		ID:          "B-008",
@@ -18,9 +18,8 @@ func StepB008WriteSysctlConfig() *runner.Step {
 		Tags:        []string{"os", "kernel"},
 		Optional:    false,
 
-		Action: func(ctx *runner.StepContext) error {
-			configFile := ctx.GetParamString("os_sysctl_file", "/etc/sysctl.d/yashandb.conf")
-
+		PreCheck: func(ctx *runner.StepContext) error {
+			// 只读检查与共享内存等尺寸计算
 			memKB, err := readMemTotalKB(ctx)
 			if err != nil {
 				return err
@@ -29,10 +28,42 @@ func StepB008WriteSysctlConfig() *runner.Step {
 			if err != nil {
 				return err
 			}
-
 			useMaxRAM := ctx.GetParamBool("os_sysctl_shm_use_max_ram_only", false)
 			dbPct := ctx.GetParamInt("db_memory_percent", 50)
+			if dbPct < 0 || dbPct > 100 {
+				return fmt.Errorf("invalid db_memory_percent: %d (expected 0-100)", dbPct)
+			}
 			shmmax, shmall, shmmni := commonos.ComputeKernelShmSizing(memKB, pageSize, useMaxRAM, dbPct)
+			ctx.SetResult("os_sysctl_mem_kb", memKB)
+			ctx.SetResult("os_sysctl_page_size", pageSize)
+			ctx.SetResult("os_sysctl_shmmax", shmmax)
+			ctx.SetResult("os_sysctl_shmall", shmall)
+			ctx.SetResult("os_sysctl_shmmni", shmmni)
+			return nil
+		},
+
+		Action: func(ctx *runner.StepContext) error {
+			configFile := ctx.GetParamString("os_sysctl_file", "/etc/sysctl.d/yashandb.conf")
+
+			memKB, _ := ctx.Results["os_sysctl_mem_kb"].(int64)
+			pageSize, _ := ctx.Results["os_sysctl_page_size"].(int64)
+			shmmax, _ := ctx.Results["os_sysctl_shmmax"].(int64)
+			shmall, _ := ctx.Results["os_sysctl_shmall"].(int64)
+			shmmni, _ := ctx.Results["os_sysctl_shmmni"].(int64)
+			if shmmax == 0 || shmall == 0 || shmmni == 0 {
+				// 若 PreCheck 结果缺失则在此重算
+				var err error
+				memKB, err = readMemTotalKB(ctx)
+				if err != nil {
+					return err
+				}
+				pageSize, _ = readHostPageSize(ctx)
+				useMaxRAM := ctx.GetParamBool("os_sysctl_shm_use_max_ram_only", false)
+				dbPct := ctx.GetParamInt("db_memory_percent", 50)
+				shmmax, shmall, shmmni = commonos.ComputeKernelShmSizing(memKB, pageSize, useMaxRAM, dbPct)
+			}
+			useMaxRAM := ctx.GetParamBool("os_sysctl_shm_use_max_ram_only", false)
+			dbPct := ctx.GetParamInt("db_memory_percent", 50)
 
 			ctx.Logger.Info("Sysctl shared memory: MemTotal=%d kB, page_size=%d, use_max_ram_only=%v, db_memory_percent=%d -> shmmax=%d shmmall=%d shmmni=%d",
 				memKB, pageSize, useMaxRAM, dbPct, shmmax, shmall, shmmni)
@@ -56,7 +87,7 @@ net.core.netdev_budget = 600
 `, shmall, shmmni, shmmax)
 
 			cmd := fmt.Sprintf("cat > %s << 'EOF'\n%sEOF", configFile, config)
-			_, err = ctx.ExecuteWithCheck(cmd, true)
+			_, err := ctx.ExecuteWithCheck(cmd, true)
 			return err
 		},
 

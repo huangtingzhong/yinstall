@@ -20,8 +20,6 @@
 - `precheck`: boolean（默认 false）
 - `include_steps`: string[]（例如 `["B-001","C-010-C-020"]`）
 - `exclude_steps`: string[]
-- `include_tags`: string[]
-- `exclude_tags`: string[]
 - `force_all`: boolean（危险）
 - `force_steps`: string[]（危险）
 - `force_delete_user`: boolean（高危，默认禁止）

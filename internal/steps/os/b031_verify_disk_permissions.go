@@ -6,7 +6,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB031VerifyDiskPermissions Verify disk permissions (YAC)
+// StepB031VerifyDiskPermissions 校验磁盘权限（YAC）
 func StepB031VerifyDiskPermissions() *runner.Step {
 	return &runner.Step{
 		ID:          "B-031",

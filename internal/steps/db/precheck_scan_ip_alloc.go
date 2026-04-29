@@ -9,9 +9,8 @@ import (
 	"github.com/yinstall/internal/logging"
 )
 
-// RunScanIPAllocation allocates SCAN IPs for local SCAN mode.
-// If --yac-scan-ips is provided, validates them; otherwise auto-allocates
-// 1 SCAN IP starting from the next IP after the last VIP.
+// RunScanIPAllocation 为本地 SCAN 模式分配 SCAN IP。
+// 若提供 --yac-scan-ips 则校验；否则从最后一个 VIP 之后的下一 IP 起自动分配 1 个 SCAN IP。
 func RunScanIPAllocation(hosts []HostExec, params map[string]interface{}, logger *logging.Logger) error {
 	if len(hosts) == 0 {
 		return fmt.Errorf("no hosts for SCAN IP allocation")
@@ -51,7 +50,7 @@ func RunScanIPAllocation(hosts []HostExec, params map[string]interface{}, logger
 		return nil
 	}
 
-	// Auto-allocate 1 SCAN IP from the next IP after the last VIP
+	// 从最后一个 VIP 之后的下一地址起自动分配 1 个 SCAN IP
 	excludeIPs := make(map[string]bool)
 	for _, h := range hosts {
 		excludeIPs[strings.TrimSpace(h.Host)] = true

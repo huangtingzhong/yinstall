@@ -22,6 +22,35 @@ func StepE014CheckSyncStatus() *runner.Step {
 		Tags:        []string{"standby", "sync", "status"},
 
 		PreCheck: func(ctx *runner.StepContext) error {
+			// Read-only: validate we can locate envFile and execute yasboot/yasql checks.
+			primaryUser := GetPrimaryOSUser(ctx)
+			envFile, err := GetPrimaryEnvFile(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to get primary environment file: %w", err)
+			}
+			if err := SyncPrimaryClusterNameFromEnvFile(ctx, envFile); err != nil {
+				return err
+			}
+			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
+
+			// Check env file readable and yasboot available when sourced.
+			res, _ := ctx.Execute(fmt.Sprintf("test -f %s", commonos.ShellSingleQuote(envFile)), false)
+			if res == nil || res.GetExitCode() != 0 {
+				return runner.SkipPrecheckDryRunWhenUpstreamArtifactMissing(ctx, fmt.Errorf("primary env file not found: %s", envFile))
+			}
+			_, err = commonos.ExecuteAsUserWithEnvCheckCtx(ctx, primaryUser, envFile, fmt.Sprintf("yasboot cluster status -c %s -d", clusterName), true)
+			if err != nil {
+				return fmt.Errorf("yasboot cluster status check failed (precheck): %w", err)
+			}
+			ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+				StepID:      "E-014",
+				StepName:    "Check Sync Status",
+				Host:        ctx.Executor.Host(),
+				Severity:    runner.PrecheckSeverityInfo,
+				Code:        "PC.STANDBY.VERIFY.APPLY_ONLY",
+				Message:     "This step performs archive switching and sync checks (post-apply verification). In --precheck it only validates envFile/yasboot availability.",
+				Remediation: "Run after expansion completes (or run without --precheck) to perform the real sync validation.",
+			})
 			return nil
 		},
 
@@ -44,7 +73,7 @@ func StepE014CheckSyncStatus() *runner.Step {
 
 			const archiveSwitches = 5
 			archiveSQL := "ALTER SYSTEM ARCHIVE LOG CURRENT;"
-			ctx.Logger.Info("On primary: running %d × %s to advance redo/archive before sync check", archiveSwitches, strings.TrimSpace(archiveSQL))
+			ctx.Logger.Info("On primary: running %d x %s to advance redo/archive before sync check", archiveSwitches, strings.TrimSpace(archiveSQL))
 			for i := 1; i <= archiveSwitches; i++ {
 				_, err := commonsql.ExecuteSQLAsSysdbaCtx(ctx, primaryUser, envFile, clusterName, archiveSQL, true)
 				if err != nil {

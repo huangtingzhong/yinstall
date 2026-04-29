@@ -33,7 +33,7 @@ func (a *pingExecutorAdapter) Execute(cmd string, sudo bool) (commonos.PingExecR
 	return &pingResultAdapter{r: r}, nil
 }
 
-// StepC004VIPCheck VIP 校验或自动生成步骤；实际逻辑由 RunVIPValidationOrAutoGenerate 在 db 命令中调用
+// StepC009VIPCheck VIP 校验或自动生成步骤；实际逻辑由 RunVIPValidationOrAutoGenerate 在 db 命令中调用
 func StepC009VIPCheck() *runner.Step {
 	return &runner.Step{
 		ID:          "C-009",
@@ -61,8 +61,8 @@ func StepC009VIPCheck() *runner.Step {
 	}
 }
 
-// RunVIPValidationOrAutoGenerate validates user-configured VIPs or auto-generates them.
-// Runs in both VIP and SCAN modes since SCAN depends on VIP.
+// RunVIPValidationOrAutoGenerate 校验用户配置的 VIP，或在策略允许时自动生成。
+// VIP 与 SCAN 模式均需执行（SCAN 依赖 VIP 前置）。
 func RunVIPValidationOrAutoGenerate(hosts []HostExec, params map[string]interface{}, logger *logging.Logger) error {
 	if len(hosts) == 0 {
 		return fmt.Errorf("no hosts for VIP check")

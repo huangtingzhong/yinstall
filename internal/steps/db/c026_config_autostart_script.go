@@ -7,7 +7,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC012ConfigAutostartScript Configure autostart script
+// StepC026ConfigAutostartScript 配置数据库开机自启脚本
 func StepC026ConfigAutostartScript() *runner.Step {
 	return &runner.Step{
 		ID:          "C-026",

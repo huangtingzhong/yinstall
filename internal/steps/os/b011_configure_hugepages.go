@@ -8,7 +8,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB011ConfigureHugepages Configure huge pages for database
+// StepB011ConfigureHugepages 按库内存需求配置 huge pages
 func StepB011ConfigureHugepages() *runner.Step {
 	return &runner.Step{
 		ID:          "B-011",
@@ -18,13 +18,13 @@ func StepB011ConfigureHugepages() *runner.Step {
 		Optional:    true,
 
 		PreCheck: func(ctx *runner.StepContext) error {
-			// Check if hugepages configuration is enabled
+			// 是否启用 hugepages 配置
 			enableHugepages := ctx.GetParamBool("os_hugepages_enable", false)
 			if !enableHugepages {
 				return fmt.Errorf("hugepages configuration is disabled, skipping")
 			}
 
-			// Check if we can read memory info
+			// 能否读取内存信息
 			result, err := ctx.Execute("cat /proc/meminfo | grep MemTotal", false)
 			if err != nil || result.GetExitCode() != 0 {
 				return fmt.Errorf("failed to read memory info")
@@ -34,10 +34,10 @@ func StepB011ConfigureHugepages() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			// Get database memory percent from yasboot configuration
+			// 数据库内存占用百分比（来自参数 / yasboot 规划）
 			dbMemoryPercent := ctx.GetParamInt("db_memory_percent", 50)
 
-			// Get total physical memory in KB
+			// 读取物理内存总量（KB）
 			result, err := ctx.Execute("cat /proc/meminfo | grep MemTotal | awk '{print $2}'", false)
 			if err != nil || result.GetExitCode() != 0 {
 				return fmt.Errorf("failed to get total memory: %w", err)
@@ -53,7 +53,7 @@ func StepB011ConfigureHugepages() *runner.Step {
 			ctx.Logger.Info("Total physical memory: %d GB", totalMemGB)
 			ctx.Logger.Info("Database memory percent (from yasboot): %d%%", dbMemoryPercent)
 
-			// Calculate hugepages memory based on physical memory size
+			// 按物理内存档位决定 hugepages 占用物理内存的比例
 			var hugepagesMemPercent int
 			if totalMemGB < 32 {
 				hugepagesMemPercent = 50
@@ -63,10 +63,10 @@ func StepB011ConfigureHugepages() *runner.Step {
 				ctx.Logger.Info("Physical memory >= 32GB, using 70%% for hugepages")
 			}
 
-			// Calculate hugepages memory in KB
+			// hugepages 目标内存（KB）
 			hugepagesMemKB := totalMemKB * int64(hugepagesMemPercent) / 100
 
-			// Get hugepage size (usually 2048 KB)
+			// hugepage 页大小（通常为 2048 KB）
 			result, err = ctx.Execute("cat /proc/meminfo | grep Hugepagesize | awk '{print $2}'", false)
 			if err != nil || result.GetExitCode() != 0 {
 				return fmt.Errorf("failed to get hugepage size: %w", err)
@@ -77,7 +77,7 @@ func StepB011ConfigureHugepages() *runner.Step {
 				return fmt.Errorf("failed to parse hugepage size: %w", err)
 			}
 
-			// Calculate number of hugepages
+			// 计算 hugepages 个数
 			nrHugepages := hugepagesMemKB / hugepageSizeKB
 
 			ctx.Logger.Info("Hugepage size: %d KB", hugepageSizeKB)
@@ -89,7 +89,7 @@ func StepB011ConfigureHugepages() *runner.Step {
 				return nil
 			}
 
-			// Configure hugepages in sysctl
+			// 写入 sysctl 配置 hugepages
 			sysctlFile := "/etc/sysctl.d/yashandb-hugepages.conf"
 			sysctlContent := fmt.Sprintf("# YashanDB Huge Pages Configuration\nvm.nr_hugepages = %d\n", nrHugepages)
 
@@ -100,7 +100,7 @@ func StepB011ConfigureHugepages() *runner.Step {
 
 			ctx.Logger.Info("Hugepages sysctl config written to %s", sysctlFile)
 
-			// Apply sysctl configuration
+			// 应用 sysctl
 			if _, err := ctx.ExecuteWithCheck("sysctl -p "+sysctlFile, true); err != nil {
 				return fmt.Errorf("failed to apply hugepages sysctl config: %w", err)
 			}
@@ -111,7 +111,7 @@ func StepB011ConfigureHugepages() *runner.Step {
 		},
 
 		PostCheck: func(ctx *runner.StepContext) error {
-			// Verify hugepages configuration
+			// 校验 HugePages_Total
 			result, err := ctx.Execute("cat /proc/meminfo | grep HugePages_Total | awk '{print $2}'", false)
 			if err != nil || result.GetExitCode() != 0 {
 				return fmt.Errorf("failed to verify hugepages configuration")
@@ -120,7 +120,7 @@ func StepB011ConfigureHugepages() *runner.Step {
 			totalHugepages := strings.TrimSpace(result.GetStdout())
 			ctx.Logger.Info("HugePages_Total: %s", totalHugepages)
 
-			// Check if hugepages are allocated
+			// 是否已实际分配 hugepages（0 可能需重启或内存可用性）
 			if totalHugepages == "0" {
 				ctx.Logger.Warn("Hugepages configured but not allocated yet (may require reboot or memory availability)")
 			}

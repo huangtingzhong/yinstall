@@ -20,6 +20,68 @@ func StepE007CheckStandbyExpansionPaths() *runner.Step {
 		Tags:        []string{"standby", "precheck", "paths"},
 		Optional:    false,
 
+		PreCheck: func(ctx *runner.StepContext) error {
+			install := strings.TrimSpace(ctx.GetParamString("db_install_path", ""))
+			data := strings.TrimSpace(ctx.GetParamString("db_data_path", ""))
+			logp := strings.TrimSpace(ctx.GetParamString("db_log_path", ""))
+			type pathItem struct {
+				label string
+				path  string
+			}
+			items := []pathItem{
+				{"install (home)", install},
+				{"data", data},
+				{"log", logp},
+			}
+			seen := map[string]bool{}
+			for _, it := range items {
+				if it.path == "" {
+					return fmt.Errorf("standby %s path is empty (set --db-home-path/--db-data-path/--db-log-path or rely on defaults)", it.label)
+				}
+				canonical := filepath.Clean(it.path)
+				if seen[canonical] {
+					continue
+				}
+				seen[canonical] = true
+				q := commonos.ShellSingleQuote(canonical)
+				for _, th := range ctx.HostsToRun() {
+					hctx := ctx.ForHost(th)
+					hctx.Logger.Info("Prechecking expansion path %s (%s) on %s", it.label, canonical, th.Host)
+					existCmd := fmt.Sprintf("if [ -e %s ] && [ ! -d %s ]; then echo NOT_DIR; elif [ -d %s ]; then echo IS_DIR; else echo MISSING; fi", q, q, q)
+					existRes, err := hctx.Execute(existCmd, false)
+					if err != nil {
+						return fmt.Errorf("path check failed on %s for %s: %w", th.Host, canonical, err)
+					}
+					kind := strings.TrimSpace(existRes.GetStdout())
+					if strings.Contains(kind, "NOT_DIR") {
+						return fmt.Errorf("path %s (%s) on %s exists but is not a directory", canonical, it.label, th.Host)
+					}
+					if strings.Contains(kind, "MISSING") {
+						// Read-only: report, do not mkdir/chown.
+						ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+							StepID:      "E-007",
+							StepName:    "Check Standby Expansion Paths",
+							Host:        th.Host,
+							Severity:    runner.PrecheckSeverityWarn,
+							Code:        "PC.STANDBY.PATH.MISSING",
+							Message:     fmt.Sprintf("path does not exist: %s (%s); apply will create it and chown", canonical, it.label),
+							Remediation: "you may pre-create the directory and ensure ownership/permissions are correct",
+						})
+						continue
+					}
+					emptyCmd := fmt.Sprintf(`test -z "$(find %s -mindepth 1 2>/dev/null | head -1)" && echo EMPTY || echo NOT_EMPTY`, q)
+					emptyRes, err := hctx.Execute(emptyCmd, false)
+					if err != nil {
+						return fmt.Errorf("directory listing failed on %s for %s: %w", th.Host, canonical, err)
+					}
+					if emptyRes == nil || !strings.Contains(strings.TrimSpace(emptyRes.GetStdout()), "EMPTY") {
+						return fmt.Errorf("directory %s (%s) on %s must be empty before expansion; remove existing files or pick another path", canonical, it.label, th.Host)
+					}
+				}
+			}
+			return nil
+		},
+
 		Action: func(ctx *runner.StepContext) error {
 			install := strings.TrimSpace(ctx.GetParamString("db_install_path", ""))
 			data := strings.TrimSpace(ctx.GetParamString("db_data_path", ""))
@@ -76,7 +138,7 @@ func StepE007CheckStandbyExpansionPaths() *runner.Step {
 						if verify == nil || verify.GetExitCode() != 0 || !strings.Contains(verify.GetStdout(), "OK") {
 							return fmt.Errorf("mkdir failed for %s on %s", canonical, th.Host)
 						}
-						hctx.Logger.Info("✓ Created empty directory %s on %s", canonical, th.Host)
+						hctx.Logger.Info("OK: Created empty directory %s on %s", canonical, th.Host)
 						continue
 					}
 
@@ -92,7 +154,7 @@ func StepE007CheckStandbyExpansionPaths() *runner.Step {
 					if _, err := hctx.Execute(chownCmd, false); err != nil {
 						return fmt.Errorf("chown failed for %s on %s: %w", canonical, th.Host, err)
 					}
-					hctx.Logger.Info("✓ Path %s (%s) exists, is empty, and ownership set on %s", canonical, it.label, th.Host)
+					hctx.Logger.Info("OK: Path %s (%s) exists, is empty, and ownership set on %s", canonical, it.label, th.Host)
 				}
 			}
 			return nil

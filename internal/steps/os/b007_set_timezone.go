@@ -7,7 +7,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepB007SetTimezone Set timezone
+// StepB007SetTimezone 设置系统时区
 func StepB007SetTimezone() *runner.Step {
 	return &runner.Step{
 		ID:          "B-007",
