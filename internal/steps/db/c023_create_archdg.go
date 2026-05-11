@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	commonos "github.com/yinstall/internal/common/os"
+	commonsql "github.com/yinstall/internal/common/sql"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -40,7 +40,6 @@ func StepC023CreateArchDG() *runner.Step {
 			archdgStr := ctx.GetParamString("yac_archdg", "")
 			user := ctx.GetParamString("os_user", "yashan")
 			installPath := ctx.GetParamString("db_install_path", "/data/yashan/yasdb_home")
-			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
 			dataPath := ctx.GetParamString("db_data_path", "/data/yashan/yasdb_data")
 
 			parts := strings.SplitN(archdgStr, ":", 2)
@@ -74,12 +73,11 @@ func StepC023CreateArchDG() *runner.Step {
 			firstHost := hosts[0]
 			firstCtx := ctx.ForHost(firstHost)
 
-			yasqlCmd := buildYasqlCmd(installPath, clusterName, dataPath, createSQL)
-			result, err := commonos.ExecuteAsUserWithCheck(firstCtx, user, yasqlCmd, true)
+			res, err := commonsql.ExecuteSQLAsSysdbaInstallLayoutCtx(firstCtx, user, installPath, dataPath, createSQL, true)
 			if err != nil {
 				stdout := ""
-				if result != nil {
-					stdout = result.GetStdout()
+				if res != nil {
+					stdout = res.Stdout
 				}
 				if strings.Contains(stdout, "already exists") {
 					ctx.Logger.Info("Archive diskgroup ARCH already exists, skipping creation")
@@ -93,13 +91,10 @@ func StepC023CreateArchDG() *runner.Step {
 			alterSQL := "ALTER DATABASE SET ARCHIVELOG DEST '+ARCH';"
 			ctx.Logger.Info("Setting archive destination to +ARCH...")
 
-			alterCmd := buildYasqlCmd(installPath, clusterName, dataPath, alterSQL)
-			result, err = commonos.ExecuteAsUser(firstCtx, user, alterCmd, true)
-			if err != nil || (result != nil && result.GetExitCode() != 0) {
-				ctx.Logger.Warn("Failed to set archive destination (can be set manually later): %s", alterSQL)
-			} else {
-				ctx.Logger.Info("Archive destination set to +ARCH")
+			if _, err := commonsql.ExecuteSQLAsSysdbaInstallLayoutCtx(firstCtx, user, installPath, dataPath, alterSQL, true); err != nil {
+				return fmt.Errorf("failed to set archive destination: %w", err)
 			}
+			ctx.Logger.Info("Archive destination set to +ARCH")
 
 			return nil
 		},
@@ -107,19 +102,20 @@ func StepC023CreateArchDG() *runner.Step {
 		PostCheck: func(ctx *runner.StepContext) error {
 			user := ctx.GetParamString("os_user", "yashan")
 			installPath := ctx.GetParamString("db_install_path", "/data/yashan/yasdb_home")
-			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
 			dataPath := ctx.GetParamString("db_data_path", "/data/yashan/yasdb_data")
 
 			hosts := ctx.HostsToRun()
 			firstCtx := ctx.ForHost(hosts[0])
 
 			checkSQL := "SELECT name, state, total_mb, free_mb FROM v\\$yfs_diskgroup WHERE name = 'ARCH';"
-			yasqlCmd := buildYasqlCmd(installPath, clusterName, dataPath, checkSQL)
-			result, _ := commonos.ExecuteAsUser(firstCtx, user, yasqlCmd, true)
+			res, err := commonsql.ExecuteSQLAsSysdbaInstallLayoutCtx(firstCtx, user, installPath, dataPath, checkSQL, true)
+			if err != nil {
+				return fmt.Errorf("archive diskgroup verification query failed: %w", err)
+			}
 
-			if result != nil && strings.Contains(strings.ToUpper(result.GetStdout()), "ARCH") {
+			if res != nil && strings.Contains(strings.ToUpper(res.Stdout), "ARCH") {
 				ctx.Logger.Info("Archive diskgroup ARCH verified:")
-				for _, line := range strings.Split(result.GetStdout(), "\n") {
+				for _, line := range strings.Split(res.Stdout, "\n") {
 					line = strings.TrimSpace(line)
 					if line != "" {
 						ctx.Logger.Info("  %s", line)
@@ -130,19 +126,4 @@ func StepC023CreateArchDG() *runner.Step {
 			return nil
 		},
 	}
-}
-
-// buildYasqlCmd 基于安装路径拼接 yasql 命令并显式设置 PATH。
-// 避免依赖 .bashrc（C-023 阶段可能尚未配置好环境）。
-func buildYasqlCmd(installPath, clusterName, dataPath, sql string) string {
-	escapedSQL := strings.ReplaceAll(sql, "$", "\\$")
-	return fmt.Sprintf(
-		`export YASDB_HOME=%s/$(ls %s/ 2>/dev/null | head -1) && `+
-			`export YASCS_HOME=%s/ycs/ce-1-1 && `+
-			`export PATH=$YASDB_HOME/bin:$PATH && `+
-			`export LD_LIBRARY_PATH=$YASDB_HOME/lib:$LD_LIBRARY_PATH && `+
-			`yasql -S / as sysdba <<EOF
-%s
-EOF`,
-		installPath, installPath, dataPath, escapedSQL)
 }

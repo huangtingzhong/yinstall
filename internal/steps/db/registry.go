@@ -46,21 +46,21 @@ func GetAllSteps() []*runner.Step {
 		// 软件安装与库部署
 		StepC020InstallSoftware(),
 		StepC021DeployDatabase(),
-		StepC022ConfigureTPCC(),
 		StepC023CreateArchDG(),
 
-		// 安装后：环境变量与验证
+		// 安装后：环境变量与验证（TPCC 依赖已写入的 env_file，须排在 C-024 之后）
 		StepC024SetEnvVars(),
-		StepC025VerifyInstall(),
+		StepC025ConfigureTPCC(),
+		StepC026VerifyInstall(),
 
 		// 自启动配置（可选）
-		StepC026ConfigAutostartScript(),
-		StepC027ConfigAutostartService(),
+		StepC027ConfigAutostartScript(),
+		StepC028ConfigAutostartService(),
 
 		// 最后一步：展示集群状态
-		StepC028ShowClusterStatus(),
+		StepC029ShowClusterStatus(),
 
 		// 自定义 SQL 脚本（可选）
-		StepC029ExecuteCustomSQL(),
+		StepC030ExecuteCustomSQL(),
 	}
 }

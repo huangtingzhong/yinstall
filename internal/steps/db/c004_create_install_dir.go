@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -29,8 +30,9 @@ func StepC004CreateInstallDir() *runner.Step {
 				isForce := hctx.IsForceStep()
 
 				// 1) 存在性与类型检查（只读）
+				stageQ := commonos.ShellSingleQuote(stageDir)
 				existRes, err := hctx.Execute(fmt.Sprintf("if [ -e %s ] && [ ! -d %s ]; then echo NOT_DIR; elif [ -d %s ]; then echo IS_DIR; else echo MISSING; fi",
-					stageDir, stageDir, stageDir), false)
+					stageQ, stageQ, stageQ), false)
 				if err != nil {
 					return fmt.Errorf("failed to check stage directory on %s: %w", th.Host, err)
 				}
@@ -58,7 +60,7 @@ func StepC004CreateInstallDir() *runner.Step {
 				}
 
 				// 3) 目录已存在：属主检查（只读）
-				ownerRes, _ := hctx.Execute(fmt.Sprintf("stat -c '%%U:%%G' %s 2>/dev/null", stageDir), false)
+				ownerRes, _ := hctx.Execute(fmt.Sprintf("stat -c '%%U:%%G' %s 2>/dev/null", stageQ), false)
 				owner := ""
 				if ownerRes != nil {
 					owner = strings.TrimSpace(ownerRes.GetStdout())
@@ -103,18 +105,22 @@ func StepC004CreateInstallDir() *runner.Step {
 				group := hctx.GetParamString("os_group", "yashan")
 				isForce := hctx.IsForceStep()
 
-				result, _ := hctx.Execute(fmt.Sprintf("test -d %s", stageDir), false)
+				stageQ := commonos.ShellSingleQuote(stageDir)
+				result, _ := hctx.Execute(fmt.Sprintf("test -d %s", stageQ), false)
 				if result != nil && result.GetExitCode() == 0 {
 					// 目录已存在
 					if isForce {
 						// Force 模式：删除重建
 						hctx.Logger.Warn("Force mode: deleting existing directory %s", stageDir)
-						if _, err := hctx.ExecuteWithCheck(fmt.Sprintf("rm -rf %s", stageDir), true); err != nil {
+						if !commonos.IsSafeUnixRmRfPath(stageDir) {
+							return fmt.Errorf("refusing to delete stage directory %s on %s: path is not under allowed installation roots", stageDir, th.Host)
+						}
+						if _, err := hctx.ExecuteWithCheck(fmt.Sprintf("rm -rf %s", stageQ), true); err != nil {
 							return fmt.Errorf("failed to delete directory %s on %s: %w", stageDir, th.Host, err)
 						}
 					} else {
 						// 非 Force 模式：检查属主
-						result, _ = hctx.Execute(fmt.Sprintf("stat -c '%%U' %s", stageDir), false)
+						result, _ = hctx.Execute(fmt.Sprintf("stat -c '%%U' %s", stageQ), false)
 						owner := ""
 						if result != nil && result.GetStdout() != "" {
 							owner = strings.TrimSpace(result.GetStdout())
@@ -127,7 +133,7 @@ func StepC004CreateInstallDir() *runner.Step {
 						} else if owner != "" {
 							// 属主不正确，修复属主
 							hctx.Logger.Info("Directory exists but owner is %s, fixing ownership to %s:%s", owner, user, group)
-							cmd := fmt.Sprintf("chown -R %s:%s %s", user, group, stageDir)
+							cmd := fmt.Sprintf("chown -R %s:%s %s", user, group, stageQ)
 							if _, err := hctx.ExecuteWithCheck(cmd, true); err != nil {
 								return fmt.Errorf("failed to fix ownership on %s: %w", th.Host, err)
 							}
@@ -142,11 +148,11 @@ func StepC004CreateInstallDir() *runner.Step {
 
 				// 目录不存在或已被删除，创建目录
 				hctx.Logger.Info("Creating install directory: %s", stageDir)
-				cmd := fmt.Sprintf("mkdir -p %s", stageDir)
+				cmd := fmt.Sprintf("mkdir -p %s", stageQ)
 				if _, err := hctx.ExecuteWithCheck(cmd, true); err != nil {
 					return fmt.Errorf("failed to create directory %s on %s: %w", stageDir, th.Host, err)
 				}
-				cmd = fmt.Sprintf("chown -R %s:%s %s", user, group, stageDir)
+				cmd = fmt.Sprintf("chown -R %s:%s %s", user, group, stageQ)
 				if _, err := hctx.ExecuteWithCheck(cmd, true); err != nil {
 					return fmt.Errorf("failed to set ownership on %s: %w", th.Host, err)
 				}
@@ -160,11 +166,12 @@ func StepC004CreateInstallDir() *runner.Step {
 				hctx := ctx.ForHost(th)
 				stageDir := hctx.GetParamString("db_stage_dir", "/home/yashan/install")
 				user := hctx.GetParamString("os_user", "yashan")
-				result, _ := hctx.Execute(fmt.Sprintf("test -d %s", stageDir), false)
+				stageQ := commonos.ShellSingleQuote(stageDir)
+				result, _ := hctx.Execute(fmt.Sprintf("test -d %s", stageQ), false)
 				if result == nil || result.GetExitCode() != 0 {
 					return fmt.Errorf("directory %s not found on %s", stageDir, th.Host)
 				}
-				result, _ = hctx.Execute(fmt.Sprintf("stat -c '%%U' %s", stageDir), false)
+				result, _ = hctx.Execute(fmt.Sprintf("stat -c '%%U' %s", stageQ), false)
 				if result != nil && result.GetStdout() != "" {
 					owner := result.GetStdout()
 					if len(owner) > 0 && owner[len(owner)-1] == '\n' {

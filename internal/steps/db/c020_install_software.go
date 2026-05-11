@@ -138,14 +138,19 @@ func StepC020InstallSoftware() *runner.Step {
 			forceCleanup := isYACMode || ctx.IsForceStep()
 			if forceCleanup {
 				ctx.Logger.Info("Cleaning up legacy artifacts before installation (force=%v, yac=%v)", ctx.IsForceStep(), isYACMode)
+				if !commonos.IsSafeUnixRmRfPath(envFile) || !commonos.IsSafeUnixRmRfPath(homeLink) {
+					return fmt.Errorf("refusing to remove legacy paths: env=%q link=%q (not under allowed installation roots)", envFile, homeLink)
+				}
+				envQ := commonos.ShellSingleQuote(envFile)
+				linkQ := commonos.ShellSingleQuote(homeLink)
 				for _, th := range hostsToClean {
 					hctx := ctx.ForHost(th)
 					ctx.Logger.Info("Cleaning up previous installation on %s", th.Host)
 					hctx.Execute(killYasomCmd, true)
 					hctx.Execute(killYasagentCmd, true)
 					hctx.Execute("sleep 2", false)
-					hctx.Execute(fmt.Sprintf("rm -f %s", envFile), true)
-					hctx.Execute(fmt.Sprintf("rm -rf %s", homeLink), true)
+					hctx.Execute(fmt.Sprintf("rm -f %s", envQ), true)
+					hctx.Execute(fmt.Sprintf("rm -rf %s", linkQ), true)
 				}
 			}
 

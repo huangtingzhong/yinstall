@@ -10,57 +10,13 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// isSafePath checks that a remote Linux path is safe to rm -rf (not empty, not root-only).
-// Control plane may be Windows while targets are Linux; paths here are always remote Unix paths,
-// so we use path.Clean (forward slashes) like YMP/db steps  -  not filepath.Clean, which on Windows
-// turns "/data/yashan/..." into "\\data\\..." and breaks depth checks when splitting on "/".
-func isSafePath(p string) bool {
-	p = strings.TrimSpace(p)
-	if p == "" || p == "/" {
-		return false
-	}
-	p = strings.ReplaceAll(p, `\`, `/`)
-	cleaned := path.Clean(p)
-	if cleaned == "/" || cleaned == "." || cleaned == "" {
-		return false
-	}
-	if !strings.HasPrefix(cleaned, "/") {
-		return false
-	}
-	parts := strings.Split(strings.TrimPrefix(cleaned, "/"), "/")
-	for _, seg := range parts {
-		if seg == "" || seg == "." {
-			return false
-		}
-	}
-	return len(parts) >= 2
-}
-
-// psPathPrefixForMatch 将远端安装目录规范为「仅匹配本实例」的前缀（末尾必有 /），
-// 避免 /data/yashan/yasdb_home/ 误匹配 yasdb_home_2788 等更长目录名。
-func psPathPrefixForMatch(p string) string {
-	p = strings.TrimSpace(p)
-	if p == "" {
-		return ""
-	}
-	p = strings.ReplaceAll(p, `\`, `/`)
-	p = path.Clean(p)
-	if p == "/" || p == "." {
-		return ""
-	}
-	if !strings.HasSuffix(p, "/") {
-		p += "/"
-	}
-	return p
-}
-
 // buildFindYashanDBProcessPSCmd 构造 ps|grep，仅匹配当前清理目标相关进程：
 // - 使用 grep -F 固定串 + 路径末尾 /，避免 yasdb_home 匹配到 yasdb_home_2788；
 // - 使用 ~/.yasboot/<cluster>_yasdb_home/ 匹配 monit 等，不用裸 cluster 名（避免 yashandb 匹配 yashandb_2788）。
 func buildFindYashanDBProcessPSCmd(ctx *runner.StepContext, yasdbHome, yasdbData, yasdbLog, osUser, clusterName string, awkPrintPid bool) string {
-	homePat := psPathPrefixForMatch(yasdbHome)
-	dataPat := psPathPrefixForMatch(yasdbData)
-	logPat := psPathPrefixForMatch(yasdbLog)
+	homePat := PathLiteralPrefixForPS(yasdbHome)
+	dataPat := PathLiteralPrefixForPS(yasdbData)
+	logPat := PathLiteralPrefixForPS(yasdbLog)
 
 	u := strings.TrimSpace(osUser)
 	if u == "" {
@@ -70,7 +26,7 @@ func buildFindYashanDBProcessPSCmd(ctx *runner.StepContext, yasdbHome, yasdbData
 	if err != nil {
 		userHome = path.Join("/home", u)
 	}
-	yasbootPat := psPathPrefixForMatch(path.Join(userHome, ".yasboot", clusterName+"_yasdb_home"))
+	yasbootPat := PathLiteralPrefixForPS(path.Join(userHome, ".yasboot", clusterName+"_yasdb_home"))
 
 	var grepFe []string
 	for _, pat := range []string{homePat, dataPat, logPat, yasbootPat} {
@@ -115,22 +71,23 @@ func buildFindMonitPSCmd(ctx *runner.StepContext, osUser, clusterName string, aw
 	return cmd
 }
 
-// removeDir removes a directory with rm -rf after safety validation
+// removeDir removes a directory with rm -rf after safety validation (see commonos.IsSafeUnixRmRfPath).
 func removeDir(ctx *runner.StepContext, path, label string) {
-	if !isSafePath(path) {
-		ctx.Logger.Warn("Skipping removal of %s: path '%s' is unsafe", label, path)
+	if !commonos.IsSafeUnixRmRfPath(path) {
+		ctx.Logger.Warn("Skipping removal of %s: path '%s' is not an allowed rm -rf target", label, path)
 		return
 	}
+	pathQ := commonos.ShellSingleQuote(path)
 
 	// Check if directory exists
-	result, _ := ctx.Execute(fmt.Sprintf("test -d %s", path), false)
+	result, _ := ctx.Execute(fmt.Sprintf("test -d %s", pathQ), false)
 	if result == nil || result.GetExitCode() != 0 {
 		ctx.Logger.Info("Skipping removal of %s: directory does not exist (%s)", label, path)
 		return
 	}
 
 	ctx.Logger.Info("Removing %s: %s", label, path)
-	result, err := ctx.Execute(fmt.Sprintf("rm -rf %s", path), true)
+	result, err := ctx.Execute(fmt.Sprintf("rm -rf %s", pathQ), true)
 	if err != nil || (result != nil && result.GetExitCode() != 0) {
 		ctx.Logger.Warn("Failed to remove %s: %v", label, err)
 	} else {
@@ -140,7 +97,7 @@ func removeDir(ctx *runner.StepContext, path, label string) {
 
 // verifyDirRemoved checks that a directory no longer exists
 func verifyDirRemoved(ctx *runner.StepContext, path, label string) {
-	result, _ := ctx.Execute(fmt.Sprintf("test -d %s", path), false)
+	result, _ := ctx.Execute(fmt.Sprintf("test -d %s", commonos.ShellSingleQuote(path)), false)
 	if result != nil && result.GetExitCode() == 0 {
 		ctx.Logger.Warn("WARNING: %s still exists: %s", label, path)
 	} else {
@@ -150,7 +107,7 @@ func verifyDirRemoved(ctx *runner.StepContext, path, label string) {
 
 // verifyFileRemoved checks that a file no longer exists
 func verifyFileRemoved(ctx *runner.StepContext, path, label string) {
-	result, _ := ctx.Execute(fmt.Sprintf("test -f %s", path), false)
+	result, _ := ctx.Execute(fmt.Sprintf("test -f %s", commonos.ShellSingleQuote(path)), false)
 	if result != nil && result.GetExitCode() == 0 {
 		ctx.Logger.Warn("WARNING: %s still exists: %s", label, path)
 	} else {
@@ -186,8 +143,8 @@ func StepCleanDB() *runner.Step {
 				{"YASDB_DATA", yasdbData},
 				{"YASDB_LOG", yasdbLog},
 			} {
-				if !isSafePath(p.path) {
-					return fmt.Errorf("unsafe path for %s: '%s' - refusing to proceed", p.name, p.path)
+				if !commonos.IsSafeUnixRmRfPath(p.path) {
+					return fmt.Errorf("unsafe path for %s: '%s' - refusing to proceed (must be under allowed installation roots)", p.name, p.path)
 				}
 			}
 
@@ -199,7 +156,7 @@ func StepCleanDB() *runner.Step {
 				{"YASDB_DATA", yasdbData},
 				{"YASDB_LOG", yasdbLog},
 			} {
-				result, _ := ctx.Execute(fmt.Sprintf("test -d %s", p.path), false)
+				result, _ := ctx.Execute(fmt.Sprintf("test -d %s", commonos.ShellSingleQuote(p.path)), false)
 				if result == nil || result.GetExitCode() != 0 {
 					ctx.Logger.Warn("Directory does not exist: %s (%s)", p.name, p.path)
 					missingDirs = append(missingDirs, fmt.Sprintf("%s (%s)", p.name, p.path))
@@ -299,20 +256,28 @@ func StepCleanDB() *runner.Step {
 
 			envFile := fmt.Sprintf("%s/%s.env", yasbootDir, clusterName)
 			ctx.Logger.Info("Removing yasboot env file: %s", envFile)
-			result, err = ctx.Execute(fmt.Sprintf("rm -f %s", envFile), true)
-			if err != nil || (result != nil && result.GetExitCode() != 0) {
-				ctx.Logger.Warn("Failed to remove yasboot env file: %v", err)
+			if !commonos.IsSafeUnixRmRfPath(envFile) {
+				ctx.Logger.Warn("Skipping rm of env file: path failed safety check: %s", envFile)
 			} else {
-				ctx.Logger.Info("Yasboot env file removed successfully")
+				result, err = ctx.Execute(fmt.Sprintf("rm -f %s", commonos.ShellSingleQuote(envFile)), true)
+				if err != nil || (result != nil && result.GetExitCode() != 0) {
+					ctx.Logger.Warn("Failed to remove yasboot env file: %v", err)
+				} else {
+					ctx.Logger.Info("Yasboot env file removed successfully")
+				}
 			}
 
 			homeFile := fmt.Sprintf("%s/%s_yasdb_home", yasbootDir, clusterName)
 			ctx.Logger.Info("Removing yasboot home file: %s", homeFile)
-			result, err = ctx.Execute(fmt.Sprintf("rm -f %s", homeFile), true)
-			if err != nil || (result != nil && result.GetExitCode() != 0) {
-				ctx.Logger.Warn("Failed to remove yasboot home file: %v", err)
+			if !commonos.IsSafeUnixRmRfPath(homeFile) {
+				ctx.Logger.Warn("Skipping rm of home file: path failed safety check: %s", homeFile)
 			} else {
-				ctx.Logger.Info("Yasboot home file removed successfully")
+				result, err = ctx.Execute(fmt.Sprintf("rm -f %s", commonos.ShellSingleQuote(homeFile)), true)
+				if err != nil || (result != nil && result.GetExitCode() != 0) {
+					ctx.Logger.Warn("Failed to remove yasboot home file: %v", err)
+				} else {
+					ctx.Logger.Info("Yasboot home file removed successfully")
+				}
 			}
 
 			// 6. 清理 .bashrc 中该集群的环境变量条目
@@ -384,7 +349,7 @@ func StepCleanDB() *runner.Step {
 				{yasdbHome, "YASDB_HOME"},
 				{yasdbData, "YASDB_DATA"},
 			} {
-				res, _ := ctx.Execute(fmt.Sprintf("test -d %s", pair.path), false)
+				res, _ := ctx.Execute(fmt.Sprintf("test -d %s", commonos.ShellSingleQuote(pair.path)), false)
 				if res != nil && res.GetExitCode() == 0 {
 					return fmt.Errorf("cleanup incomplete: %s still exists at %s (rm may have failed or wrong path; check sudo/permissions and processes holding files)", pair.label, pair.path)
 				}

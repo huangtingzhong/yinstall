@@ -118,7 +118,7 @@ func init() {
 	// 内核参数
 	osCmd.Flags().StringVar(&osSysctlFile, "os-sysctl-file", "/etc/sysctl.d/yashandb.conf", "Sysctl config file path")
 	osCmd.Flags().StringVar(&osLimitsFile, "os-limits-file", "/etc/security/limits.conf", "Limits config file path")
-	osCmd.Flags().BoolVar(&osKernelArgsEnable, "os-kernel-args-enable", false, "Enable kernel args configuration")
+	osCmd.Flags().BoolVar(&osKernelArgsEnable, "os-kernel-args-enable", true, "Enable kernel args configuration")
 	osCmd.Flags().StringVar(&osKernelArgs, "os-kernel-args", "transparent_hugepage=never elevator=deadline LANG=en_US.UTF-8", "Kernel boot arguments")
 
 	// Hugepages 参数

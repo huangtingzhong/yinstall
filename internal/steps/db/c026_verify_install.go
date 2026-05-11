@@ -5,13 +5,14 @@ import (
 	"strings"
 
 	commonos "github.com/yinstall/internal/common/os"
+	commonsql "github.com/yinstall/internal/common/sql"
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC025VerifyInstall 验证安装结果与连通性
-func StepC025VerifyInstall() *runner.Step {
+// StepC026VerifyInstall 验证安装结果与连通性
+func StepC026VerifyInstall() *runner.Step {
 	return &runner.Step{
-		ID:          "C-025",
+		ID:          "C-026",
 		Name:        "Verify Installation",
 		Description: "Verify database installation and connectivity",
 		Tags:        []string{"db", "verify"},
@@ -67,21 +68,10 @@ func StepC025VerifyInstall() *runner.Step {
 				}
 
 				hctx.Logger.Info("Step 2: Checking database connectivity...")
-				result, _ = commonos.ExecuteAsUserWithEnv(hctx, user, envFile, `yasql / as sysdba -c "SELECT 1 FROM dual;"`, false)
-				if result != nil && result.GetExitCode() == 0 {
-					hctx.Logger.Info("Database connectivity: OK")
-				} else {
-					result, _ = commonos.ExecuteAsUserWithEnv(hctx, user, envFile, `echo "SELECT 1 FROM dual;" | yasql / as sysdba`, false)
-					if result != nil && result.GetExitCode() == 0 {
-						hctx.Logger.Info("Database connectivity: OK")
-					} else {
-						hctx.Logger.Warn("Database connectivity check failed")
-						if result != nil {
-							hctx.Logger.Info("Output: %s", result.GetStdout())
-							hctx.Logger.Info("Error: %s", result.GetStderr())
-						}
-					}
+				if _, err := commonsql.ExecuteSQLAsSysdbaCtx(hctx, user, envFile, clusterName, "SELECT 1 FROM dual", false); err != nil {
+					return fmt.Errorf("database connectivity check failed on host %s: %w", th.Host, err)
 				}
+				hctx.Logger.Info("Database connectivity: OK")
 
 				hctx.Logger.Info("Step 3: Checking key processes...")
 				processes := []string{"yasom", "yasagent", "yasdb"}

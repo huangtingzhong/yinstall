@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -25,9 +26,17 @@ func StepCleanYMP() *runner.Step {
 			ctx.Logger.Info("  YMP_HOME: %s", ympHome)
 			ctx.Logger.Info("  YMP_USER: %s", ympUser)
 
+			if !commonos.IsSafeUnixRmRfPath(ympHome) {
+				return fmt.Errorf("YMP_HOME %q is not an allowed rm -rf target; refusing YMP cleanup", ympHome)
+			}
+			ympEnvFilePre := fmt.Sprintf("/home/%s/.yasboot/ymp.env", ympUser)
+			if !commonos.IsSafeUnixRmRfPath(ympEnvFilePre) {
+				return fmt.Errorf("ymp.env path %q is not an allowed target; refusing YMP cleanup", ympEnvFilePre)
+			}
+
 			// Check if YMP_HOME directory exists
 			ctx.Logger.Info("Checking if YMP_HOME directory exists...")
-			result, _ := ctx.Execute(fmt.Sprintf("test -d %s", ympHome), false)
+			result, _ := ctx.Execute(fmt.Sprintf("test -d %s", commonos.ShellSingleQuote(ympHome)), false)
 			ympHomeExists := result != nil && result.GetExitCode() == 0
 			if ympHomeExists {
 				ctx.Logger.Info("[OK] YMP_HOME directory exists")
@@ -38,7 +47,7 @@ func StepCleanYMP() *runner.Step {
 			// Check if ymp.env file exists
 			ympEnvFile := fmt.Sprintf("/home/%s/.yasboot/ymp.env", ympUser)
 			ctx.Logger.Info("Checking if ymp.env file exists...")
-			result, _ = ctx.Execute(fmt.Sprintf("test -f %s", ympEnvFile), false)
+			result, _ = ctx.Execute(fmt.Sprintf("test -f %s", commonos.ShellSingleQuote(ympEnvFile)), false)
 			ympEnvExists := result != nil && result.GetExitCode() == 0
 			if ympEnvExists {
 				ctx.Logger.Info("[OK] ymp.env file exists: %s", ympEnvFile)
@@ -58,17 +67,28 @@ func StepCleanYMP() *runner.Step {
 		Action: func(ctx *runner.StepContext) error {
 			ympHome := ctx.GetParamString("ymp_home", "/opt/ymp")
 			ympUser := ctx.GetParamString("ymp_user", "ymp")
+			if !commonos.IsSafeUnixRmRfPath(ympHome) {
+				return fmt.Errorf("YMP_HOME %q failed safety check; refusing cleanup", ympHome)
+			}
+			ympEnvFile := fmt.Sprintf("/home/%s/.yasboot/ymp.env", ympUser)
+			if !commonos.IsSafeUnixRmRfPath(ympEnvFile) {
+				return fmt.Errorf("ymp.env path %q failed safety check", ympEnvFile)
+			}
+			ympHQ := commonos.ShellSingleQuote(ympHome)
+			ympEnvQ := commonos.ShellSingleQuote(ympEnvFile)
 
 			ctx.Logger.Info("Starting YMP cleanup process")
 
 			// 1. Find all YMP processes
 			ctx.Logger.Info("Step 1: Finding YMP processes")
-			// 在路径后添加 / 以避免误匹配（如 /opt/ymp 不会匹配到 /opt/ymp2）
-			ympHomePattern := ympHome
-			if !strings.HasSuffix(ympHomePattern, "/") {
-				ympHomePattern = ympHomePattern + "/"
+			ympPat := PathLiteralPrefixForPS(ympHome)
+			var findProcessCmd string
+			if ympPat == "" {
+				findProcessCmd = `false`
+			} else {
+				findProcessCmd = fmt.Sprintf("ps -ef | grep -F %s | grep -v grep | grep -v yinstall | awk '{print $2}'",
+					commonos.ShellSingleQuote(ympPat))
 			}
-			findProcessCmd := fmt.Sprintf("ps -ef | grep '%s' | grep -v grep | awk '{print $2}'", ympHomePattern)
 			result, _ := ctx.Execute(findProcessCmd, false)
 
 			var pids []string
@@ -119,10 +139,10 @@ func StepCleanYMP() *runner.Step {
 
 			// 4. Remove YMP_HOME directory
 			ctx.Logger.Info("Step 4: Removing YMP directory")
-			result, _ = ctx.Execute(fmt.Sprintf("test -d %s", ympHome), false)
+			result, _ = ctx.Execute(fmt.Sprintf("test -d %s", ympHQ), false)
 			if result != nil && result.GetExitCode() == 0 {
 				ctx.Logger.Info("Removing YMP_HOME: %s", ympHome)
-				result, err := ctx.Execute(fmt.Sprintf("rm -rf %s", ympHome), true)
+				result, err := ctx.Execute(fmt.Sprintf("rm -rf %s", ympHQ), true)
 				if err != nil || (result != nil && result.GetExitCode() != 0) {
 					ctx.Logger.Warn("Failed to remove YMP_HOME: %v", err)
 				} else {
@@ -134,11 +154,10 @@ func StepCleanYMP() *runner.Step {
 
 			// 5. Remove ymp.env file
 			ctx.Logger.Info("Step 5: Removing ymp.env configuration file")
-			ympEnvFile := fmt.Sprintf("/home/%s/.yasboot/ymp.env", ympUser)
-			result, _ = ctx.Execute(fmt.Sprintf("test -f %s", ympEnvFile), false)
+			result, _ = ctx.Execute(fmt.Sprintf("test -f %s", ympEnvQ), false)
 			if result != nil && result.GetExitCode() == 0 {
 				ctx.Logger.Info("Removing ymp.env: %s", ympEnvFile)
-				result, err := ctx.Execute(fmt.Sprintf("rm -f %s", ympEnvFile), true)
+				result, err := ctx.Execute(fmt.Sprintf("rm -f %s", ympEnvQ), true)
 				if err != nil || (result != nil && result.GetExitCode() != 0) {
 					ctx.Logger.Warn("Failed to remove ymp.env: %v", err)
 				} else {
@@ -159,12 +178,14 @@ func StepCleanYMP() *runner.Step {
 			ctx.Logger.Info("Verifying cleanup results")
 
 			// 1. Check if processes still exist
-			// 在路径后添加 / 以避免误匹配
-			ympHomePattern := ympHome
-			if !strings.HasSuffix(ympHomePattern, "/") {
-				ympHomePattern = ympHomePattern + "/"
+			ympPat := PathLiteralPrefixForPS(ympHome)
+			var findProcessCmd string
+			if ympPat == "" {
+				findProcessCmd = `false`
+			} else {
+				findProcessCmd = fmt.Sprintf("ps -ef | grep -F %s | grep -v grep | grep -v yinstall",
+					commonos.ShellSingleQuote(ympPat))
 			}
-			findProcessCmd := fmt.Sprintf("ps -ef | grep '%s' | grep -v grep", ympHomePattern)
 			result, _ := ctx.Execute(findProcessCmd, false)
 
 			if result != nil && result.GetStdout() != "" {
@@ -176,7 +197,7 @@ func StepCleanYMP() *runner.Step {
 			}
 
 			// 2. Check if YMP_HOME directory still exists
-			result, _ = ctx.Execute(fmt.Sprintf("test -d %s", ympHome), false)
+			result, _ = ctx.Execute(fmt.Sprintf("test -d %s", commonos.ShellSingleQuote(ympHome)), false)
 			if result != nil && result.GetExitCode() == 0 {
 				ctx.Logger.Warn("WARNING: YMP_HOME still exists: %s", ympHome)
 			} else {
@@ -185,7 +206,7 @@ func StepCleanYMP() *runner.Step {
 
 			// 3. Check if ymp.env file still exists
 			ympEnvFile := fmt.Sprintf("/home/%s/.yasboot/ymp.env", ympUser)
-			result, _ = ctx.Execute(fmt.Sprintf("test -f %s", ympEnvFile), false)
+			result, _ = ctx.Execute(fmt.Sprintf("test -f %s", commonos.ShellSingleQuote(ympEnvFile)), false)
 			if result != nil && result.GetExitCode() == 0 {
 				ctx.Logger.Warn("WARNING: ymp.env still exists: %s", ympEnvFile)
 			} else {

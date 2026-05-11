@@ -85,10 +85,14 @@ func StepH011InstallYMP() *runner.Step {
 			// Force reinstall: cleanup old ymp.env here (write op must not be in PreCheck).
 			if isForce {
 				ympEnvFile := fmt.Sprintf("/home/%s/.yasboot/ymp.env", ympUser)
-				r, _ := ctx.Execute(fmt.Sprintf("test -f %s", ympEnvFile), false)
+				if !commonos.IsSafeUnixRmRfPath(ympEnvFile) {
+					return fmt.Errorf("refusing to remove ymp.env: path failed safety check: %s", ympEnvFile)
+				}
+				envQ := commonos.ShellSingleQuote(ympEnvFile)
+				r, _ := ctx.Execute(fmt.Sprintf("test -f %s", envQ), false)
 				if r != nil && r.GetExitCode() == 0 {
 					ctx.Logger.Info("Force reinstall detected, removing existing ymp.env: %s", ympEnvFile)
-					if _, err := ctx.ExecuteWithCheck(fmt.Sprintf("rm -f %s", ympEnvFile), true); err != nil {
+					if _, err := ctx.ExecuteWithCheck(fmt.Sprintf("rm -f %s", envQ), true); err != nil {
 						return fmt.Errorf("failed to remove existing ymp.env: %w", err)
 					}
 					ctx.Logger.Info("OK: Existing ymp.env removed")

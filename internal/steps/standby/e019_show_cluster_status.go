@@ -1,6 +1,6 @@
 // e019_show_cluster_status.go - 显示集群状态
 // 本步骤在主库上执行 yasboot cluster status 命令，显示完整的集群状态信息
-// 参考 C-028 步骤的实现
+// 参考 C-029 步骤的实现
 
 package standby
 

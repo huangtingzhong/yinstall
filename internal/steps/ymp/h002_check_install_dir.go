@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -31,11 +32,12 @@ func StepH002CheckInstallDir() *runner.Step {
 				return fmt.Errorf("install directory must be an absolute path: %s", installDir)
 			}
 
+			installQ := commonos.ShellSingleQuote(installDir)
 			// Directory existence/content check in precheck (read-only).
-			result, _ := ctx.Execute(fmt.Sprintf("test -d %s", installDir), false)
+			result, _ := ctx.Execute(fmt.Sprintf("test -d %s", installQ), false)
 			dirExists := result != nil && result.GetExitCode() == 0
 			if dirExists {
-				checkCmd := fmt.Sprintf("find %s -mindepth 1 -maxdepth 1 2>/dev/null | head -1", installDir)
+				checkCmd := fmt.Sprintf("find %s -mindepth 1 -maxdepth 1 2>/dev/null | head -1", installQ)
 				r, _ := ctx.Execute(checkCmd, false)
 				hasContent := r != nil && r.GetExitCode() == 0 && strings.TrimSpace(r.GetStdout()) != ""
 				if hasContent {
@@ -97,17 +99,19 @@ func StepH002CheckInstallDir() *runner.Step {
 				return fmt.Errorf("install directory must be an absolute path: %s", installDir)
 			}
 
+			installQ := commonos.ShellSingleQuote(installDir)
+
 			ctx.Logger.Info("Checking installation directory: %s", installDir)
 
 			// 检查目录是否存在
-			result, _ := ctx.Execute(fmt.Sprintf("test -d %s", installDir), false)
+			result, _ := ctx.Execute(fmt.Sprintf("test -d %s", installQ), false)
 			dirExists := result != nil && result.GetExitCode() == 0
 
 			if dirExists {
 				// 检查目录是否为空
 				// 使用精确匹配，只检查指定目录下的内容，不递归检查子目录
 				// 使用 find 命令检查目录下是否有文件或子目录（排除 . 和 ..）
-				checkCmd := fmt.Sprintf("find %s -mindepth 1 -maxdepth 1 2>/dev/null | head -1", installDir)
+				checkCmd := fmt.Sprintf("find %s -mindepth 1 -maxdepth 1 2>/dev/null | head -1", installQ)
 				result, _ := ctx.Execute(checkCmd, false)
 				hasContent := result != nil && result.GetExitCode() == 0 && strings.TrimSpace(result.GetStdout()) != ""
 
@@ -115,22 +119,25 @@ func StepH002CheckInstallDir() *runner.Step {
 					if isForce {
 						// 强制模式：删除整个目录
 						ctx.Logger.Warn("Force mode: deleting existing directory %s", installDir)
+						if !commonos.IsSafeUnixRmRfPath(installDir) {
+							return fmt.Errorf("refusing to delete install directory %s: path is not under allowed installation roots", installDir)
+						}
 						// 使用绝对路径，防止误删除（如 /opt/ymp 不会删除 /opt/ymp2）
 						// 先检查路径是否确实是目录，再删除
-						verifyCmd := fmt.Sprintf("test -d %s && test ! -L %s", installDir, installDir)
+						verifyCmd := fmt.Sprintf("test -d %s && test ! -L %s", installQ, installQ)
 						verifyResult, _ := ctx.Execute(verifyCmd, false)
 						if verifyResult == nil || verifyResult.GetExitCode() != 0 {
 							return fmt.Errorf("install directory %s is not a regular directory (may be a symlink), refusing to delete", installDir)
 						}
 
 						// 删除目录（使用绝对路径，防止模糊匹配）
-						if _, err := ctx.ExecuteWithCheck(fmt.Sprintf("rm -rf %s", installDir), true); err != nil {
+						if _, err := ctx.ExecuteWithCheck(fmt.Sprintf("rm -rf %s", installQ), true); err != nil {
 							return fmt.Errorf("failed to delete directory %s: %w", installDir, err)
 						}
 						ctx.Logger.Info("Directory %s deleted successfully", installDir)
 					} else {
 						// 非强制模式：列出目录内容并报错
-						listCmd := fmt.Sprintf("ls -la %s 2>/dev/null | head -10", installDir)
+						listCmd := fmt.Sprintf("ls -la %s 2>/dev/null | head -10", installQ)
 						listResult, _ := ctx.Execute(listCmd, false)
 						dirContent := ""
 						if listResult != nil {
@@ -162,10 +169,11 @@ func StepH002CheckInstallDir() *runner.Step {
 			installDir = strings.TrimSuffix(installDir, "/")
 
 			// 验证目录状态：要么不存在，要么存在但为空
-			result, _ := ctx.Execute(fmt.Sprintf("test -d %s", installDir), false)
+			installQ := commonos.ShellSingleQuote(installDir)
+			result, _ := ctx.Execute(fmt.Sprintf("test -d %s", installQ), false)
 			if result != nil && result.GetExitCode() == 0 {
 				// 目录存在，检查是否为空
-				checkCmd := fmt.Sprintf("find %s -mindepth 1 -maxdepth 1 2>/dev/null | head -1", installDir)
+				checkCmd := fmt.Sprintf("find %s -mindepth 1 -maxdepth 1 2>/dev/null | head -1", installQ)
 				result, _ := ctx.Execute(checkCmd, false)
 				if result != nil && result.GetExitCode() == 0 && strings.TrimSpace(result.GetStdout()) != "" {
 					return fmt.Errorf("directory %s still contains files after cleanup", installDir)

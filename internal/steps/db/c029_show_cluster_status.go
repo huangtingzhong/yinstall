@@ -9,10 +9,10 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC028ShowClusterStatus 安装流程末尾展示集群状态
-func StepC028ShowClusterStatus() *runner.Step {
+// StepC029ShowClusterStatus 安装流程末尾展示集群状态
+func StepC029ShowClusterStatus() *runner.Step {
 	return &runner.Step{
-		ID:          "C-028",
+		ID:          "C-029",
 		Name:        "Show Cluster Status",
 		Description: "Display cluster status information",
 		Tags:        []string{"db", "status", "display"},

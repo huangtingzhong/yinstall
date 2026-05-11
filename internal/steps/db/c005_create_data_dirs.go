@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -34,9 +35,10 @@ func StepC005CreateDataDirs() *runner.Step {
 				dirs := []string{installPath, dataPath, logPath}
 
 				for _, dir := range dirs {
+					dirQ := commonos.ShellSingleQuote(dir)
 					// 路径已存在且非目录则失败
 					res, _ := hctx.Execute(fmt.Sprintf("if [ -e %s ] && [ ! -d %s ]; then echo NOT_DIR; elif [ -d %s ]; then echo IS_DIR; else echo MISSING; fi",
-						dir, dir, dir), false)
+						dirQ, dirQ, dirQ), false)
 					kind := ""
 					if res != nil {
 						kind = strings.TrimSpace(res.GetStdout())
@@ -99,15 +101,19 @@ func StepC005CreateDataDirs() *runner.Step {
 				dirs := []string{installPath, dataPath, logPath}
 
 				for _, dir := range dirs {
+					dirQ := commonos.ShellSingleQuote(dir)
 					// 检查目录是否存在
-					result, _ := hctx.Execute(fmt.Sprintf("test -d %s", dir), false)
+					result, _ := hctx.Execute(fmt.Sprintf("test -d %s", dirQ), false)
 					dirExists := result != nil && result.GetExitCode() == 0
 
 					if dirExists {
 						if isForce {
 							// 强制模式：如果目录存在，删除它
 							hctx.Logger.Warn("Force mode: deleting existing directory %s on %s", dir, th.Host)
-							if _, err := hctx.ExecuteWithCheck(fmt.Sprintf("rm -rf %s", dir), true); err != nil {
+							if !commonos.IsSafeUnixRmRfPath(dir) {
+								return fmt.Errorf("refusing to delete directory %s on %s: path is not under allowed installation roots", dir, th.Host)
+							}
+							if _, err := hctx.ExecuteWithCheck(fmt.Sprintf("rm -rf %s", dirQ), true); err != nil {
 								return fmt.Errorf("failed to delete directory %s on %s: %w", dir, th.Host, err)
 							}
 						} else {
@@ -118,13 +124,13 @@ func StepC005CreateDataDirs() *runner.Step {
 
 					// 创建目录（目录不存在或已被删除）
 					hctx.Logger.Info("Creating directory: %s on %s", dir, th.Host)
-					cmd := fmt.Sprintf("mkdir -p %s", dir)
+					cmd := fmt.Sprintf("mkdir -p %s", dirQ)
 					if _, err := hctx.ExecuteWithCheck(cmd, true); err != nil {
 						return fmt.Errorf("failed to create directory %s on %s: %w", dir, th.Host, err)
 					}
 
 					// 设置目录属主和属组
-					cmd = fmt.Sprintf("chown -R %s:%s %s", user, group, dir)
+					cmd = fmt.Sprintf("chown -R %s:%s %s", user, group, dirQ)
 					if _, err := hctx.ExecuteWithCheck(cmd, true); err != nil {
 						return fmt.Errorf("failed to set ownership on %s: %w", th.Host, err)
 					}
@@ -142,7 +148,7 @@ func StepC005CreateDataDirs() *runner.Step {
 				logPath := hctx.GetParamString("db_log_path", "/data/yashan/log")
 				dirs := []string{installPath, dataPath, logPath}
 				for _, dir := range dirs {
-					result, _ := hctx.Execute(fmt.Sprintf("test -d %s", dir), false)
+					result, _ := hctx.Execute(fmt.Sprintf("test -d %s", commonos.ShellSingleQuote(dir)), false)
 					if result == nil || result.GetExitCode() != 0 {
 						return fmt.Errorf("directory %s not found on %s", dir, th.Host)
 					}

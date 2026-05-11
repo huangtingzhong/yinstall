@@ -6,6 +6,7 @@ package ymp
 import (
 	"fmt"
 	"path"
+	"strings"
 
 	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
@@ -32,25 +33,46 @@ func StepH015Cleanup() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			installDir := ctx.GetParamString("ymp_install_dir", "/opt/ymp")
+			installDir := strings.TrimSuffix(strings.TrimSpace(ctx.GetParamString("ymp_install_dir", "/opt/ymp")), "/")
+			installDir = path.Clean(strings.ReplaceAll(installDir, `\`, `/`))
 			ympUser := ctx.GetParamString("ymp_user", "ymp")
 
-			// 先停止 YMP 进程
-			ympSh := path.Join(installDir, "yashan-migrate-platform", "bin", "ymp.sh")
-			ctx.Logger.Info("Stopping YMP service...")
-			_, _ = commonos.ExecuteAsUser(ctx, ympUser, fmt.Sprintf("sh %s stop 2>/dev/null", ympSh), true)
-
-			// 清理安装产物
-			cleanupPaths := []string{
-				path.Join(installDir, "yashan-migrate-platform", "db", "*"),
-				fmt.Sprintf("/home/%s/.yasboot/ymp.env", ympUser),
-				path.Join(installDir, "yashan-migrate-platform"),
-				fmt.Sprintf("%s/instantclient_*", installDir),
+			if !strings.HasPrefix(installDir, "/") {
+				return fmt.Errorf("ymp_install_dir must be absolute: %s", installDir)
+			}
+			if !commonos.IsSafeUnixRmRfPath(installDir) {
+				return fmt.Errorf("refusing cleanup: ymp_install_dir %q is not under allowed installation roots", installDir)
 			}
 
-			for _, path := range cleanupPaths {
-				ctx.Logger.Info("Removing: %s", path)
-				ctx.Execute(fmt.Sprintf("rm -rf %s", path), true)
+			installQ := commonos.ShellSingleQuote(installDir)
+			ympRoot := path.Join(installDir, "yashan-migrate-platform")
+			if !commonos.IsSafeUnixRmRfPath(ympRoot) {
+				return fmt.Errorf("refusing cleanup: derived path %q failed safety check", ympRoot)
+			}
+			ympRootQ := commonos.ShellSingleQuote(ympRoot)
+
+			ympSh := path.Join(installDir, "yashan-migrate-platform", "bin", "ymp.sh")
+			ctx.Logger.Info("Stopping YMP service...")
+			_, _ = commonos.ExecuteAsUser(ctx, ympUser, fmt.Sprintf("sh %s stop 2>/dev/null", commonos.ShellSingleQuote(ympSh)), true)
+
+			// 整块删除平台目录（包含 db 子目录）；禁止向 rm 传入 shell glob（原 db/*、instantclient_* 会扩大删除范围）
+			ctx.Logger.Info("Removing YMP platform tree: %s", ympRoot)
+			_, _ = ctx.Execute(fmt.Sprintf("rm -rf %s", ympRootQ), true)
+
+			// instantclient_* 目录位于 installDir 下一层：用 find 限定删除范围，不把用户可控 glob 交给 rm
+			ctx.Logger.Info("Removing instantclient_* directories under %s (if any)", installDir)
+			findRm := fmt.Sprintf(
+				`find %s -maxdepth 1 -mindepth 1 -type d -name 'instantclient_*' -print0 2>/dev/null | xargs -0r rm -rf 2>/dev/null || true`,
+				installQ,
+			)
+			_, _ = ctx.Execute(findRm, true)
+
+			ympEnv := fmt.Sprintf("/home/%s/.yasboot/ymp.env", ympUser)
+			if commonos.IsSafeUnixRmRfPath(ympEnv) {
+				ctx.Logger.Info("Removing: %s", ympEnv)
+				_, _ = ctx.Execute(fmt.Sprintf("rm -f %s", commonos.ShellSingleQuote(ympEnv)), true)
+			} else {
+				ctx.Logger.Warn("Skipping ymp.env removal: path failed safety check: %s", ympEnv)
 			}
 
 			ctx.Logger.Info("YMP cleanup completed")
@@ -58,10 +80,11 @@ func StepH015Cleanup() *runner.Step {
 		},
 
 		PostCheck: func(ctx *runner.StepContext) error {
-			installDir := ctx.GetParamString("ymp_install_dir", "/opt/ymp")
+			installDir := strings.TrimSuffix(strings.TrimSpace(ctx.GetParamString("ymp_install_dir", "/opt/ymp")), "/")
+			installDir = path.Clean(strings.ReplaceAll(installDir, `\`, `/`))
 			ympDir := path.Join(installDir, "yashan-migrate-platform")
 
-			result, _ := ctx.Execute(fmt.Sprintf("test -d %s", ympDir), false)
+			result, _ := ctx.Execute(fmt.Sprintf("test -d %s", commonos.ShellSingleQuote(ympDir)), false)
 			if result != nil && result.GetExitCode() == 0 {
 				return fmt.Errorf("YMP directory still exists: %s", ympDir)
 			}

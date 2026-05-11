@@ -71,7 +71,11 @@ func StepC007ExtractPackage() *runner.Step {
 			if !isEmpty {
 				if ctx.IsForceStep() {
 					ctx.Logger.Warn("Stage directory %s is not empty; force mode enabled, cleaning before extraction", stageDir)
-					cleanCmd := fmt.Sprintf(`rm -rf %s/* %s/.[!.]* %s/.??* 2>/dev/null || true`, stageQ, stageQ, stageQ)
+					if !commonos.IsSafeUnixRmRfPath(stageDir) {
+						return fmt.Errorf("refusing to clean stage directory %q: path is not under allowed installation roots", stageDir)
+					}
+					// 仅删除 stage 下顶层项，避免未引号通配或 "rm -rf $dir/*" 在异常路径上扩大范围
+					cleanCmd := fmt.Sprintf(`find %s -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true`, stageQ)
 					if _, err := ctx.ExecuteWithCheck(cleanCmd, true); err != nil {
 						return fmt.Errorf("failed to cleanup stage directory %s before extraction: %w", stageDir, err)
 					}
@@ -93,15 +97,16 @@ func StepC007ExtractPackage() *runner.Step {
 			ctx.Logger.Info("Package found at: %s", fullPath)
 			ctx.Logger.Info("Extracting package: %s -> %s", fullPath, stageDir)
 
-			ctx.Execute(fmt.Sprintf("mkdir -p %s", stageDir), true)
+			ctx.Execute(fmt.Sprintf("mkdir -p %s", stageQ), true)
 
+			fullQ := commonos.ShellSingleQuote(fullPath)
 			var cmd string
 			if strings.HasSuffix(fullPath, ".tar.gz") || strings.HasSuffix(fullPath, ".tgz") {
-				cmd = fmt.Sprintf("tar -zxf %s -C %s", fullPath, stageDir)
+				cmd = fmt.Sprintf("tar -zxf %s -C %s", fullQ, stageQ)
 			} else if strings.HasSuffix(fullPath, ".tar") {
-				cmd = fmt.Sprintf("tar -xf %s -C %s", fullPath, stageDir)
+				cmd = fmt.Sprintf("tar -xf %s -C %s", fullQ, stageQ)
 			} else if strings.HasSuffix(fullPath, ".zip") {
-				cmd = fmt.Sprintf("unzip -o %s -d %s", fullPath, stageDir)
+				cmd = fmt.Sprintf("unzip -o %s -d %s", fullQ, stageQ)
 			} else {
 				return fmt.Errorf("unsupported package format: %s", fullPath)
 			}
@@ -110,7 +115,7 @@ func StepC007ExtractPackage() *runner.Step {
 				return fmt.Errorf("failed to extract package: %w", err)
 			}
 
-			cmd = fmt.Sprintf("chown -R %s:%s %s", user, group, stageDir)
+			cmd = fmt.Sprintf("chown -R %s:%s %s", user, group, stageQ)
 			if _, err := ctx.ExecuteWithCheck(cmd, true); err != nil {
 				return fmt.Errorf("failed to set ownership: %w", err)
 			}
@@ -133,7 +138,7 @@ func StepC007ExtractPackage() *runner.Step {
 		PostCheck: func(ctx *runner.StepContext) error {
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			yasbootPath := path.Join(stageDir, "bin/yasboot")
-			result, _ := ctx.Execute(fmt.Sprintf("test -x %s", yasbootPath), false)
+			result, _ := ctx.Execute(fmt.Sprintf("test -x %s", commonos.ShellSingleQuote(yasbootPath)), false)
 			if result == nil || result.GetExitCode() != 0 {
 				return fmt.Errorf("yasboot not found at %s", yasbootPath)
 			}

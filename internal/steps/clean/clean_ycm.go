@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -23,9 +24,13 @@ func StepCleanYCM() *runner.Step {
 			ctx.Logger.Info("YCM cleanup parameters:")
 			ctx.Logger.Info("  YCM_HOME: %s", ycmHome)
 
+			if !commonos.IsSafeUnixRmRfPath(ycmHome) {
+				return fmt.Errorf("YCM_HOME %q is not an allowed rm -rf target; refusing YCM cleanup", ycmHome)
+			}
+
 			// Check if directory exists
 			ctx.Logger.Info("Checking if YCM_HOME directory exists...")
-			result, _ := ctx.Execute(fmt.Sprintf("test -d %s", ycmHome), false)
+			result, _ := ctx.Execute(fmt.Sprintf("test -d %s", commonos.ShellSingleQuote(ycmHome)), false)
 			if result == nil || result.GetExitCode() != 0 {
 				ctx.Logger.Info("YCM_HOME directory does not exist (%s), skipping cleanup", ycmHome)
 				return fmt.Errorf("skip: YCM_HOME directory does not exist")
@@ -36,18 +41,25 @@ func StepCleanYCM() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			ycmHome := ctx.GetParamString("ycm_home", "")
+			ycmHome := ctx.GetParamString("ycm_home", "/opt/ycm")
+			if !commonos.IsSafeUnixRmRfPath(ycmHome) {
+				return fmt.Errorf("YCM_HOME %q failed safety check; refusing to remove", ycmHome)
+			}
+			ycmQ := commonos.ShellSingleQuote(ycmHome)
 
 			ctx.Logger.Info("Starting YCM cleanup process")
 
 			// 1. Find all YCM processes
 			ctx.Logger.Info("Step 1: Finding YCM processes")
-			// 在路径后添加 / 以避免误匹配（如 /opt/ycm 不会匹配到 /opt/ycm2）
-			ycmHomePattern := ycmHome
-			if !strings.HasSuffix(ycmHomePattern, "/") {
-				ycmHomePattern = ycmHomePattern + "/"
+			// grep -F + PathLiteralPrefixForPS：避免 /opt/ycm 匹配 /opt/ycm2、/data123 匹配 /data1234 等前缀歧义
+			ycmPat := PathLiteralPrefixForPS(ycmHome)
+			var findProcessCmd string
+			if ycmPat == "" {
+				findProcessCmd = `false`
+			} else {
+				findProcessCmd = fmt.Sprintf("ps -ef | grep -F %s | grep -v grep | grep -v yinstall | awk '{print $2}'",
+					commonos.ShellSingleQuote(ycmPat))
 			}
-			findProcessCmd := fmt.Sprintf("ps -ef | grep '%s' | grep -v grep | awk '{print $2}'", ycmHomePattern)
 			result, _ := ctx.Execute(findProcessCmd, false)
 
 			var pids []string
@@ -99,7 +111,7 @@ func StepCleanYCM() *runner.Step {
 			// 4. Remove directory
 			ctx.Logger.Info("Step 4: Removing YCM directory")
 			ctx.Logger.Info("Removing YCM_HOME: %s", ycmHome)
-			result, err := ctx.Execute(fmt.Sprintf("rm -rf %s", ycmHome), true)
+			result, err := ctx.Execute(fmt.Sprintf("rm -rf %s", ycmQ), true)
 			if err != nil || (result != nil && result.GetExitCode() != 0) {
 				ctx.Logger.Warn("Failed to remove YCM_HOME: %v", err)
 			} else {
@@ -116,12 +128,14 @@ func StepCleanYCM() *runner.Step {
 			ctx.Logger.Info("Verifying cleanup results")
 
 			// 1. Check if processes still exist
-			// 在路径后添加 / 以避免误匹配
-			ycmHomePattern := ycmHome
-			if !strings.HasSuffix(ycmHomePattern, "/") {
-				ycmHomePattern = ycmHomePattern + "/"
+			ycmPat := PathLiteralPrefixForPS(ycmHome)
+			var findProcessCmd string
+			if ycmPat == "" {
+				findProcessCmd = `false`
+			} else {
+				findProcessCmd = fmt.Sprintf("ps -ef | grep -F %s | grep -v grep | grep -v yinstall",
+					commonos.ShellSingleQuote(ycmPat))
 			}
-			findProcessCmd := fmt.Sprintf("ps -ef | grep '%s' | grep -v grep", ycmHomePattern)
 			result, _ := ctx.Execute(findProcessCmd, false)
 
 			if result != nil && result.GetStdout() != "" {
@@ -133,7 +147,7 @@ func StepCleanYCM() *runner.Step {
 			}
 
 			// 2. Check if directory still exists
-			result, _ = ctx.Execute(fmt.Sprintf("test -d %s", ycmHome), false)
+			result, _ = ctx.Execute(fmt.Sprintf("test -d %s", commonos.ShellSingleQuote(ycmHome)), false)
 			if result != nil && result.GetExitCode() == 0 {
 				ctx.Logger.Warn("WARNING: YCM_HOME still exists: %s", ycmHome)
 			} else {

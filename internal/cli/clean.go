@@ -27,6 +27,9 @@ func NewCleanCommand() *cobra.Command {
 		ympUser       string
 		cleanYACDisks string
 		detailedSteps bool
+		dbCleanPort   int
+		ycmCleanPort  int
+		ympCleanPort  int
 	)
 
 	cmd := &cobra.Command{
@@ -35,9 +38,9 @@ func NewCleanCommand() *cobra.Command {
 		Long: `Clean YashanDB/YCM/YMP installations by stopping processes and removing directories.
 
 Supported cleanup types:
-  - db:  Clean YashanDB installation (default, requires --yasdb-home, --yasdb-data, --cluster-name)
-  - ycm: Clean YCM installation (requires --ycm-home)
-  - ymp: Clean YMP installation (requires --ymp-home)
+  - db:  Clean YashanDB installation (default). Paths align with yinstall db: non-default --db-port infers *_<port> dirs when paths not overridden.
+  - ycm: Clean YCM installation. Non-default --ycm-port infers /opt/ycm_<port> when --ycm-home not set (same idea as db port suffix).
+  - ymp: Clean YMP installation. Non-default --ymp-port infers /opt/ymp_<port> when --ymp-home not set.
 
 Examples:
   # Clean YashanDB on multiple nodes (default type). For standby nodes, use the SAME --yasdb-home/--yasdb-data
@@ -93,15 +96,27 @@ Examples:
 				return fmt.Errorf("no valid target IP addresses provided")
 			}
 
-			// 校验不同类型的参数
+			// 校验不同类型的参数与端口
 			switch cleanType {
 			case "db":
-				// DB 参数有默认值，这里不额外校验
+				if err := validatePort("--db-port", dbCleanPort); err != nil {
+					return err
+				}
 			case "ycm":
-				// YCM home 有默认值，会在清理前检查是否存在
+				if err := validatePort("--ycm-port", ycmCleanPort); err != nil {
+					return err
+				}
 			case "ymp":
-				// YMP home 有默认值，会在清理前检查是否存在
+				if err := validatePort("--ymp-port", ympCleanPort); err != nil {
+					return err
+				}
 			}
+
+			applyCleanPathInference(cmd, cleanType,
+				dbCleanPort, &yasdbHome, &yasdbData, &yasdbLog, &clusterName,
+				ycmCleanPort, &ycmHome,
+				ympCleanPort, &ympHome,
+			)
 
 			// 创建 target hosts
 			var targetHosts []runner.TargetHost
@@ -174,6 +189,9 @@ Examples:
 			params["ymp_home"] = ympHome
 			params["ymp_user"] = ympUser
 			params["clean_yac_disks"] = cleanYACDisks
+			if cleanType == "db" {
+				params["db_begin_port"] = dbCleanPort
+			}
 
 			// 初始化 cleanup 日志
 			rid := fmt.Sprintf("clean-%s-%s", cleanType, time.Now().Format("20060102-150405"))
@@ -270,13 +288,51 @@ Examples:
 	cmd.Flags().StringVar(&osUser, "os-user", "yashan", "OS user for YashanDB installation (for DB cleanup)")
 	cmd.Flags().StringVar(&cleanYACDisks, "clean-yac-disks", "", "Clean YAC shared disks: 'auto' to query via ycsctl, or comma-separated paths like '/dev/mapper/sys1,/dev/mapper/sys2'")
 	cmd.Flags().BoolVar(&detailedSteps, "detailed-steps", false, "Use detailed cleanup steps (DB only, allows step-by-step execution)")
+	cmd.Flags().IntVar(&dbCleanPort, "db-port", 1688, "Database begin port (for DB cleanup): like yinstall db, non-default port infers yasdb_home/data/log_* and cluster name unless paths explicitly set")
 
 	// YCM 专用 flags
 	cmd.Flags().StringVar(&ycmHome, "ycm-home", "/opt/ycm", "YCM installation directory (for YCM cleanup, default: /opt/ycm)")
+	cmd.Flags().IntVar(&ycmCleanPort, "ycm-port", 9060, "YCM web port: when not default (9060) and --ycm-home unchanged, infer /opt/ycm_<port>")
 
 	// YMP 专用 flags
 	cmd.Flags().StringVar(&ympHome, "ymp-home", "/opt/ymp", "YMP installation directory (for YMP cleanup, default: /opt/ymp)")
+	cmd.Flags().IntVar(&ympCleanPort, "ymp-port", 8090, "YMP web port: when not default (8090) and --ymp-home unchanged, infer /opt/ymp_<port>")
 	cmd.Flags().StringVar(&ympUser, "ymp-user", "ymp", "YMP user name (for YMP cleanup, default: ymp)")
 
 	return cmd
+}
+
+// applyCleanPathInference 与 yinstall db 一致：非默认端口且未显式覆盖 flag 时，推断 home/data/log/cluster 路径。
+// YCM：非默认 YCM Web 端口且未指定 --ycm-home 时推断 /opt/ycm_<port>。YMP：非默认 YMP 端口时推断 /opt/ymp_<port>。
+func applyCleanPathInference(cmd *cobra.Command, cleanType string,
+	dbPort int,
+	yasdbHome, yasdbData, yasdbLog, clusterName *string,
+	ycmPort int, ycmHome *string,
+	ympPort int, ympHome *string,
+) {
+	switch cleanType {
+	case "db":
+		if dbPort != 1688 {
+			if !cmd.Flags().Changed("yasdb-home") {
+				*yasdbHome = fmt.Sprintf("/data/yashan/yasdb_home_%d", dbPort)
+			}
+			if !cmd.Flags().Changed("yasdb-data") {
+				*yasdbData = fmt.Sprintf("/data/yashan/yasdb_data_%d", dbPort)
+			}
+			if !cmd.Flags().Changed("yasdb-log") {
+				*yasdbLog = fmt.Sprintf("/data/yashan/log_%d", dbPort)
+			}
+			if !cmd.Flags().Changed("cluster-name") {
+				*clusterName = fmt.Sprintf("yashandb_%d", dbPort)
+			}
+		}
+	case "ycm":
+		if ycmPort != 9060 && !cmd.Flags().Changed("ycm-home") {
+			*ycmHome = fmt.Sprintf("/opt/ycm_%d", ycmPort)
+		}
+	case "ymp":
+		if ympPort != 8090 && !cmd.Flags().Changed("ymp-home") {
+			*ympHome = fmt.Sprintf("/opt/ymp_%d", ympPort)
+		}
+	}
 }

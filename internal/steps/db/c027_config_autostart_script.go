@@ -7,10 +7,10 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC026ConfigAutostartScript 配置数据库开机自启脚本
-func StepC026ConfigAutostartScript() *runner.Step {
+// StepC027ConfigAutostartScript 配置数据库开机自启脚本
+func StepC027ConfigAutostartScript() *runner.Step {
 	return &runner.Step{
-		ID:          "C-026",
+		ID:          "C-027",
 		Name:        "Configure Autostart Script",
 		Description: "Create yashan_monit.sh script for database autostart",
 		Tags:        []string{"db", "autostart"},

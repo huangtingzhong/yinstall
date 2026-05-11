@@ -120,7 +120,12 @@ func StepC021DeployDatabase() *runner.Step {
 						firstHctx := ctx.ForHost(firstHost)
 						ctx.Logger.Info("Wiping YFS metadata on %d shared disks from node %s (shared disks only need one node)...", len(uniqueDisks), firstHost.Host)
 						for _, disk := range uniqueDisks {
-							ddCmd := fmt.Sprintf("dd if=/dev/zero of=%s bs=1M count=10 conv=notrunc 2>/dev/null", disk)
+							if !commonos.IsSafeUnixBlockDevicePath(disk) {
+								ctx.Logger.Warn("  [%s] Skipping unsafe disk path for dd: %s", firstHost.Host, disk)
+								continue
+							}
+							diskQ := commonos.ShellSingleQuote(disk)
+							ddCmd := fmt.Sprintf("dd if=/dev/zero of=%s bs=1M count=10 conv=notrunc 2>/dev/null", diskQ)
 							ddResult, _ := firstHctx.Execute(ddCmd, true)
 							if ddResult != nil && ddResult.GetExitCode() == 0 {
 								ctx.Logger.Info("  [%s] Wiped header: %s", firstHost.Host, disk)
@@ -131,36 +136,59 @@ func StepC021DeployDatabase() *runner.Step {
 					}
 				}
 
+				dataClean := path.Clean(strings.ReplaceAll(dataPath, `\`, `/`))
+				dataQ := commonos.ShellSingleQuote(dataClean)
+
 				// 3. Clean password files
 				if isYACMode {
 					ctx.Logger.Info("YAC mode: cleaning password files on all nodes")
 					for _, th := range ctx.TargetHosts {
 						hctx := ctx.ForHost(th)
-						findCmd := fmt.Sprintf("find %s -type f -name 'yasdb.pwd' 2>/dev/null", dataPath)
+						findCmd := fmt.Sprintf("find %s -type f -name 'yasdb.pwd' 2>/dev/null", dataQ)
 						res, _ := hctx.Execute(findCmd, false)
 						if res != nil && res.GetStdout() != "" {
 							pwdFiles := strings.Split(strings.TrimSpace(res.GetStdout()), "\n")
 							for _, pwdFile := range pwdFiles {
 								pwdFile = strings.TrimSpace(pwdFile)
-								if pwdFile != "" {
-									ctx.Logger.Info("Removing password file on %s: %s", th.Host, pwdFile)
-									hctx.Execute(fmt.Sprintf("rm -f %s", pwdFile), true)
+								if pwdFile == "" {
+									continue
 								}
+								pc := path.Clean(strings.ReplaceAll(pwdFile, `\`, `/`))
+								if pc != dataClean && !strings.HasPrefix(pc, dataClean+"/") {
+									ctx.Logger.Warn("Skipping pwd path outside db_data_path on %s: %s", th.Host, pwdFile)
+									continue
+								}
+								if !commonos.IsSafeUnixRmRfPath(pc) {
+									ctx.Logger.Warn("Skipping pwd path failed safety check on %s: %s", th.Host, pwdFile)
+									continue
+								}
+								ctx.Logger.Info("Removing password file on %s: %s", th.Host, pwdFile)
+								hctx.Execute(fmt.Sprintf("rm -f %s", commonos.ShellSingleQuote(pc)), true)
 							}
 						}
 					}
 				} else {
 					ctx.Logger.Info("Standalone mode: cleaning password file on current node")
-					findCmd := fmt.Sprintf("find %s -type f -name 'yasdb.pwd' 2>/dev/null", dataPath)
+					findCmd := fmt.Sprintf("find %s -type f -name 'yasdb.pwd' 2>/dev/null", dataQ)
 					res, _ := ctx.Execute(findCmd, false)
 					if res != nil && res.GetStdout() != "" {
 						pwdFiles := strings.Split(strings.TrimSpace(res.GetStdout()), "\n")
 						for _, pwdFile := range pwdFiles {
 							pwdFile = strings.TrimSpace(pwdFile)
-							if pwdFile != "" {
-								ctx.Logger.Info("Removing password file: %s", pwdFile)
-								ctx.Execute(fmt.Sprintf("rm -f %s", pwdFile), true)
+							if pwdFile == "" {
+								continue
 							}
+							pc := path.Clean(strings.ReplaceAll(pwdFile, `\`, `/`))
+							if pc != dataClean && !strings.HasPrefix(pc, dataClean+"/") {
+								ctx.Logger.Warn("Skipping pwd path outside db_data_path: %s", pwdFile)
+								continue
+							}
+							if !commonos.IsSafeUnixRmRfPath(pc) {
+								ctx.Logger.Warn("Skipping pwd path failed safety check: %s", pwdFile)
+								continue
+							}
+							ctx.Logger.Info("Removing password file: %s", pwdFile)
+							ctx.Execute(fmt.Sprintf("rm -f %s", commonos.ShellSingleQuote(pc)), true)
 						}
 					}
 				}

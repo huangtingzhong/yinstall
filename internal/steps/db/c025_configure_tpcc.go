@@ -6,14 +6,15 @@ import (
 	"strings"
 
 	commonos "github.com/yinstall/internal/common/os"
+	commonsql "github.com/yinstall/internal/common/sql"
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC022ConfigureTPCC 配置 TPCC 相关数据库参数
-// 在 C-021（Deploy Database）之后执行，用于压测/TPCC 场景的参数优化。
-func StepC022ConfigureTPCC() *runner.Step {
+// StepC025ConfigureTPCC 配置 TPCC 相关数据库参数
+// 须在 C-024（环境变量）之后执行，以便 source env_file 后使用部署实例的 yasql 与 / as sysdba。
+func StepC025ConfigureTPCC() *runner.Step {
 	return &runner.Step{
-		ID:          "C-022",
+		ID:          "C-025",
 		Name:        "Configure TPCC Parameters",
 		Description: "Configure database parameters for TPCC workload optimization",
 		Tags:        []string{"db", "config", "tpcc", "optimization"},
@@ -36,12 +37,28 @@ func StepC022ConfigureTPCC() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
-			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
-			user := ctx.GetParamString("os_user", "yashan")
-			sysPassword := ctx.GetParamString("db_admin_password", "Yashan1!")
+			firstHost := ctx.HostsToRun()[0]
+			hctx := ctx.ForHost(firstHost)
 
-			ctx.Logger.Info("Configuring TPCC optimization parameters...")
+			user := hctx.GetParamString("os_user", "yashan")
+			clusterName := hctx.GetParamString("db_cluster_name", "yashandb")
+
+			envFile := ""
+			if envFileVal, ok := ctx.Results["env_file"]; ok {
+				if envFileStr, ok := envFileVal.(string); ok {
+					envFile = envFileStr
+				}
+			}
+			if envFile == "" {
+				beginPort := hctx.GetParamInt("db_begin_port", 1688)
+				homeDir, err := commonos.GetUserHomeDir(hctx, user)
+				if err != nil {
+					homeDir = fmt.Sprintf("/home/%s", user)
+				}
+				envFile = commonos.DetermineEnvFile(homeDir, beginPort)
+			}
+
+			hctx.Logger.Info("Configuring TPCC optimization parameters...")
 
 			tpccSQLs := []string{
 				"ALTER SYSTEM SET UNDO_RETENTION = 30 SCOPE=SPFILE",
@@ -68,22 +85,16 @@ func StepC022ConfigureTPCC() *runner.Step {
 			}
 
 			allSQL := strings.Join(tpccSQLs, ";\n") + ";"
-			yasqlPath := path.Join(stageDir, "bin", "yasql")
-			quotedPwd := commonos.YasqlQuotePassword(sysPassword)
-			yasqlCmd := fmt.Sprintf("%s sys/%s -c %s <<'TPCC_EOF'\n%s\nTPCC_EOF", yasqlPath, quotedPwd, clusterName, allSQL)
 
-			ctx.Logger.Info("Executing %d TPCC optimization SQLs via yasql...", len(tpccSQLs))
-			result, err := commonos.ExecuteAsUser(ctx, user, yasqlCmd, false)
+			hctx.Logger.Info("Executing %d TPCC optimization SQLs via yasql (/ as sysdba)...", len(tpccSQLs))
+			_, err := commonsql.ExecuteSQLAsSysdbaCtx(hctx, user, envFile, clusterName, allSQL, true)
 			if err != nil {
-				ctx.Logger.Warn("TPCC SQL execution error: %v", err)
-			} else if result.GetExitCode() != 0 {
-				ctx.Logger.Warn("TPCC SQL execution returned exit code %d: %s", result.GetExitCode(), result.GetStderr())
-			} else {
-				ctx.Logger.Info("All TPCC optimization SQLs executed successfully")
+				return fmt.Errorf("TPCC SQL execution failed: %w", err)
 			}
 
-			ctx.Logger.Info("TPCC parameter optimization completed")
-			ctx.Logger.Info("Note: Parameter changes require database restart to take effect")
+			hctx.Logger.Info("All TPCC optimization SQLs executed successfully")
+			hctx.Logger.Info("TPCC parameter optimization completed")
+			hctx.Logger.Info("Note: Parameter changes require database restart to take effect")
 
 			return nil
 		},

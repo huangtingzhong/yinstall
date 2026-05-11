@@ -226,9 +226,10 @@ func CleanEnvVars(ctx *runner.StepContext, user, clusterName, dataPath string, b
 		ctx.Execute(fmt.Sprintf("sed -i '/^$/N;/^\\n$/d' %s", bashrc), false)
 	} else {
 		portFile := path.Join(homeDir, fmt.Sprintf(".port%d", beginPort))
-		r, _ := ctx.Execute(fmt.Sprintf("test -f %s", portFile), false)
+		portQ := ShellSingleQuote(portFile)
+		r, _ := ctx.Execute(fmt.Sprintf("test -f %s", portQ), false)
 		if r != nil && r.GetExitCode() == 0 {
-			ctx.Execute(fmt.Sprintf("rm -f %s", portFile), true)
+			ctx.Execute(fmt.Sprintf("rm -f %s", portQ), true)
 		}
 	}
 

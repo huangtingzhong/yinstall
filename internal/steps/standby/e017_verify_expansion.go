@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	commonos "github.com/yinstall/internal/common/os"
+	commonsql "github.com/yinstall/internal/common/sql"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -63,19 +64,15 @@ func StepE017VerifyExpansion() *runner.Step {
 
 			ctx.Logger.Info("Verifying standby expansion")
 
-			// Test yasql connectivity
+			// Test yasql connectivity（与 commonsql.ExecuteSQLAsSysdbaCtx 一致）
 			ctx.Logger.Info("Testing database connectivity...")
-			result, err := commonos.ExecuteAsUserWithEnv(ctx, user, envFile, `echo "SELECT 1 FROM DUAL;" | yasql / as sysdba`, true)
-			if err != nil {
-				ctx.Logger.Warn("Database connectivity test failed: %v", err)
-			} else if result.GetExitCode() == 0 {
-				ctx.Logger.Info("Database connectivity: OK")
-			} else {
-				ctx.Logger.Warn("Database connectivity test returned non-zero exit code")
+			if _, err := commonsql.ExecuteSQLAsSysdbaCtx(ctx, user, envFile, clusterName, "SELECT 1 FROM DUAL", true); err != nil {
+				return fmt.Errorf("database connectivity test failed: %w", err)
 			}
+			ctx.Logger.Info("Database connectivity: OK")
 
 			// Check yasboot availability
-			result, _ = commonos.ExecuteAsUserWithEnv(ctx, user, envFile, "command -v yasboot", true)
+			result, _ := commonos.ExecuteAsUserWithEnv(ctx, user, envFile, "command -v yasboot", true)
 			if result != nil && result.GetExitCode() == 0 {
 				ctx.Logger.Info("yasboot found: %s", strings.TrimSpace(result.GetStdout()))
 			} else {

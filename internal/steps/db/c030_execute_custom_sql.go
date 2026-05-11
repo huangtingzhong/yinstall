@@ -4,18 +4,18 @@ import (
 	"fmt"
 	"path"          // 远端（Linux）路径拼接
 	"path/filepath" // 本地操作系统路径（Windows 上 filepath.IsAbs 等）
-	"regexp"
 	"strings"
 
 	"github.com/yinstall/internal/common/file"
 	commonos "github.com/yinstall/internal/common/os"
+	commonsql "github.com/yinstall/internal/common/sql"
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC029ExecuteCustomSQL 执行自定义 SQL 脚本
-func StepC029ExecuteCustomSQL() *runner.Step {
+// StepC030ExecuteCustomSQL 执行自定义 SQL 脚本
+func StepC030ExecuteCustomSQL() *runner.Step {
 	return &runner.Step{
-		ID:          "C-029",
+		ID:          "C-030",
 		Name:        "Execute Custom SQL Script",
 		Description: "Execute custom SQL script using yasql",
 		Tags:        []string{"db", "sql", "custom"},
@@ -61,20 +61,17 @@ func StepC029ExecuteCustomSQL() *runner.Step {
 				return fmt.Errorf("failed to execute yasql: %w", err)
 			}
 
-			// 检查执行结果
-			if result.GetExitCode() != 0 {
-				ctx.Logger.Error("SQL script execution failed with exit code: %d", result.GetExitCode())
+			yr := &commonsql.YasqlResult{
+				Stdout:   result.GetStdout(),
+				Stderr:   result.GetStderr(),
+				ExitCode: result.GetExitCode(),
+				Success:  result.GetExitCode() == 0,
+			}
+			if err := commonsql.ValidateYasqlResultSuccess(yr); err != nil {
+				ctx.Logger.Error("SQL script execution failed: %v", err)
 				ctx.Logger.Error("STDOUT: %s", result.GetStdout())
 				ctx.Logger.Error("STDERR: %s", result.GetStderr())
-				return fmt.Errorf("SQL script execution failed")
-			}
-
-			// 检查输出中是否有 YAS-NNNNN 错误代码
-			output := result.GetStdout() + result.GetStderr()
-			if hasYasError(output) {
-				ctx.Logger.Error("SQL script execution completed with YAS errors:")
-				ctx.Logger.Error("Output: %s", output)
-				return fmt.Errorf("SQL script execution failed with YAS errors")
+				return fmt.Errorf("SQL script execution failed: %w", err)
 			}
 
 			ctx.Logger.Info("Custom SQL script executed successfully")
@@ -187,11 +184,4 @@ func resolveScriptPath(ctx *runner.StepContext, scriptPath string) (string, erro
 	}
 	ctx.Logger.Info("Uploaded SQL script to: %s", remotePath)
 	return remotePath, nil
-}
-
-// hasYasError 检查输出中是否包含 YAS-NNNNN 格式的错误代码
-func hasYasError(output string) bool {
-	// 匹配 YAS-NNNNN 格式（N 为数字）
-	re := regexp.MustCompile(`YAS-\d{5}`)
-	return re.MatchString(output)
 }

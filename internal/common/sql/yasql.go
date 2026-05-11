@@ -5,11 +5,90 @@ package sql
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
+
+// yasErrorCodePattern 匹配 YashanDB yasql 输出中的错误码 YAS-NNNNN（N 为数字）。
+var yasErrorCodePattern = regexp.MustCompile(`YAS-\d{5}`)
+
+// OutputContainsYasError 判断合并输出（stdout+stderr）中是否出现 Yashan 报错关键字 YAS-NNNNN。
+func OutputContainsYasError(output string) bool {
+	return yasErrorCodePattern.MatchString(output)
+}
+
+func errIfYasqlOutputHasError(r *YasqlResult) error {
+	if r == nil {
+		return nil
+	}
+	combined := r.Stdout + r.Stderr
+	if !OutputContainsYasError(combined) {
+		return nil
+	}
+	code := yasErrorCodePattern.FindString(combined)
+	if code == "" {
+		code = "YAS-NNNNN"
+	}
+	return fmt.Errorf("yasql output contains Yashan error %s", code)
+}
+
+// ValidateYasqlResultSuccess 校验 yasql 结果：先检查 YAS-NNNNN，再检查退出码（供直连 ctx.Execute yasql 的路径统一使用）。
+func ValidateYasqlResultSuccess(r *YasqlResult) error {
+	if r == nil {
+		return fmt.Errorf("yasql result is nil")
+	}
+	if err := errIfYasqlOutputHasError(r); err != nil {
+		return err
+	}
+	if !r.Success || r.ExitCode != 0 {
+		return fmt.Errorf("yasql command failed with exit code %d: %s", r.ExitCode, r.Stderr)
+	}
+	return nil
+}
+
+// buildInstallLayoutYasqlCommand 在安装介质目录尚未写入用户 env 时，通过 db_install_path / db_data_path 推导 YASDB_HOME 后执行 yasql（历史行为与 C-023 一致）。
+func buildInstallLayoutYasqlCommand(installPath, dataPath, sql string) string {
+	escapedSQL := strings.ReplaceAll(sql, "$", "\\$")
+	return fmt.Sprintf(
+		`export YASDB_HOME=%s/$(ls %s/ 2>/dev/null | head -1) && `+
+			`export YASCS_HOME=%s/ycs/ce-1-1 && `+
+			`export PATH=$YASDB_HOME/bin:$PATH && `+
+			`export LD_LIBRARY_PATH=$YASDB_HOME/lib:$LD_LIBRARY_PATH && `+
+			`yasql -S / as sysdba <<EOF
+%s
+EOF`,
+		installPath, installPath, dataPath, escapedSQL)
+}
+
+// ExecuteSQLAsSysdbaInstallLayoutCtx 使用安装目录布局执行 sysdba SQL（heredoc，-S），并进行退出码与 YAS-NNNNN 校验。
+func ExecuteSQLAsSysdbaInstallLayoutCtx(ctx *runner.StepContext, osUser, installPath, dataPath, sql string, showOutput bool) (*YasqlResult, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("step context is required")
+	}
+	if sql == "" {
+		return nil, fmt.Errorf("sql statement is required")
+	}
+	cmd := buildInstallLayoutYasqlCommand(installPath, dataPath, sql)
+	result, execErr := commonos.ExecuteAsUser(ctx, osUser, cmd, showOutput)
+	yasqlResult := &YasqlResult{Success: false}
+	if result != nil {
+		yasqlResult.Stdout = result.GetStdout()
+		yasqlResult.Stderr = result.GetStderr()
+		yasqlResult.ExitCode = result.GetExitCode()
+		yasqlResult.Success = result.GetExitCode() == 0
+	}
+	if execErr != nil {
+		return yasqlResult, fmt.Errorf("failed to execute yasql: %w", execErr)
+	}
+	if err := ValidateYasqlResultSuccess(yasqlResult); err != nil {
+		yasqlResult.Success = false
+		return yasqlResult, err
+	}
+	return yasqlResult, nil
+}
 
 // YasqlConfig yasql 执行配置
 type YasqlConfig struct {
@@ -116,9 +195,9 @@ func ExecuteSQL(ctx *runner.StepContext, cfg *YasqlConfig, sql string) (*YasqlRe
 		return yasqlResult, fmt.Errorf("failed to execute yasql: %w", err)
 	}
 
-	if !yasqlResult.Success {
-		return yasqlResult, fmt.Errorf("yasql command failed with exit code %d: %s",
-			yasqlResult.ExitCode, yasqlResult.Stderr)
+	if err := ValidateYasqlResultSuccess(yasqlResult); err != nil {
+		yasqlResult.Success = false
+		return yasqlResult, err
 	}
 
 	return yasqlResult, nil
@@ -202,9 +281,9 @@ func ExecuteSQLAsSysdbaCtx(ctx *runner.StepContext, osUser, envFile, clusterName
 		return yasqlResult, fmt.Errorf("failed to execute yasql: %w", err)
 	}
 
-	if !yasqlResult.Success {
-		return yasqlResult, fmt.Errorf("yasql command failed with exit code %d: %s",
-			yasqlResult.ExitCode, yasqlResult.Stderr)
+	if err := ValidateYasqlResultSuccess(yasqlResult); err != nil {
+		yasqlResult.Success = false
+		return yasqlResult, err
 	}
 
 	return yasqlResult, nil

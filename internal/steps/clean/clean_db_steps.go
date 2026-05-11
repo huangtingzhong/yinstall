@@ -266,8 +266,8 @@ func StepCleanDB003RemoveDirectories() *runner.Step {
 				{"YASDB_DATA", yasdbData},
 				{"YASDB_LOG", yasdbLog},
 			} {
-				if !isSafePath(p.path) {
-					return fmt.Errorf("unsafe path for %s: '%s' - refusing to proceed", p.name, p.path)
+				if !commonos.IsSafeUnixRmRfPath(p.path) {
+					return fmt.Errorf("unsafe path for %s: '%s' - refusing to proceed (must be under allowed installation roots)", p.name, p.path)
 				}
 			}
 
@@ -330,21 +330,29 @@ func StepCleanDB004RemoveConfig() *runner.Step {
 
 			envFile := fmt.Sprintf("%s/%s.env", yasbootDir, clusterName)
 			ctx.Logger.Info("Removing yasboot env file: %s", envFile)
-			result, err := ctx.Execute(fmt.Sprintf("rm -f %s", envFile), true)
-			if err != nil || (result != nil && result.GetExitCode() != 0) {
-				ctx.Logger.Warn("Failed to remove yasboot env file: %v", err)
+			if !commonos.IsSafeUnixRmRfPath(envFile) {
+				ctx.Logger.Warn("Skipping rm of env file: path failed safety check: %s", envFile)
 			} else {
-				ctx.Logger.Info("Yasboot env file removed successfully")
+				result, err := ctx.Execute(fmt.Sprintf("rm -f %s", commonos.ShellSingleQuote(envFile)), true)
+				if err != nil || (result != nil && result.GetExitCode() != 0) {
+					ctx.Logger.Warn("Failed to remove yasboot env file: %v", err)
+				} else {
+					ctx.Logger.Info("Yasboot env file removed successfully")
+				}
 			}
 
 			// 删除集群 home 文件
 			homeFile := fmt.Sprintf("%s/%s_yasdb_home", yasbootDir, clusterName)
 			ctx.Logger.Info("Removing yasboot home file: %s", homeFile)
-			result, err = ctx.Execute(fmt.Sprintf("rm -f %s", homeFile), true)
-			if err != nil || (result != nil && result.GetExitCode() != 0) {
-				ctx.Logger.Warn("Failed to remove yasboot home file: %v", err)
+			if !commonos.IsSafeUnixRmRfPath(homeFile) {
+				ctx.Logger.Warn("Skipping rm of home file: path failed safety check: %s", homeFile)
 			} else {
-				ctx.Logger.Info("Yasboot home file removed successfully")
+				result, err := ctx.Execute(fmt.Sprintf("rm -f %s", commonos.ShellSingleQuote(homeFile)), true)
+				if err != nil || (result != nil && result.GetExitCode() != 0) {
+					ctx.Logger.Warn("Failed to remove yasboot home file: %v", err)
+				} else {
+					ctx.Logger.Info("Yasboot home file removed successfully")
+				}
 			}
 
 			ctx.Logger.Info("Configuration cleanup completed")
@@ -452,8 +460,15 @@ func StepCleanDB005CleanYACDisks() *runner.Step {
 
 				ctx.Logger.Info("Cleaning disk: %s", diskPath)
 
+				if !commonos.IsSafeUnixBlockDevicePath(diskPath) {
+					ctx.Logger.Warn("Refusing dd on unsafe disk path: %s", diskPath)
+					failCount++
+					continue
+				}
+				diskQ := commonos.ShellSingleQuote(diskPath)
+
 				// 检查磁盘是否存在
-				result, _ := ctx.Execute(fmt.Sprintf("test -e %s", diskPath), false)
+				result, _ := ctx.Execute(fmt.Sprintf("test -e %s", diskQ), false)
 				if result == nil || result.GetExitCode() != 0 {
 					ctx.Logger.Warn("Disk does not exist, skipping: %s", diskPath)
 					failCount++
@@ -462,7 +477,7 @@ func StepCleanDB005CleanYACDisks() *runner.Step {
 
 				// 使用 dd 清理磁盘头（前 10MB）
 				ctx.Logger.Info("Wiping disk header (first 10MB): %s", diskPath)
-				cmd := fmt.Sprintf("dd if=/dev/zero of=%s bs=1M count=10 2>&1", diskPath)
+				cmd := fmt.Sprintf("dd if=/dev/zero of=%s bs=1M count=10 2>&1", diskQ)
 				result, err := ctx.Execute(cmd, true)
 				if err != nil || (result != nil && result.GetExitCode() != 0) {
 					ctx.Logger.Error("Failed to wipe disk %s: %v", diskPath, err)
