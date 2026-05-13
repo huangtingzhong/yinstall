@@ -11,7 +11,7 @@
 //  b. os_iso_device 是文件名/路径 → FindAndDistribute（远端 → 本地/上传）
 //       找不到指定文件 → 回退到 ISO 文件自动搜索
 //  c. 自动搜索：在 remoteDir / $HOME / /data/yashan/soft 及 localDirs 中
-//     查找第一个 *.iso 文件
+//     查找第一个 *.iso 文件（按目录顺序；与 internal/common/file 中安装包「合并选最新」逻辑无关）
 
 package os
 
@@ -117,7 +117,8 @@ func deviceHasMedia(ctx *runner.StepContext, device string) bool {
 }
 
 // autoFindISO 自动在远端和本地软件目录中搜索第一个 *.iso 文件。
-// 搜索顺序：remoteDir → $HOME → /data/yashan/soft → localDirs
+// 策略：按目录顺序「首个命中即返回」，不做多路径合并、不做版本比较（与 file 包中安装包 FindLatest* 不同）。
+// 搜索顺序：remoteDir → $HOME → /data/yashan/soft → localDirs（与 remoteISOSearchDirs 一致）
 func autoFindISO(ctx *runner.StepContext) (string, error) {
 	ctx.Logger.Info("Auto-searching for *.iso files...")
 

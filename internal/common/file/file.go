@@ -1,3 +1,8 @@
+// 说明：本包内 FindLatest*、findLatestInstantclient*、FindZstdSourceTarball 的「远端+本地存在目录合并、再按版本号选全局最新」
+// 仅适用于 DB / YCM / YMP 安装包、instantclient、zstd 源码等可版本排序的介质。
+//
+// ISO（local-iso / YUM 源盘）的查找与挂载仍走 internal/common/os/iso.go（resolveISOPath / autoFindISO）：
+// 保持「按目录顺序命中第一个 *.iso」策略，不参与上述合并选最新，也不做 ISO 版本比较。
 package file
 
 import (
@@ -12,6 +17,25 @@ import (
 
 	"github.com/yinstall/internal/runner"
 )
+
+// remoteSoftwareDirExists 远端软件目录是否存在（不存在则跳过扫描，避免无意义 ls）。
+func remoteSoftwareDirExists(ctx *runner.StepContext, dir string) bool {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return false
+	}
+	return DirExists(ctx, dir)
+}
+
+// localSoftwareDirExists 控制端本地软件目录是否存在。
+func localSoftwareDirExists(dir string) bool {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return false
+	}
+	fi, err := os.Stat(dir)
+	return err == nil && fi.IsDir()
+}
 
 // FindAndDistribute 查找文件并分发到远程，返回远程文件路径。
 //
@@ -151,10 +175,9 @@ func IsISOFile(path string) bool {
 	return strings.HasSuffix(lower, ".iso")
 }
 
-// remoteSearchDirs 返回自动发现时需要扫描的远端目录列表。
-//
-//   - remoteDir 非空：只扫描该目录（用户明确指定，不做额外搜索）
-//   - remoteDir 为空：扫描 SSH 用户的 $HOME 和 /data/yashan/soft（去重）
+// remoteSearchDirs 返回自动发现时需要扫描的远端目录列表（去重）。
+// 顺序为：[remoteDir（若为空则默认 /data/yashan/soft）, SSH 用户 $HOME]。
+// 即使用户通过 --remote-software-dir 指定了远端目录，仍会额外扫描 $HOME 下的包（与历史行为一致）。
 func remoteSearchDirs(ctx *runner.StepContext, remoteDir string) []string {
 	homeDir := "/root"
 	if r, _ := ctx.Execute("echo $HOME", false); r != nil && strings.TrimSpace(r.GetStdout()) != "" {
@@ -181,7 +204,9 @@ func remoteSearchDirs(ctx *runner.StepContext, remoteDir string) []string {
 //   - x86: yashandb-23.4.7.100-linux-x86_64.tar.gz 或 ...-linux-x86-64.tar.gz
 //   - arm: yashandb-23.4.7.100-linux-aarch64.tar.gz 或 ...-linux-aarch-64.tar.gz
 //
-// 返回找到的软件包路径（远程或本地）
+// 在远端 software 目录（仅存在者）与本地 software 目录（仅存在者）中收集全部候选，按版本号取全局最新：
+//   - 若选中远端文件 → 返回远端绝对路径，可直接使用
+//   - 若选中本地文件 → 返回本地绝对路径，由 FindAndDistribute 上传
 func FindLatestDBPackage(
 	ctx *runner.StepContext,
 	localDirs []string,
@@ -201,6 +226,9 @@ func FindLatestDBPackage(
 
 	var remotePackages []string
 	for _, dir := range remoteSearchDirs(ctx, remoteDir) {
+		if !remoteSoftwareDirExists(ctx, dir) {
+			continue
+		}
 		result, _ := ctx.Execute(fmt.Sprintf("ls -1 %s/yashandb-*-linux-*.tar.gz 2>/dev/null || true", dir), false)
 		if result != nil && result.GetStdout() != "" {
 			for _, f := range strings.Split(strings.TrimSpace(result.GetStdout()), "\n") {
@@ -211,12 +239,12 @@ func FindLatestDBPackage(
 			}
 		}
 	}
-	if len(remotePackages) > 0 {
-		return findLatestVersion(remotePackages, re), nil
-	}
 
 	var localPackages []string
 	for _, dir := range localDirs {
+		if !localSoftwareDirExists(dir) {
+			continue
+		}
 		matches, err := filepath.Glob(filepath.Join(dir, "yashandb-*-linux-*.tar.gz"))
 		if err == nil {
 			for _, m := range matches {
@@ -227,13 +255,14 @@ func FindLatestDBPackage(
 		}
 	}
 
-	if len(localPackages) == 0 {
+	all := append(append([]string{}, remotePackages...), localPackages...)
+	if len(all) == 0 {
 		remoteDirs := remoteSearchDirs(ctx, remoteDir)
 		return "", fmt.Errorf("no yashandb package found (linux-x86_64|linux-x86-64 or linux-aarch64|linux-aarch-64) in remote dirs %v or local dirs %v", remoteDirs, localDirs)
 	}
 
-	latest := findLatestVersion(localPackages, re)
-	return filepath.Base(latest), nil
+	latest := findLatestVersion(all, re)
+	return latest, nil
 }
 
 // FindLatestYCMPackage 自动查找最新版本的 YCM 软件包
@@ -241,7 +270,7 @@ func FindLatestDBPackage(
 //   - x86: yashandb-cloud-manager-23.5.3.2-linux-x86_64.tar.gz 或 ...-linux-x86-64.tar.gz
 //   - arm: yashandb-cloud-manager-23.5.3.2-linux-aarch64.tar.gz 或 ...-linux-aarch-64.tar.gz
 //
-// 返回找到的软件包路径（远程或本地）
+// 远端与本地（仅存在目录）合并候选后取版本最新；远端路径直接使用，本地绝对路径由 FindAndDistribute 上传。
 func FindLatestYCMPackage(
 	ctx *runner.StepContext,
 	localDirs []string,
@@ -261,6 +290,9 @@ func FindLatestYCMPackage(
 
 	var remotePackages []string
 	for _, dir := range remoteSearchDirs(ctx, remoteDir) {
+		if !remoteSoftwareDirExists(ctx, dir) {
+			continue
+		}
 		result, _ := ctx.Execute(fmt.Sprintf("ls -1 %s/yashandb-cloud-manager-*-linux-*.tar.gz 2>/dev/null || true", dir), false)
 		if result != nil && result.GetStdout() != "" {
 			for _, f := range strings.Split(strings.TrimSpace(result.GetStdout()), "\n") {
@@ -271,12 +303,12 @@ func FindLatestYCMPackage(
 			}
 		}
 	}
-	if len(remotePackages) > 0 {
-		return findLatestVersion(remotePackages, re), nil
-	}
 
 	var localPackages []string
 	for _, dir := range localDirs {
+		if !localSoftwareDirExists(dir) {
+			continue
+		}
 		matches, err := filepath.Glob(filepath.Join(dir, "yashandb-cloud-manager-*-linux-*.tar.gz"))
 		if err == nil {
 			for _, m := range matches {
@@ -287,13 +319,13 @@ func FindLatestYCMPackage(
 		}
 	}
 
-	if len(localPackages) == 0 {
+	all := append(append([]string{}, remotePackages...), localPackages...)
+	if len(all) == 0 {
 		remoteDirs := remoteSearchDirs(ctx, remoteDir)
 		return "", fmt.Errorf("no yashandb-cloud-manager package found (linux-x86_64|linux-x86-64 or linux-aarch64|linux-aarch-64) in remote dirs %v or local dirs %v", remoteDirs, localDirs)
 	}
 
-	latest := findLatestVersion(localPackages, re)
-	return filepath.Base(latest), nil
+	return findLatestVersion(all, re), nil
 }
 
 // FindLatestYMPPackage 自动查找最新版本的 YMP 软件包
@@ -301,7 +333,7 @@ func FindLatestYCMPackage(
 //   - x86: yashan-migrate-platform-23.5.3.2-linux-x86_64.zip 或 ...-linux-x86-64.zip
 //   - arm: yashan-migrate-platform-23.5.3.2-linux-aarch64.zip 或 ...-linux-aarch-64.zip
 //
-// 返回找到的软件包路径（远程或本地）
+// 远端与本地（仅存在目录）合并候选后取版本最新；远端路径直接使用，本地绝对路径由 FindAndDistribute 上传。
 func FindLatestYMPPackage(
 	ctx *runner.StepContext,
 	localDirs []string,
@@ -322,6 +354,9 @@ func FindLatestYMPPackage(
 
 	var remotePackages []string
 	for _, dir := range remoteSearchDirs(ctx, remoteDir) {
+		if !remoteSoftwareDirExists(ctx, dir) {
+			continue
+		}
 		// 用较宽 glob 再 regex 过滤，避免远端 shell 对花括号展开差异
 		result, _ := ctx.Execute(fmt.Sprintf("ls -1 %s/yashan-migrate-platform-*-linux-*.zip 2>/dev/null || true", dir), false)
 		if result != nil && result.GetStdout() != "" {
@@ -333,12 +368,12 @@ func FindLatestYMPPackage(
 			}
 		}
 	}
-	if len(remotePackages) > 0 {
-		return findLatestVersion(remotePackages, re), nil
-	}
 
 	var localPackages []string
 	for _, dir := range localDirs {
+		if !localSoftwareDirExists(dir) {
+			continue
+		}
 		matches, err := filepath.Glob(filepath.Join(dir, "yashan-migrate-platform-*-linux-*.zip"))
 		if err == nil {
 			for _, m := range matches {
@@ -349,13 +384,13 @@ func FindLatestYMPPackage(
 		}
 	}
 
-	if len(localPackages) == 0 {
+	all := append(append([]string{}, remotePackages...), localPackages...)
+	if len(all) == 0 {
 		remoteDirs := remoteSearchDirs(ctx, remoteDir)
 		return "", fmt.Errorf("no yashan-migrate-platform package found (linux-x86_64|linux-x86-64 or linux-aarch64|linux-aarch-64) in remote dirs %v or local dirs %v", remoteDirs, localDirs)
 	}
 
-	latest := findLatestVersion(localPackages, re)
-	return filepath.Base(latest), nil
+	return findLatestVersion(all, re), nil
 }
 
 // FindZstdSourceTarball 在本地/远端软件目录中查找 zstd 源码包（.tar.gz），供 RHEL7 等无 libzstd RPM 时编译安装。
@@ -381,18 +416,35 @@ func FindZstdSourceTarball(
 
 	pattern := `zstd-(\d+\.\d+\.\d+)\.tar\.gz`
 	re := regexp.MustCompile(`^` + pattern + `$`)
+	reVer := regexp.MustCompile(pattern)
 
-	// 远端：先找 1.5.7，再列全部匹配并取最高版本
+	// 优先 zstd-1.5.7.tar.gz：远端与本地（仅存在目录）均扫描，远端命中优先返回远端绝对路径。
 	shellQuote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 	for _, dir := range remoteSearchDirs(ctx, remoteDir) {
+		if !remoteSoftwareDirExists(ctx, dir) {
+			continue
+		}
 		pref := path.Join(dir, "zstd-1.5.7.tar.gz")
 		r, _ := ctx.Execute(fmt.Sprintf("test -f %s && echo ok", shellQuote(pref)), false)
 		if r != nil && strings.Contains(strings.TrimSpace(r.GetStdout()), "ok") {
 			return pref, nil
 		}
 	}
+	for _, dir := range localDirs {
+		if !localSoftwareDirExists(dir) {
+			continue
+		}
+		pref := filepath.Join(dir, "zstd-1.5.7.tar.gz")
+		if _, err := os.Stat(pref); err == nil {
+			return pref, nil
+		}
+	}
+
 	var remotePackages []string
 	for _, dir := range remoteSearchDirs(ctx, remoteDir) {
+		if !remoteSoftwareDirExists(ctx, dir) {
+			continue
+		}
 		result, _ := ctx.Execute(fmt.Sprintf("ls -1 %s/zstd-*.tar.gz 2>/dev/null || true", dir), false)
 		if result != nil && result.GetStdout() != "" {
 			for _, f := range strings.Split(strings.TrimSpace(result.GetStdout()), "\n") {
@@ -403,12 +455,12 @@ func FindZstdSourceTarball(
 			}
 		}
 	}
-	if len(remotePackages) > 0 {
-		return findLatestVersion(remotePackages, regexp.MustCompile(pattern)), nil
-	}
 
 	var localPackages []string
 	for _, dir := range localDirs {
+		if !localSoftwareDirExists(dir) {
+			continue
+		}
 		matches, err := filepath.Glob(filepath.Join(dir, "zstd-*.tar.gz"))
 		if err != nil {
 			continue
@@ -419,22 +471,13 @@ func FindZstdSourceTarball(
 			}
 		}
 	}
-	if len(localPackages) == 0 {
+
+	all := append(append([]string{}, remotePackages...), localPackages...)
+	if len(all) == 0 {
 		remoteDirs := remoteSearchDirs(ctx, remoteDir)
 		return "", fmt.Errorf("no zstd source tarball (zstd-x.y.z.tar.gz, prefer zstd-1.5.7.tar.gz) in remote dirs %v or local dirs %v", remoteDirs, localDirs)
 	}
-	prefer := ""
-	for _, m := range localPackages {
-		if filepath.Base(m) == "zstd-1.5.7.tar.gz" {
-			prefer = m
-			break
-		}
-	}
-	if prefer != "" {
-		return filepath.Base(prefer), nil
-	}
-	latest := findLatestVersion(localPackages, regexp.MustCompile(pattern))
-	return filepath.Base(latest), nil
+	return findLatestVersion(all, reVer), nil
 }
 
 // FindLatestInstantclientBasicPackage 自动查找最新版本的 Oracle instantclient-basic 软件包。
@@ -471,9 +514,7 @@ func FindLatestInstantclientSQLPlusPackage(
 //
 // 版本排序：先比较点分版本号，再比较发布号（缺省视为 0）。
 //
-// 返回规则与 FindLatestDBPackage 一致：
-//   - 远端找到 → 返回完整远端路径
-//   - 本地找到 → 返回文件名（由调用方通过 FindAndDistribute 上传）
+// 返回：远端为完整远端路径；本地为完整本地路径（由 FindAndDistribute 上传）。
 func findLatestInstantclientPackage(
 	ctx *runner.StepContext,
 	localDirs []string,
@@ -497,6 +538,9 @@ func findLatestInstantclientPackage(
 
 	var remotePackages []string
 	for _, dir := range remoteSearchDirs(ctx, remoteDir) {
+		if !remoteSoftwareDirExists(ctx, dir) {
+			continue
+		}
 		r, _ := ctx.Execute(
 			fmt.Sprintf("ls -1 %s/%s 2>/dev/null || true", dir, lsGlob), false)
 		if r != nil && r.GetStdout() != "" {
@@ -508,12 +552,12 @@ func findLatestInstantclientPackage(
 			}
 		}
 	}
-	if len(remotePackages) > 0 {
-		return findLatestInstantclientVersion(remotePackages, re), nil
-	}
 
 	var localPackages []string
 	for _, dir := range localDirs {
+		if !localSoftwareDirExists(dir) {
+			continue
+		}
 		matches, err := filepath.Glob(filepath.Join(dir, lsGlob))
 		if err == nil {
 			for _, m := range matches {
@@ -523,15 +567,16 @@ func findLatestInstantclientPackage(
 			}
 		}
 	}
-	if len(localPackages) == 0 {
+
+	all := append(append([]string{}, remotePackages...), localPackages...)
+	if len(all) == 0 {
 		remoteDirs := remoteSearchDirs(ctx, remoteDir)
 		return "", fmt.Errorf(
 			"no instantclient-%s package found (arch glob=%s) in remote dirs %v or local dirs %v",
 			component, icGlob, remoteDirs, localDirs)
 	}
 
-	latest := findLatestInstantclientVersion(localPackages, re)
-	return filepath.Base(latest), nil
+	return findLatestInstantclientVersion(all, re), nil
 }
 
 // findLatestInstantclientVersion 从文件列表中找到版本号+发布号最大的 instantclient 包

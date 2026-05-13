@@ -33,7 +33,17 @@ func libzstdSourceSatisfiedRHEL7(ctx *runner.StepContext) bool {
 	return r2 != nil && r2.GetExitCode() == 0
 }
 
-// IsDepPackageSatisfied 判断依赖包是否已满足（含 EL7 上 libzstd 的源码安装等价路径）
+// libzstdSatisfiedByZstdRPM 部分 RPM 系发行版（如麒麟 Kylin、部分 RHEL/Fedora 衍生）不提供独立 libzstd 包名，
+// 运行时由 zstd 主包提供；dnf install libzstd 可能解析为已装 zstd，但 rpm -q libzstd 仍会失败。
+func libzstdSatisfiedByZstdRPM(ctx *runner.StepContext, pkgManager string) bool {
+	if pkgManager == "apt" {
+		return false
+	}
+	r, _ := ctx.Execute("rpm -q zstd >/dev/null 2>&1", false)
+	return r != nil && r.GetExitCode() == 0
+}
+
+// IsDepPackageSatisfied 判断依赖包是否已满足（含 libzstd：EL7 源码等价、RPM 系 zstd 主包等价）
 func IsDepPackageSatisfied(ctx *runner.StepContext, pkg, pkgManager string) bool {
 	pkg = strings.TrimSpace(pkg)
 	if pkg == "" {
@@ -42,8 +52,13 @@ func IsDepPackageSatisfied(ctx *runner.StepContext, pkg, pkgManager string) bool
 	if IsPackageInstalled(ctx, pkg, pkgManager) {
 		return true
 	}
-	if pkg == "libzstd" && ctx.OSInfo != nil && IsRHEL7(ctx.OSInfo) {
-		return libzstdSourceSatisfiedRHEL7(ctx)
+	if pkg == "libzstd" {
+		if ctx.OSInfo != nil && IsRHEL7(ctx.OSInfo) && libzstdSourceSatisfiedRHEL7(ctx) {
+			return true
+		}
+		if libzstdSatisfiedByZstdRPM(ctx, pkgManager) {
+			return true
+		}
 	}
 	return false
 }
