@@ -11,7 +11,7 @@ output/
 # yinstall 日志（--log-dir 或仓库内 logs/）
 logs/
 
-# 项目文档（本地维护，不同步）
+# docs/ 整目录不同步（含 installer.md、plans/、templates/、architecture/ 等全部子路径）
 docs/
 
 # Claude / Cursor 开发规范（本地双副本，见 CLAUDE.md 与 .cursor/rules/*.mdc）
