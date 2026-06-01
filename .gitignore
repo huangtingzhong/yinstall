@@ -44,13 +44,8 @@ sql_*.txt
 # Claude Code 本地工作区
 .claude/
 
-# Python（skills/yinstall-agent 脚本）
-__pycache__/
-*.py[cod]
-*$py.class
-
-# skills 内嵌二进制
-skills/yinstall-agent/scripts/bin/
+# Agent skills（本地维护，不同步）
+skills/
 
 # 本地安装命令草稿
 *_install_cmd.txt
