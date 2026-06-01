@@ -51,10 +51,9 @@ skills/
 *_install_cmd.txt
 ymp_install_cmd.txt
 
-# Markdown：默认忽略，白名单保留根目录核心文档（不含 CLAUDE.md / docs/）
+# Markdown：默认忽略，白名单保留根目录核心文档（installer.md 已移至 docs/，随 docs/ 排除）
 *.md
 !README.md
-!installer.md
 !requirements.md
 !HUAWEI_MULTIPATH_SUPPORT.md
 !SSH_AUTH_IMPROVEMENT.md

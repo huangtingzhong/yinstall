@@ -11,7 +11,7 @@ YashanDB 安装自动化工具：通过 SSH 在目标机上执行 OS 基线、�
 | **yasinstall** | Go 编译的主程序（CLI），支持多子命令，通过 SSH 在目标机执行安装 |
 | **ymp_install_command.sh** | 辅助脚本：根据变量生成并打印 `yasinstall ymp` 的完整命令，便于复制执行 |
 | **ymp_install_cmd.txt** | YMP 安装命令的文本模板与参数说明 |
-| **installer.md** | 安装规范文档（需求、硬件、OS、安装步骤等） |
+| **docs/installer.md** | 安装规范文档（需求、硬件、OS、安装步骤等；本地 docs/，不入库） |
 | **requirements.md** | 需求/规格文档 |
 
 ---
@@ -153,7 +153,7 @@ yasinstall clean -t ymp --targets 10.10.10.125 --ymp-home /opt/ymp
 | 查看 YMP 参数说明 | `./yasinstall ymp --help` |
 | 只生成 YMP 安装命令（不执行） | 编辑并运行 `./ymp_install_command.sh`，复制输出命令 |
 | 实际执行 YMP 安装 | 使用 `./yasinstall ymp ...`（或脚本输出的命令） |
-| 安装规范与环境要求 | 查阅 `installer.md` |
+| 安装规范与环境要求 | 查阅 `docs/installer.md` |
 
 ---
 
