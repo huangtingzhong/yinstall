@@ -12,6 +12,7 @@ import (
 	"github.com/yinstall/internal/logging"
 	"github.com/yinstall/internal/runner"
 	"github.com/yinstall/internal/ssh"
+	dbsteps "github.com/yinstall/internal/steps/db"
 	ossteps "github.com/yinstall/internal/steps/os"
 	standbysteps "github.com/yinstall/internal/steps/standby"
 )
@@ -54,7 +55,7 @@ var (
 	standbyYACMode   bool // 是否为 YAC 模式（影响环境变量和自启动配置）
 	standbyBeginPort int  // 数据库起始端口（用于多实例场景的环境变量文件命名）
 
-	standbyYasbootExtraArgs string // 追加到 yasboot config node gen 的额外参数
+	standbyYasbootGenExtraArgs string // 追加到 yasboot config node gen 的额外参数
 )
 
 // newStandbyStepContext 构造带全局步骤相关标志的 StepContext（与 db/os 一致：dry-run、precheck、force、软件目录等）。
@@ -229,9 +230,9 @@ func init() {
 	standbyCmd.Flags().BoolVar(&standbyCleanupOnFailure, "standby-cleanup-on-failure", false, "Auto cleanup on failure (dangerous, requires --force)")
 
 	// YAC 模式和多实例支持
-	standbyCmd.Flags().BoolVar(&standbyYACMode, "yac-mode", false, "Enable YAC mode (affects env vars and autostart config)")
+	standbyCmd.Flags().BoolVar(&standbyYACMode, "yac", false, "Enable YAC mode (affects env vars and autostart config)")
 	standbyCmd.Flags().IntVar(&standbyBeginPort, "db-port", 1688, "Database begin port for yasboot expansion (default 1688; omit flag to use primary v$parameter.LISTEN_ADDR port)")
-	standbyCmd.Flags().StringVar(&standbyYasbootExtraArgs, "yasboot-extra-args", "", "Extra arguments appended to yasboot config node gen only (space-separated)")
+	standbyCmd.Flags().StringVar(&standbyYasbootGenExtraArgs, "yasboot-gen-extra-args", "", "Extra arguments appended to yasboot config node gen only (space-separated)")
 }
 
 // runStandby 执行添加备库流程
@@ -259,11 +260,14 @@ func runStandby(cmd *cobra.Command, args []string) error {
 		}
 		if allLocal {
 			flags.Local = true
-			// 本地模式下，除非用户显式指定，否则不注入默认的备库 os-user-password。
-			if !cmd.Flags().Changed("os-user-password") {
-				standbyOSUserPassword = ""
-			}
 		}
+	}
+
+	ResolveOSUserPassword(cmd, flags, standbyOSUser, &standbyOSUserPassword)
+
+	// 本地模式下，除非用户显式指定，否则不注入默认的备库 os-user-password。
+	if flags.Local && !cmd.Flags().Changed("os-user-password") {
+		standbyOSUserPassword = ""
 	}
 
 	// 设置主库 SSH 参数默认值（继承全局参数）
@@ -501,7 +505,7 @@ func buildStandbyParams(flags GlobalFlags) map[string]interface{} {
 	params["standby_targets_str"] = strings.Join(flags.Targets, ",")
 	params["standby_cleanup_on_failure"] = standbyCleanupOnFailure
 	params["skip_os"] = skipOS
-	params["yasboot_extra_args"] = standbyYasbootExtraArgs
+	params[dbsteps.ParamYasbootGenExtraArgs] = standbyYasbootGenExtraArgs
 
 	return params
 }

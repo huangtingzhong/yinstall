@@ -10,7 +10,7 @@ import (
 // 配合 grep -F 使用，避免：
 // - /opt/ycm 匹配到 /opt/ycm2；
 // - /data/yashan/yasdb_home 匹配到 yasdb_home_3988（另一实例）；
-// - /data123 与 /data1234 等「前缀重叠」：Clean 后分段匹配，且目录路径须满足 commonos.IsSafeUnixRmRfPath 白名单规则。
+// - /data123 与 /data1234 等「前缀重叠」：Clean 后分段匹配；删除路径用 ValidateDeletePath 拒绝通配符与 ".." 。
 func PathLiteralPrefixForPS(p string) string {
 	p = strings.TrimSpace(p)
 	if p == "" {

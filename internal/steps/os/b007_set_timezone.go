@@ -17,6 +17,7 @@ func StepB007SetTimezone() *runner.Step {
 		Optional:    false,
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-007: Set Timezone")
 			timezone := ctx.GetParamString("os_timezone", "Asia/Shanghai")
 			cmd := fmt.Sprintf("timedatectl set-timezone '%s'", timezone)
 			_, err := ctx.ExecuteWithCheck(cmd, true)

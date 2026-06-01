@@ -12,6 +12,7 @@ import (
 // StepE006CheckStandbyBeginPort 在每台备库上检查 db_begin_port（与 --db-port 一致）是否已被占用
 func StepE006CheckStandbyBeginPort() *runner.Step {
 	checkOnHost := func(ctx *runner.StepContext, th runner.TargetHost, beginPort int) error {
+		standbyLogPhase(ctx, "host-start", fmt.Sprintf("host=%s port=%d", th.Host, beginPort))
 		hctx := ctx.ForHost(th)
 		hctx.Logger.Info("Checking if port %d is in use on standby %s...", beginPort, th.Host)
 
@@ -31,6 +32,7 @@ func StepE006CheckStandbyBeginPort() *runner.Step {
 			return fmt.Errorf("port %d is already in use on %s (--db-port); port info: %s; choose another port or stop the process using it", beginPort, th.Host, portInfo)
 		}
 		hctx.Logger.Info("OK: Port %d is available on %s", beginPort, th.Host)
+		standbyLogPhase(hctx, "host-done", fmt.Sprintf("host=%s port=%d", th.Host, beginPort))
 		return nil
 	}
 
@@ -52,6 +54,7 @@ func StepE006CheckStandbyBeginPort() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			standbyLogPhase(ctx, "plan", "E-006: Check Standby Begin Port Available")
 			beginPort := ctx.GetParamInt("db_begin_port", 1688)
 
 			for _, th := range ctx.HostsToRun() {

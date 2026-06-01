@@ -27,7 +27,9 @@ func StepE001CheckPrimaryConnectivity() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			standbyLogPhase(ctx, "plan", "E-001: Check Primary Connectivity")
 			primaryIP := ctx.GetParamString("primary_ip", "")
+			standbyLogPhase(ctx, "check-start", fmt.Sprintf("primary=%s", primaryIP))
 
 			ctx.Logger.Info("Checking connectivity to primary: %s", primaryIP)
 
@@ -58,6 +60,7 @@ func StepE001CheckPrimaryConnectivity() *runner.Step {
 			}
 
 			ctx.SetResult("primary_hostname", hostname)
+			standbyLogPhase(ctx, "check-done", fmt.Sprintf("hostname=%s", hostname))
 			ctx.Logger.Info("Primary connectivity check passed")
 			return nil
 		},

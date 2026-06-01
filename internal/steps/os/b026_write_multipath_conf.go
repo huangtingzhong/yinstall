@@ -100,6 +100,7 @@ func StepB026WriteMultipathConf() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-026: Write Multipath Config")
 			confPath := ctx.GetParamString("yac_multipath_conf", "/etc/multipath.conf")
 
 			// 获取磁盘组配置

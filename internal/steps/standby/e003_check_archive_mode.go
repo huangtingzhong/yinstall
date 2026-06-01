@@ -30,6 +30,8 @@ func StepE003CheckArchiveMode() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			standbyLogPhase(ctx, "plan", "E-003: Check Archive Mode")
+			standbyLogPhase(ctx, "check-start", "log_mode query")
 			primaryUser := GetPrimaryOSUser(ctx)
 
 			ctx.Logger.Info("Checking primary database archive mode")
@@ -83,6 +85,7 @@ func StepE003CheckArchiveMode() *runner.Step {
 				return fmt.Errorf("primary database is not in archive mode")
 			}
 
+			standbyLogPhase(ctx, "check-done", "log_mode=archivelog")
 			ctx.Logger.Info("OK: Primary database is running in archive mode")
 			return nil
 		},

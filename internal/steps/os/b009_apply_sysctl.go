@@ -26,6 +26,7 @@ func StepB009ApplySysctl() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-009: Apply Sysctl Config")
 			_, err := ctx.ExecuteWithCheck("sysctl --system", true)
 			return err
 		},

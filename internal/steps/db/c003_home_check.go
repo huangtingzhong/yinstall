@@ -67,6 +67,7 @@ func StepC003HomeCheck() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-003: Check YASDB_HOME Processes")
 			installPath := ctx.GetParamString("db_install_path", "/data/yashan/yasdb_home")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
 			beginPort := ctx.GetParamInt("db_begin_port", 1688)

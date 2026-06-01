@@ -28,6 +28,7 @@ func StepC027ConfigAutostartScript() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-027: Configure Autostart Script")
 			for _, th := range ctx.HostsToRun() {
 				hctx := ctx.ForHost(th)
 				user := hctx.GetParamString("os_user", "yashan")

@@ -1,0 +1,18 @@
+--------------------------------------------------------------------------------
+HostID: host0001, ManageIP: 10.10.10.125
+--------------------------------------------------------------------------------
+Monit 5.35.2 uptime: 1m
+ Service Name                     Status                      Type          
+ yashandb01                       OK                          System        
+ yasom                            OK                          Process       
+ yashandb-ce-1-1                  OK                          Process       
+ yasagent                         OK                          Process       
+
+--------------------------------------------------------------------------------
+HostID: host0002, ManageIP: 10.10.10.126
+--------------------------------------------------------------------------------
+Monit 5.35.2 uptime: 1m
+ Service Name                     Status                      Type          
+ yashandb02                       OK                          System        
+ yashandb-ce-1-2                  OK                          Process       
+ yasagent                         OK                          Process       

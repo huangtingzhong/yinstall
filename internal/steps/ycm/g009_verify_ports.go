@@ -38,6 +38,7 @@ func StepG009VerifyPorts() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ycmLogPhase(ctx, "plan", "G-009: Verify YCM Port Listening")
 			ycmPort := ctx.GetParamInt("ycm_port", 9060)
 
 			ctx.Logger.Info("Checking if YCM is listening on port %d...", ycmPort)

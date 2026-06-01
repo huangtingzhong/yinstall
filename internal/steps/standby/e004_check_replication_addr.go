@@ -30,6 +30,8 @@ func StepE004CheckReplicationAddr() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			standbyLogPhase(ctx, "plan", "E-004: Check Replication Address")
+			standbyLogPhase(ctx, "check-start", "REPLICATION_ADDR query")
 			primaryUser := GetPrimaryOSUser(ctx)
 
 			ctx.Logger.Info("Checking primary database REPLICATION_ADDR parameter")
@@ -134,6 +136,7 @@ func StepE004CheckReplicationAddr() *runner.Step {
 			// Store REPLICATION_ADDR for later use
 			ctx.SetResult("primary_replication_addr", replicationAddr)
 
+			standbyLogPhase(ctx, "check-done", fmt.Sprintf("addr=%s", runner.TruncateForLog(replicationAddr, 60)))
 			return nil
 		},
 

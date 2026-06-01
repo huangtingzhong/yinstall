@@ -8,6 +8,9 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
+// udevRuleActionOpts 与 installer.md 3.13.2 一致：仅在 add/change 时匹配，并关闭设备 watch。
+const udevRuleActionOpts = `, ACTION=="add|change", OPTIONS:="nowatch"`
+
 // StepB029WriteUdevRules 写入 udev 规则（YAC）
 func StepB029WriteUdevRules() *runner.Step {
 	return &runner.Step{
@@ -35,6 +38,7 @@ func StepB029WriteUdevRules() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-029: Write Udev Rules")
 			rulesFile := ctx.GetParamString("yac_udev_rules_file", "/etc/udev/rules.d/99-yashandb-permissions.rules")
 			owner := ctx.GetParamString("yac_udev_owner", "yashan")
 			group := ctx.GetParamString("yac_udev_group", "YASDBA")
@@ -93,8 +97,8 @@ func StepB029WriteUdevRules() *runner.Step {
 							ctx.Logger.Warn("Failed to get WWID for Huawei disk %s: %v, skipping udev rule", disk, err)
 							continue
 						}
-						rule := fmt.Sprintf(`SUBSYSTEM=="block", ATTR{wwid}=="%s", SYMLINK+="yfs/%s", OWNER="%s", GROUP="%s", MODE="%s"`,
-							wwid, alias, owner, group, mode)
+						rule := fmt.Sprintf(`SUBSYSTEM=="block", ATTR{wwid}=="%s", SYMLINK+="yfs/%s", OWNER="%s", GROUP="%s", MODE="%s"%s`,
+							wwid, alias, owner, group, mode, udevRuleActionOpts)
 						rules = append(rules, rule)
 						ctx.Logger.Info("  Generated WWID-based rule for Huawei disk %s -> /dev/yfs/%s (wwid: %s)", disk, alias, wwid)
 					} else if IsMultipathDisk(disk) {
@@ -102,19 +106,19 @@ func StepB029WriteUdevRules() *runner.Step {
 						if dmAlias == disk {
 							dmAlias = strings.TrimPrefix(disk, "/dev/dm-")
 						}
-						rule := fmt.Sprintf(`SUBSYSTEM=="block", ENV{DM_NAME}=="%s", SYMLINK+="yfs/%s", OWNER="%s", GROUP="%s", MODE="%s"`,
-							dmAlias, alias, owner, group, mode)
+						rule := fmt.Sprintf(`SUBSYSTEM=="block", ENV{DM_NAME}=="%s", SYMLINK+="yfs/%s", OWNER="%s", GROUP="%s", MODE="%s"%s`,
+							dmAlias, alias, owner, group, mode, udevRuleActionOpts)
 						rules = append(rules, rule)
 						ctx.Logger.Info("  Generated DM_NAME-based rule for multipath disk %s -> /dev/yfs/%s", disk, alias)
 					} else if needMultipath {
-						dmRule := fmt.Sprintf(`SUBSYSTEM=="block", ENV{DM_NAME}=="%s", SYMLINK+="yfs/%s", OWNER="%s", GROUP="%s", MODE="%s"`,
-							alias, alias, owner, group, mode)
+						dmRule := fmt.Sprintf(`SUBSYSTEM=="block", ENV{DM_NAME}=="%s", SYMLINK+="yfs/%s", OWNER="%s", GROUP="%s", MODE="%s"%s`,
+							alias, alias, owner, group, mode, udevRuleActionOpts)
 						rules = append(rules, dmRule)
 						ctx.Logger.Info("  Generated DM_NAME rule for raw disk %s -> /dev/yfs/%s (multipath enabled)", disk, alias)
 					} else {
 						diskName := strings.TrimPrefix(disk, "/dev/")
-						kernelRule := fmt.Sprintf(`KERNEL=="%s", SUBSYSTEM=="block", SYMLINK+="yfs/%s", OWNER="%s", GROUP="%s", MODE="%s"`,
-							diskName, alias, owner, group, mode)
+						kernelRule := fmt.Sprintf(`SUBSYSTEM=="block", KERNEL=="%s", SYMLINK+="yfs/%s", OWNER="%s", GROUP="%s", MODE="%s"%s`,
+							diskName, alias, owner, group, mode, udevRuleActionOpts)
 						rules = append(rules, kernelRule)
 						ctx.Logger.Info("  Generated KERNEL rule for raw disk %s -> /dev/yfs/%s (no multipath)", disk, alias)
 					}
@@ -135,16 +139,22 @@ func StepB029WriteUdevRules() *runner.Step {
 			}
 
 			if len(rules) == 0 {
-				rule := fmt.Sprintf(`SUBSYSTEM=="block", ENV{DM_NAME}=~"^(data|sys|arch)", SYMLINK+="yfs/%%E{DM_NAME}", OWNER="%s", GROUP="%s", MODE="%s"`,
-					owner, group, mode)
+				rule := fmt.Sprintf(`SUBSYSTEM=="block", ENV{DM_NAME}=~"^(data|sys|arch)", SYMLINK+="yfs/%%E{DM_NAME}", OWNER="%s", GROUP="%s", MODE="%s"%s`,
+					owner, group, mode, udevRuleActionOpts)
 				rules = append(rules, rule)
 				ctx.Logger.Info("  Using default SYMLINK-based rule for all multipath disks")
 			}
 
 			rulesContent := strings.Join(rules, "\n")
+			osLogPhase(ctx, "op-start", fmt.Sprintf("file=%s rules=%d", rulesFile, len(rules)))
 			cmd := fmt.Sprintf("echo '%s' > %s", rulesContent, rulesFile)
 			_, err = ctx.ExecuteWithCheck(cmd, true)
-			return err
+			if err != nil {
+				osLogPhase(ctx, "op-fail", runner.TruncateForLog(err.Error(), 80))
+				return err
+			}
+			osLogPhase(ctx, "op-done", fmt.Sprintf("file=%s rules=%d", rulesFile, len(rules)))
+			return nil
 		},
 
 		PostCheck: func(ctx *runner.StepContext) error {

@@ -2,8 +2,8 @@ package ssh
 
 import (
 	"bytes"
+	"context"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -28,7 +28,7 @@ const (
 type Executor interface {
 	Execute(cmd string, sudo bool) (*ExecResult, error)
 	ExecuteScript(script string, sudo bool) (*ExecResult, error)
-	Upload(localPath, remotePath string) error
+	Upload(localPath, remotePath string, uploadCtx *UploadContext) error
 	Download(remotePath, localPath string) error
 	Close() error
 	Host() string
@@ -91,6 +91,17 @@ type Config struct {
 	Timeout       time.Duration
 	Logger        *logging.Logger // 可选的日志记录器，用于记录所有命令执行
 	StepID        string          // 可选的步骤 ID，用于日志记录
+}
+
+// IsAuthenticationFailure 判断错误是否为 SSH 握手/密码认证失败（用于探测场景，非网络类致命错误）。
+func IsAuthenticationFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "unable to authenticate") ||
+		strings.Contains(s, "authentication failed") ||
+		strings.Contains(s, "handshake failed")
 }
 
 // NewExecutor 创建执行器
@@ -249,24 +260,53 @@ func (e *LocalExecutor) Execute(command string, sudo bool) (*ExecResult, error) 
 	return result, nil
 }
 
+// ExecuteContext 在 context 控制下执行命令；context 取消时通过 cmd.Cancel 终止进程。
+// 本方法不在 Executor 接口中，供 collect 子命令的 collectExecAdapter 使用。
+func (e *LocalExecutor) ExecuteContext(ctx context.Context, command string, sudo bool) (*ExecResult, error) {
+	result := &ExecResult{
+		Command:   command,
+		StartTime: time.Now(),
+	}
+
+	var cmd *exec.Cmd
+	if sudo && os.Getuid() != 0 {
+		cmd = exec.CommandContext(ctx, "sudo", "-n", "bash", "-c", command)
+	} else {
+		cmd = exec.CommandContext(ctx, "bash", "-c", command)
+	}
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
+	err := cmd.Run()
+	result.EndTime = time.Now()
+	result.Duration = result.EndTime.Sub(result.StartTime)
+	result.Stdout = stdoutBuf.String()
+	result.Stderr = stderrBuf.String()
+
+	if err != nil {
+		if ctx.Err() != nil {
+			// context 超时或取消，统一返回 124（与 SSH session 超时一致）
+			result.ExitCode = 124
+			return result, fmt.Errorf("command timed out: %w", ctx.Err())
+		}
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			result.ExitCode = exitErr.ExitCode()
+		} else {
+			result.ExitCode = -1
+		}
+	}
+
+	return result, nil
+}
+
 func (e *LocalExecutor) ExecuteScript(script string, sudo bool) (*ExecResult, error) {
 	return e.Execute(script, sudo)
 }
 
-func (e *LocalExecutor) Upload(localPath, remotePath string) error {
-	// 本机直接复制
-	if localPath == remotePath {
-		return nil
-	}
-	input, err := os.ReadFile(localPath)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(remotePath, input, 0644)
-}
-
 func (e *LocalExecutor) Download(remotePath, localPath string) error {
-	return e.Upload(remotePath, localPath)
+	return e.Upload(remotePath, localPath, nil)
 }
 
 func (e *LocalExecutor) Close() error {
@@ -411,59 +451,77 @@ func (e *SSHExecutor) Execute(command string, sudo bool) (*ExecResult, error) {
 	return result, nil
 }
 
-func (e *SSHExecutor) ExecuteScript(script string, sudo bool) (*ExecResult, error) {
-	return e.Execute(script, sudo)
-}
+// ExecuteContext 在 context 控制下执行命令；context 取消时先发 SIGKILL 再关闭 session，
+// 确保 goroutine 退出且不泄漏，SSH 连接保持可复用。
+// 本方法不在 Executor 接口中，供 collect 子命令的 collectExecAdapter 使用。
+func (e *SSHExecutor) ExecuteContext(ctx context.Context, command string, sudo bool) (*ExecResult, error) {
+	result := &ExecResult{
+		Command:   command,
+		StartTime: time.Now(),
+	}
 
-func (e *SSHExecutor) Upload(localPath, remotePath string) error {
+	escapedCmd := strings.ReplaceAll(command, "'", "'\"'\"'")
+	var actualCmd string
+	if sudo && e.config.User != "root" {
+		actualCmd = fmt.Sprintf("sudo -n bash -c '%s'", escapedCmd)
+	} else {
+		actualCmd = fmt.Sprintf("bash -c '%s'", escapedCmd)
+	}
+
 	session, err := e.client.NewSession()
 	if err != nil {
-		return err
-	}
-	defer session.Close()
-
-	file, err := os.Open(localPath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	stat, err := file.Stat()
-	if err != nil {
-		return err
+		result.EndTime = time.Now()
+		result.Duration = result.EndTime.Sub(result.StartTime)
+		result.ExitCode = -1
+		result.Stderr = fmt.Sprintf("failed to create session: %v", err)
+		return result, fmt.Errorf("failed to create session: %w", err)
 	}
 
-	w, err := session.StdinPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stdin pipe: %w", err)
-	}
+	var stdoutBuf, stderrBuf bytes.Buffer
+	session.Stdout = &stdoutBuf
+	session.Stderr = &stderrBuf
 
-	copyErrCh := make(chan error, 1)
+	type runResult struct{ code int }
+	ch := make(chan runResult, 1)
+
 	go func() {
-		defer w.Close()
-		if _, err := fmt.Fprintf(w, "C0644 %d %s\n", stat.Size(), stat.Name()); err != nil {
-			copyErrCh <- fmt.Errorf("failed to write SCP header: %w", err)
-			return
+		runErr := session.Run(actualCmd)
+		code := 0
+		if runErr != nil {
+			if exitErr, ok := runErr.(*ssh.ExitError); ok {
+				code = exitErr.ExitStatus()
+			} else {
+				code = -1
+			}
 		}
-		if _, err := io.Copy(w, file); err != nil {
-			copyErrCh <- fmt.Errorf("failed to copy file data: %w", err)
-			return
-		}
-		if _, err := fmt.Fprint(w, "\x00"); err != nil {
-			copyErrCh <- fmt.Errorf("failed to write SCP trailer: %w", err)
-			return
-		}
-		copyErrCh <- nil
+		ch <- runResult{code}
 	}()
 
-	if err := session.Run(fmt.Sprintf("scp -t %s", remotePath)); err != nil {
-		return err
+	select {
+	case res := <-ch:
+		session.Close()
+		result.EndTime = time.Now()
+		result.Duration = result.EndTime.Sub(result.StartTime)
+		result.Stdout = stdoutBuf.String()
+		result.Stderr = stderrBuf.String()
+		result.ExitCode = res.code
+		return result, nil
+	case <-ctx.Done():
+		// 先 SIGKILL 让远端进程退出，再 Close session 解除 goroutine 的 session.Run 阻塞
+		_ = session.Signal(ssh.SIGKILL)
+		session.Close()
+		<-ch // 等 goroutine 退出，避免 goroutine 泄漏
+		result.EndTime = time.Now()
+		result.Duration = result.EndTime.Sub(result.StartTime)
+		result.Stdout = stdoutBuf.String()
+		result.Stderr = stderrBuf.String()
+		result.ExitCode = 124 // 与 GNU timeout 退出码一致
+		return result, fmt.Errorf("command timed out: %w", ctx.Err())
 	}
+}
 
-	if copyErr := <-copyErrCh; copyErr != nil {
-		return copyErr
-	}
-	return nil
+func (e *SSHExecutor) ExecuteScript(script string, sudo bool) (*ExecResult, error) {
+	return e.Execute(script, sudo)
 }
 
 func (e *SSHExecutor) Download(remotePath, localPath string) error {

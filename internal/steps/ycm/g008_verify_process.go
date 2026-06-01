@@ -38,6 +38,7 @@ func StepG008VerifyProcess() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ycmLogPhase(ctx, "plan", "G-008: Verify YCM Processes")
 			installDir := ctx.GetParamString("ycm_install_dir", "/opt")
 			ycmDir := fmt.Sprintf("%s/ycm", installDir)
 

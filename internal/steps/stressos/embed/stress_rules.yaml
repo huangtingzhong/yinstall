@@ -1,0 +1,7 @@
+version: "1"
+# Built-in stress rules for yinstall stressos.
+# Rules with the same id in --rules-file override these; new ids are appended.
+# type: shell  -> executed as SSH login user (sudo if sudo:true)
+# source: inline -> content field contains the script
+# source: file   -> path field points to embed/scripts/
+rules: []

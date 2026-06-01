@@ -35,12 +35,19 @@ func buildFindYashanDBProcessPSCmd(ctx *runner.StepContext, yasdbHome, yasdbData
 		}
 		grepFe = append(grepFe, "-e "+commonos.ShellSingleQuote(pat))
 	}
+	if alt, ok := ctx.Results[resultKeyCleanAltYasdbHome].(string); ok && strings.TrimSpace(alt) != "" {
+		if altPat := PathLiteralPrefixForPS(alt); altPat != "" {
+			grepFe = append(grepFe, "-e "+commonos.ShellSingleQuote(altPat))
+		}
+	}
+	grepFe = appendYACPathPatterns(ctx, grepFe, yasdbData)
 	if len(grepFe) == 0 {
 		return `false`
 	}
 
 	cmd := fmt.Sprintf(
-		`ps -ef | grep -E '(yasdb|yasagent|yasom|monit)' | grep -F %s | grep -v grep | grep -v yinstall`,
+		`ps -ef | grep -E '%s' | grep -F %s | grep -v grep | grep -v yinstall`,
+		cleanDBProcessNamePattern(ctx),
 		strings.Join(grepFe, " "),
 	)
 	if awkPrintPid {
@@ -71,10 +78,10 @@ func buildFindMonitPSCmd(ctx *runner.StepContext, osUser, clusterName string, aw
 	return cmd
 }
 
-// removeDir removes a directory with rm -rf after safety validation (see commonos.IsSafeUnixRmRfPath).
+// removeDir removes a directory with rm -rf after path validation and existence check.
 func removeDir(ctx *runner.StepContext, path, label string) {
-	if !commonos.IsSafeUnixRmRfPath(path) {
-		ctx.Logger.Warn("Skipping removal of %s: path '%s' is not an allowed rm -rf target", label, path)
+	if err := commonos.ValidateDeletePath(path); err != nil {
+		ctx.Logger.Warn("Skipping removal of %s: invalid delete path %q: %v", label, path, err)
 		return
 	}
 	pathQ := commonos.ShellSingleQuote(path)
@@ -93,6 +100,29 @@ func removeDir(ctx *runner.StepContext, path, label string) {
 	} else {
 		ctx.Logger.Info("%s removed successfully", label)
 	}
+}
+
+// removeCleanDBDirectoryTree 删除 sourced 的 HOME/DATA/LOG；YAC 时另删 CLI 级 data 根与 /data/.../yasdb_home 软件树。
+func removeCleanDBDirectoryTree(ctx *runner.StepContext) {
+	yasdbHome, yasdbData, yasdbLog, _, _, err := effectiveCleanDBPaths(ctx)
+	if err != nil {
+		ctx.Logger.Warn("removeCleanDBDirectoryTree: %v", err)
+		return
+	}
+	removeDir(ctx, yasdbHome, "YASDB_HOME")
+	if alt, ok := ctx.Results[resultKeyCleanAltYasdbHome].(string); ok && strings.TrimSpace(alt) != "" {
+		removeDir(ctx, alt, "YASDB_HOME (install tree)")
+	}
+	removeDir(ctx, yasdbData, "YASDB_DATA")
+	paramData := path.Clean(strings.ReplaceAll(ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data"), `\`, `/`))
+	dataClean := path.Clean(strings.ReplaceAll(yasdbData, `\`, `/`))
+	if paramData != "" && paramData != dataClean {
+		if commonos.DeletePathUnder(dataClean, paramData) || commonos.DeletePathUnder(paramData, dataClean) {
+			removeDir(ctx, paramData, "YAC YASDB_DATA root")
+		}
+	}
+	removeDir(ctx, yasdbLog, "YASDB_LOG")
+	removeCleanYACExtraDirs(ctx)
 }
 
 // verifyDirRemoved checks that a directory no longer exists
@@ -126,12 +156,15 @@ func StepCleanDB() *runner.Step {
 		Optional: true,
 
 		PreCheck: func(ctx *runner.StepContext) error {
-			yasdbHome := ctx.GetParamString("yasdb_home", "/data/yashan/yasdb_home")
-			yasdbData := ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data")
-			yasdbLog := ctx.GetParamString("yasdb_log", "/data/yashan/log")
-			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
+			if err := prepareCleanDBEnv(ctx); err != nil {
+				return err
+			}
+			yasdbHome, yasdbData, yasdbLog, clusterName, _, err := effectiveCleanDBPaths(ctx)
+			if err != nil {
+				return err
+			}
 
-			ctx.Logger.Info("DB cleanup parameters:")
+			ctx.Logger.Info("DB cleanup parameters (after source env validation):")
 			ctx.Logger.Info("  YASDB_HOME: %s", yasdbHome)
 			ctx.Logger.Info("  YASDB_DATA: %s", yasdbData)
 			ctx.Logger.Info("  YASDB_LOG: %s", yasdbLog)
@@ -143,8 +176,8 @@ func StepCleanDB() *runner.Step {
 				{"YASDB_DATA", yasdbData},
 				{"YASDB_LOG", yasdbLog},
 			} {
-				if !commonos.IsSafeUnixRmRfPath(p.path) {
-					return fmt.Errorf("unsafe path for %s: '%s' - refusing to proceed (must be under allowed installation roots)", p.name, p.path)
+				if err := commonos.ValidateDeletePath(p.path); err != nil {
+					return fmt.Errorf("invalid delete path for %s: '%s': %w", p.name, p.path, err)
 				}
 			}
 
@@ -180,13 +213,12 @@ func StepCleanDB() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			yasdbHome := ctx.GetParamString("yasdb_home", "/data/yashan/yasdb_home")
-			yasdbData := ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data")
-			yasdbLog := ctx.GetParamString("yasdb_log", "/data/yashan/log")
-			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
-			osUser := ctx.GetParamString("os_user", "yashan")
+			yasdbHome, yasdbData, yasdbLog, clusterName, osUser, err := effectiveCleanDBPaths(ctx)
+			if err != nil {
+				return err
+			}
 
-			ctx.Logger.Info("Starting DB cleanup process")
+			ctx.Logger.Info("Starting DB cleanup process (paths from sourced env)")
 
 			// 1. Find all YashanDB processes（固定串 + 路径尾 / + .yasboot/<cluster>_yasdb_home/，不误伤其他实例）
 			ctx.Logger.Info("Step 1: Finding YashanDB processes")
@@ -240,9 +272,7 @@ func StepCleanDB() *runner.Step {
 
 			// 4. Remove directories (with safety validation)
 			ctx.Logger.Info("Step 4: Removing directories")
-			removeDir(ctx, yasdbHome, "YASDB_HOME")
-			removeDir(ctx, yasdbData, "YASDB_DATA")
-			removeDir(ctx, yasdbLog, "YASDB_LOG")
+			removeCleanDBDirectoryTree(ctx)
 
 			// 5. Remove .yasboot files (use dynamic home directory lookup)
 			ctx.Logger.Info("Step 5: Removing .yasboot configuration files")
@@ -256,8 +286,8 @@ func StepCleanDB() *runner.Step {
 
 			envFile := fmt.Sprintf("%s/%s.env", yasbootDir, clusterName)
 			ctx.Logger.Info("Removing yasboot env file: %s", envFile)
-			if !commonos.IsSafeUnixRmRfPath(envFile) {
-				ctx.Logger.Warn("Skipping rm of env file: path failed safety check: %s", envFile)
+			if err := commonos.ValidateDeletePath(envFile); err != nil {
+				ctx.Logger.Warn("Skipping rm of env file: %v", err)
 			} else {
 				result, err = ctx.Execute(fmt.Sprintf("rm -f %s", commonos.ShellSingleQuote(envFile)), true)
 				if err != nil || (result != nil && result.GetExitCode() != 0) {
@@ -269,8 +299,8 @@ func StepCleanDB() *runner.Step {
 
 			homeFile := fmt.Sprintf("%s/%s_yasdb_home", yasbootDir, clusterName)
 			ctx.Logger.Info("Removing yasboot home file: %s", homeFile)
-			if !commonos.IsSafeUnixRmRfPath(homeFile) {
-				ctx.Logger.Warn("Skipping rm of home file: path failed safety check: %s", homeFile)
+			if err := commonos.ValidateDeletePath(homeFile); err != nil {
+				ctx.Logger.Warn("Skipping rm of home file: %v", err)
 			} else {
 				result, err = ctx.Execute(fmt.Sprintf("rm -f %s", commonos.ShellSingleQuote(homeFile)), true)
 				if err != nil || (result != nil && result.GetExitCode() != 0) {
@@ -321,11 +351,10 @@ func StepCleanDB() *runner.Step {
 		},
 
 		PostCheck: func(ctx *runner.StepContext) error {
-			yasdbHome := ctx.GetParamString("yasdb_home", "/data/yashan/yasdb_home")
-			yasdbData := ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data")
-			yasdbLog := ctx.GetParamString("yasdb_log", "/data/yashan/log")
-			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
-			osUser := ctx.GetParamString("os_user", "yashan")
+			yasdbHome, yasdbData, yasdbLog, clusterName, osUser, err := effectiveCleanDBPaths(ctx)
+			if err != nil {
+				return err
+			}
 
 			ctx.Logger.Info("Verifying cleanup results")
 
@@ -342,13 +371,14 @@ func StepCleanDB() *runner.Step {
 			}
 
 			// 2. Check if directories still exist（HOME/DATA 必须删净，否则备库扩容 yasboot host add 会报 path should be empty）
-			for _, pair := range []struct {
-				path  string
-				label string
-			}{
+			verifyPaths := []struct{ path, label string }{
 				{yasdbHome, "YASDB_HOME"},
 				{yasdbData, "YASDB_DATA"},
-			} {
+			}
+			if alt, ok := ctx.Results[resultKeyCleanAltYasdbHome].(string); ok && strings.TrimSpace(alt) != "" {
+				verifyPaths = append(verifyPaths, struct{ path, label string }{alt, "YASDB_HOME (install tree)"})
+			}
+			for _, pair := range verifyPaths {
 				res, _ := ctx.Execute(fmt.Sprintf("test -d %s", commonos.ShellSingleQuote(pair.path)), false)
 				if res != nil && res.GetExitCode() == 0 {
 					return fmt.Errorf("cleanup incomplete: %s still exists at %s (rm may have failed or wrong path; check sudo/permissions and processes holding files)", pair.label, pair.path)

@@ -36,6 +36,7 @@ func StepB014WriteYumRepo() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-014: Write YUM Repo Config")
 			repoFile := ctx.GetParamString("os_yum_repo_file", "/etc/yum.repos.d/local.repo")
 			mountpoint := ctx.GetParamString("os_iso_mountpoint", "/media")
 

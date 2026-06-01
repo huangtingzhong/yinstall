@@ -52,6 +52,8 @@ func StepE017VerifyExpansion() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			standbyLogPhase(ctx, "plan", "E-017: Verify Expansion")
+			standbyLogPhase(ctx, "verify-start", "connectivity processes cluster status")
 			user := ctx.GetParamString("os_user", "yashan")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
 			beginPort := ctx.GetParamInt("db_begin_port", 1688)
@@ -118,6 +120,7 @@ func StepE017VerifyExpansion() *runner.Step {
 			}
 
 			ctx.Logger.Info("Standby expansion verification completed")
+			standbyLogPhase(ctx, "verify-done", clusterName)
 			return nil
 		},
 	}

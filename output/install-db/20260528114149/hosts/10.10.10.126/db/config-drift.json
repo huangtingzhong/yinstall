@@ -1,0 +1,6 @@
+{
+  "host": "10.10.10.126",
+  "live_count": 0,
+  "live_params": {},
+  "note": "Drift detection compares live V$PARAMETER with collected config files. Manual review recommended."
+}

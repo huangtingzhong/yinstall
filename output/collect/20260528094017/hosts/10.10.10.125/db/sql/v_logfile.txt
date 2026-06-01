@@ -1,0 +1,15 @@
+
+THREAD#           ID NAME                                                               BLOCK_SIZE           BLOCK_COUNT           USED_BLOCKS    SEQUENCE# STATUS    TYPE      ARCHIVED HEALTH                            
+------- ------------ ---------------------------------------------------------------- ------------ --------------------- --------------------- ------------ --------- --------- -------- --------------------------------- 
+      1            0 +DG0/dbfiles/redo1                                                        512                262144                261176            9 INACTIVE  ONLINE    YES      NORMAL                           
+      1            1 +DG0/dbfiles/redo2                                                        512                262144                262125           10 INACTIVE  ONLINE    YES      NORMAL                           
+      1            2 +DG0/dbfiles/redo3                                                        512                262144                109143           11 INACTIVE  ONLINE    YES      NORMAL                           
+      1            3 +DG0/dbfiles/redo4                                                        512                262144                  3837           12 CURRENT   ONLINE    NO       NORMAL                           
+      2            0 +DG0/dbfiles/redo5                                                        512                262144                262067            9 INACTIVE  ONLINE    YES      NORMAL                           
+      2            1 +DG0/dbfiles/redo6                                                        512                262144                125077           10 INACTIVE  ONLINE    YES      NORMAL                           
+      2            2 +DG0/dbfiles/redo7                                                        512                262144                 41429           11 CURRENT   ONLINE    NO       NORMAL                           
+      2            3 +DG0/dbfiles/redo8                                                        512                262144                259956            8 INACTIVE  ONLINE    YES      NORMAL                           
+
+8 rows fetched.
+
+

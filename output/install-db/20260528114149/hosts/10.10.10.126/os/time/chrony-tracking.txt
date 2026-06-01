@@ -1,0 +1,13 @@
+Reference ID    : CB6B0658 (203.107.6.88)
+Stratum         : 3
+Ref time (UTC)  : Thu May 28 03:33:34 2026
+System time     : 0.000418157 seconds slow of NTP time
+Last offset     : -0.000522094 seconds
+RMS offset      : 0.000997180 seconds
+Frequency       : 2.734 ppm slow
+Residual freq   : -0.005 ppm
+Skew            : 0.500 ppm
+Root delay      : 0.052942269 seconds
+Root dispersion : 0.003630884 seconds
+Update interval : 1029.6 seconds
+Leap status     : Normal

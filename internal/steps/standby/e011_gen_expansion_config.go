@@ -10,6 +10,7 @@ import (
 
 	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
+	dbsteps "github.com/yinstall/internal/steps/db"
 )
 
 // StepE011GenExpansionConfig 生成扩容配置文件步骤
@@ -33,6 +34,8 @@ func StepE011GenExpansionConfig() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			standbyLogPhase(ctx, "plan", "E-011: Generate Expansion Config")
+			standbyLogPhase(ctx, "config-gen-start", "expansion config")
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			primaryUser := GetPrimaryOSUser(ctx)
 			password := ctx.GetParamString("os_user_password", "")
@@ -93,15 +96,15 @@ func StepE011GenExpansionConfig() *runner.Step {
 					nodeCount)
 			}
 
-			extra := ctx.GetParamString("yasboot_extra_args", "")
-			genCmd = commonos.YasbootAppendExtraArgs(genCmd, extra, false)
+			extra := ctx.GetParamString(dbsteps.ParamYasbootGenExtraArgs, "")
+			genCmd = dbsteps.AppendYasbootGenExtraArgs(genCmd, extra)
 			if strings.TrimSpace(extra) != "" {
 				ctx.Logger.Info("yasboot config node gen: appending extra args: %s", strings.TrimSpace(extra))
 			}
 
 			// Run with primary env sourced.
 			ctx.Logger.Info("Running: yasboot config node gen ...")
-			result, err := commonos.ExecuteAsUserWithEnvCheck(ctx, primaryUser, envFile, genCmd, true)
+			result, err := runYasbootOnPrimaryWithEnvFileQuiet(ctx, primaryUser, envFile, genCmd)
 			if err != nil {
 				// If command failed and error indicates host exists, try to get host-id and retry
 				if result != nil {
@@ -113,7 +116,7 @@ func StepE011GenExpansionConfig() *runner.Step {
 
 						// Query cluster status to get host-id
 						statusCmd := fmt.Sprintf("yasboot process yasagent status -c %s", clusterName)
-						statusResult, statusErr := commonos.ExecuteAsUserWithEnvCheck(ctx, primaryUser, envFile, statusCmd, true)
+						statusResult, statusErr := runYasbootOnPrimaryWithEnvFileQuiet(ctx, primaryUser, envFile, statusCmd)
 						if statusErr == nil && statusResult != nil && statusResult.GetExitCode() == 0 {
 							// Parse status output to extract host-id for the target IP
 							statusOutput := statusResult.GetStdout()
@@ -140,7 +143,7 @@ func StepE011GenExpansionConfig() *runner.Step {
 														installPath, dataPath, logPath,
 														beginPort,
 														nodeCount)
-													genCmd = commonos.YasbootAppendExtraArgs(genCmd, ctx.GetParamString("yasboot_extra_args", ""), false)
+													genCmd = dbsteps.AppendYasbootGenExtraArgs(genCmd, ctx.GetParamString(dbsteps.ParamYasbootGenExtraArgs, ""))
 													result, err = commonos.ExecuteAsUserWithEnvCheck(ctx, primaryUser, envFile, genCmd, true)
 													if err == nil {
 														break
@@ -155,6 +158,9 @@ func StepE011GenExpansionConfig() *runner.Step {
 					}
 				}
 				if err != nil {
+					if !runner.CommandExitLogged(err) && result != nil {
+						commonos.LogTerminalCommandFailure(ctx, genCmd, result)
+					}
 					return fmt.Errorf("failed to generate expansion config: %w", err)
 				}
 			}
@@ -176,6 +182,7 @@ func StepE011GenExpansionConfig() *runner.Step {
 			// Store cluster name in context for PostCheck
 			ctx.Results["extracted_cluster_name"] = clusterName
 
+			standbyLogPhase(ctx, "config-gen-done", "expansion config")
 			return nil
 		},
 

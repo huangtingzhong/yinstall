@@ -37,6 +37,7 @@ func StepH013VerifyPort() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ympLogPhase(ctx, "plan", "H-013: Verify YMP Port")
 			port := ctx.GetParamInt("ymp_port", 8090)
 
 			ctx.Logger.Info("Checking port %d...", port)

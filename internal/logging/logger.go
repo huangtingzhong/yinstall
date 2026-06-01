@@ -11,6 +11,19 @@ import (
 	"time"
 )
 
+// redactSensitive 为 true 时对日志中的密码/密钥等做 ***REDACTED*** 脱敏；默认 false（明文，便于排障）。
+var redactSensitive bool
+
+// SetRedactSensitive 设置是否在 session/debug 日志中脱敏密码等敏感字段。
+func SetRedactSensitive(enabled bool) {
+	redactSensitive = enabled
+}
+
+// RedactSensitive 返回当前是否启用日志脱敏。
+func RedactSensitive() bool {
+	return redactSensitive
+}
+
 // Logger 日志管理器
 type Logger struct {
 	runID          string
@@ -38,6 +51,76 @@ type LogEntry struct {
 	Duration  string `json:"duration,omitempty"`
 }
 
+// LogTimestampFormat 为日志文件名中的紧凑时间戳（与 runID 后缀一致）。
+const LogTimestampFormat = "20060102150405"
+
+var (
+	runIDTSCompactSuffix = regexp.MustCompile(`-(\d{14})$`)
+	runIDTSHyphenSuffix  = regexp.MustCompile(`-(\d{8})-(\d{6})$`)
+	runIDStripSuffix     = regexp.MustCompile(`-(?:\d{14}|\d{8}-\d{6})$`)
+)
+
+// SessionAndDebugLogPaths 生成 session / debug 日志绝对路径：
+// yinstall_<type>_<timestamp>.log 与 yinstall_<type>_debug_<timestamp>.log
+func SessionAndDebugLogPaths(logDir, runID string, now time.Time) (sessionPath, debugPath string, err error) {
+	absLogDir, err := filepath.Abs(logDir)
+	if err != nil {
+		absLogDir = logDir
+	}
+	logType, ts := LogTypeAndTimestamp(runID, now)
+	sessionPath = filepath.Join(absLogDir, "yinstall_"+logType+"_"+ts+".log")
+	debugPath = filepath.Join(absLogDir, "yinstall_"+logType+"_debug_"+ts+".log")
+	return sessionPath, debugPath, nil
+}
+
+// LogTypeAndTimestamp 从 runID 解析类型与时间戳；无法解析时间戳时用 now。
+func LogTypeAndTimestamp(runID string, now time.Time) (logType, compactTS string) {
+	compactTS = compactTimestampFromRunID(runID)
+	if compactTS == "" {
+		compactTS = now.Format(LogTimestampFormat)
+	}
+	logType = sanitizeLogType(logTypeFromRunID(runID))
+	return logType, compactTS
+}
+
+func logTypeFromRunID(runID string) string {
+	if runID == "" {
+		return "run"
+	}
+	typ := runIDStripSuffix.ReplaceAllString(runID, "")
+	if typ == "" {
+		return runID
+	}
+	return typ
+}
+
+func compactTimestampFromRunID(runID string) string {
+	if m := runIDTSHyphenSuffix.FindStringSubmatch(runID); len(m) == 3 {
+		return m[1] + m[2]
+	}
+	if m := runIDTSCompactSuffix.FindStringSubmatch(runID); len(m) == 2 {
+		return m[1]
+	}
+	return ""
+}
+
+func sanitizeLogType(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	out := strings.Trim(b.String(), "_")
+	if out == "" {
+		return "run"
+	}
+	return out
+}
+
 // NewLogger 创建日志管理器，打印 banner 到终端和 session 日志
 func NewLogger(runID, logDir, version, author, contact string) (*Logger, error) {
 	// 检查并创建日志目录
@@ -51,9 +134,11 @@ func NewLogger(runID, logDir, version, author, contact string) (*Logger, error) 
 		absLogDir = logDir // 转换失败时回退原值
 	}
 
-	timestamp := time.Now().Format("2006-01-02_15-04-05")
-	sessionPath := filepath.Join(absLogDir, fmt.Sprintf("yinstall_%s_%s.log", timestamp, runID))
-	debugPath := filepath.Join(absLogDir, fmt.Sprintf("yinstall_%s_%s_debug.log", timestamp, runID))
+	now := time.Now()
+	sessionPath, debugPath, err := SessionAndDebugLogPaths(absLogDir, runID, now)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build log paths: %w", err)
+	}
 
 	sessionFile, err := os.Create(sessionPath)
 	if err != nil {
@@ -136,6 +221,19 @@ func (l *Logger) ConsoleStep(stepID, stepName string, stepIndex, totalSteps int,
 	l.debugWrite("STEP", line)
 }
 
+// ConsoleStepSkipped 输出不计入进度总数的跳过（Optional 条件不满足等）。
+func (l *Logger) ConsoleStepSkipped(stepID, stepName string) {
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
+	line := fmt.Sprintf("%s %s: skipped (not in progress total): '%s'\n", timestamp, stepID, stepName)
+	l.mu.Lock()
+	fmt.Print(line)
+	if l.sessionFile != nil {
+		l.sessionFile.WriteString(line)
+	}
+	l.mu.Unlock()
+	l.debugWrite("STEP", line)
+}
+
 // Info 写入 debug 日志（不输出到终端）
 func (l *Logger) Info(format string, args ...interface{}) {
 	l.debugWrite("INFO", fmt.Sprintf(format, args...))
@@ -172,6 +270,11 @@ func (l *Logger) LogErrorExit(host, stepID, stepName, command, stdout, stderr st
 		fmt.Sprintf("  Host: %s", host),
 		fmt.Sprintf("  Step: %s %s", stepID, stepName),
 	}
+	command = redact(command)
+	stdout = redact(stdout)
+	stderr = redact(stderr)
+	errMsg = redact(errMsg)
+
 	if command != "" {
 		lines = append(lines, "  --- Command ---", indentBlock(command), "")
 	}
@@ -243,10 +346,58 @@ func (l *Logger) Debug(entry LogEntry) {
 	l.debugWrite(strings.ToUpper(entry.Level), strings.Join(parts, " "))
 }
 
+// maxScriptPreviewLines 限制单次脚本预览的最大行数，避免超大 SQL/脚本撑爆 debug 日志。
+const maxScriptPreviewLines = 256
+
+// LogScriptPreview 在执行 shell/SQL 脚本正文前写入 debug（多行；--log-redact 时脱敏）；超长截断。
+// scriptKind 示例：shell、sql；label 可为空或远端路径等附注。
+func (l *Logger) LogScriptPreview(host, stepID, scriptKind, label, body string) {
+	if l == nil {
+		return
+	}
+	scriptKind = strings.TrimSpace(scriptKind)
+	if scriptKind == "" {
+		scriptKind = "script"
+	}
+	prefix := fmt.Sprintf("host=%s step=%s script=%s", host, stepID, scriptKind)
+	if label = strings.TrimSpace(label); label != "" {
+		prefix += " label=" + label
+	}
+	l.debugWrite("DEBUG", prefix+" >>> body (before execute):")
+	body = strings.TrimRight(redact(body), "\n")
+	if body == "" {
+		l.debugWrite("DEBUG", prefix+" body| (empty)")
+		return
+	}
+	lines := strings.Split(body, "\n")
+	omitted := 0
+	if len(lines) > maxScriptPreviewLines {
+		omitted = len(lines) - maxScriptPreviewLines
+		lines = lines[:maxScriptPreviewLines]
+	}
+	for _, line := range lines {
+		l.debugWrite("DEBUG", fmt.Sprintf("%s body| %s", prefix, line))
+	}
+	if omitted > 0 {
+		l.debugWrite("DEBUG", fmt.Sprintf("%s body| ... (%d lines omitted)", prefix, omitted))
+	}
+}
+
 // LogCommandStart 在命令执行前记录到 debug 日志
 func (l *Logger) LogCommandStart(host, stepID, command string) {
 	command = redact(command)
 	l.debugWrite("DEBUG", fmt.Sprintf("host=%s step=%s >>> %s", host, stepID, command))
+}
+
+// logCommandStream 将单路输出逐行写入 debug；无内容时写一行 (empty)，便于区分「无输出」与「未记录」。
+func (l *Logger) logCommandStream(prefix, label, s string) {
+	if s == "" {
+		l.debugWrite("DEBUG", fmt.Sprintf("%s %s| (empty)", prefix, label))
+		return
+	}
+	for _, line := range strings.Split(s, "\n") {
+		l.debugWrite("DEBUG", fmt.Sprintf("%s %s| %s", prefix, label, line))
+	}
 }
 
 // LogCommandResult 在命令执行后记录结果到 debug 日志（每个字段独立一行）
@@ -256,16 +407,8 @@ func (l *Logger) LogCommandResult(host, stepID string, stdout, stderr string, ex
 	prefix := fmt.Sprintf("host=%s step=%s", host, stepID)
 
 	l.debugWrite("DEBUG", fmt.Sprintf("%s exit_code=%d duration=%s", prefix, exitCode, duration))
-	if stdout != "" {
-		for _, line := range strings.Split(stdout, "\n") {
-			l.debugWrite("DEBUG", fmt.Sprintf("%s stdout| %s", prefix, line))
-		}
-	}
-	if stderr != "" {
-		for _, line := range strings.Split(stderr, "\n") {
-			l.debugWrite("DEBUG", fmt.Sprintf("%s stderr| %s", prefix, line))
-		}
-	}
+	l.logCommandStream(prefix, "stdout", stdout)
+	l.logCommandStream(prefix, "stderr", stderr)
 }
 
 // LogCommand 兼容旧接口（合并 start + result）
@@ -318,6 +461,19 @@ func (l *Logger) Close() {
 	}
 }
 
+// ConsoleNotice 向终端与 session 输出一行说明（用于步骤内子阶段跳过等）。
+func (l *Logger) ConsoleNotice(stepID, message string) {
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
+	line := fmt.Sprintf("%s %s: %s\n", timestamp, stepID, strings.TrimSpace(message))
+	l.mu.Lock()
+	fmt.Print(line)
+	if l.sessionFile != nil {
+		_, _ = l.sessionFile.WriteString(line)
+	}
+	l.mu.Unlock()
+	l.debugWrite("NOTICE", line)
+}
+
 // ConsolePrecheckIssue prints a single precheck issue line to terminal + session log.
 // This is for --precheck readability (no JSON output).
 func (l *Logger) ConsolePrecheckIssue(stepID, stepName, host, severity, code, message string) {
@@ -355,13 +511,18 @@ func (l *Logger) ConsoleWithType(stepID, stepName, host, phase, execType string,
 // 1. key=value / key:value 格式（password、passwd、pwd、secret、token、api_key 等）
 // 2. echo ... | passwd 格式
 // 3. --password value / --passwd value 命令行参数格式
+// 4. yasboot 风格 -p 'secret'（非 --password）
 var sensitivePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(password|passwd|pwd|secret|token|api[_-]?key|secret[_-]?key|private[_-]?key)[\s]*[=:]\s*['"]?([^'";\s]+)`),
 	regexp.MustCompile(`(?i)echo\s+['"]?[^'"]+['"]?\s*\|\s*passwd`),
 	regexp.MustCompile(`(?i)--(?:password|passwd|pwd|secret|token)\s+['"]?([^'";\s]+)['"]?`),
+	regexp.MustCompile(`(?i)(?:^|\s)-p\s+(?:'[^']*'|"[^"]*"|\S+)`),
 }
 
 func redact(s string) string {
+	if !redactSensitive || s == "" {
+		return s
+	}
 	result := s
 	for i, pattern := range sensitivePatterns {
 		result = pattern.ReplaceAllStringFunc(result, func(match string) string {
@@ -376,6 +537,10 @@ func redact(s string) string {
 				parts := strings.Fields(match)
 				if len(parts) >= 2 {
 					return parts[0] + " ***REDACTED***"
+				}
+			case 3:
+				if idx := strings.Index(strings.ToLower(match), "-p"); idx >= 0 {
+					return match[:idx+2] + " ***REDACTED***"
 				}
 			}
 			return "***REDACTED***"

@@ -33,6 +33,7 @@ func StepH015Cleanup() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ympLogPhase(ctx, "plan", "H-015: Cleanup Failed Install")
 			installDir := strings.TrimSuffix(strings.TrimSpace(ctx.GetParamString("ymp_install_dir", "/opt/ymp")), "/")
 			installDir = path.Clean(strings.ReplaceAll(installDir, `\`, `/`))
 			ympUser := ctx.GetParamString("ymp_user", "ymp")
@@ -40,14 +41,14 @@ func StepH015Cleanup() *runner.Step {
 			if !strings.HasPrefix(installDir, "/") {
 				return fmt.Errorf("ymp_install_dir must be absolute: %s", installDir)
 			}
-			if !commonos.IsSafeUnixRmRfPath(installDir) {
-				return fmt.Errorf("refusing cleanup: ymp_install_dir %q is not under allowed installation roots", installDir)
+			if err := commonos.ValidateDeletePath(installDir); err != nil {
+				return fmt.Errorf("refusing cleanup: invalid ymp_install_dir %q: %w", installDir, err)
 			}
 
 			installQ := commonos.ShellSingleQuote(installDir)
 			ympRoot := path.Join(installDir, "yashan-migrate-platform")
-			if !commonos.IsSafeUnixRmRfPath(ympRoot) {
-				return fmt.Errorf("refusing cleanup: derived path %q failed safety check", ympRoot)
+			if err := commonos.ValidateDeletePath(ympRoot); err != nil {
+				return fmt.Errorf("refusing cleanup: invalid derived path %q: %w", ympRoot, err)
 			}
 			ympRootQ := commonos.ShellSingleQuote(ympRoot)
 
@@ -68,11 +69,11 @@ func StepH015Cleanup() *runner.Step {
 			_, _ = ctx.Execute(findRm, true)
 
 			ympEnv := fmt.Sprintf("/home/%s/.yasboot/ymp.env", ympUser)
-			if commonos.IsSafeUnixRmRfPath(ympEnv) {
+			if err := commonos.ValidateDeletePath(ympEnv); err != nil {
+				ctx.Logger.Warn("Skipping ymp.env removal: %v", err)
+			} else {
 				ctx.Logger.Info("Removing: %s", ympEnv)
 				_, _ = ctx.Execute(fmt.Sprintf("rm -f %s", commonos.ShellSingleQuote(ympEnv)), true)
-			} else {
-				ctx.Logger.Warn("Skipping ymp.env removal: path failed safety check: %s", ympEnv)
 			}
 
 			ctx.Logger.Info("YMP cleanup completed")

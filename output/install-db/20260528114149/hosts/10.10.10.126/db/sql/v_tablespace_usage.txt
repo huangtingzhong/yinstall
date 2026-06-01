@@ -1,0 +1,14 @@
+
+         ID NAME                                                             STATUS            CONTENTS          ALLOCATION_TYPE    TOTAL_MB     FREE_MB    USED_PCT 
+----------- ---------------------------------------------------------------- ----------------- ----------------- --------------- ----------- ----------- ----------- 
+          5 UNDO0                                                            ONLINE            UNDO              AUTO                    128        10.5        91.8
+          6 UNDO1                                                            ONLINE            UNDO              AUTO                    128          74       42.19
+          0 SYSTEM                                                           ONLINE            PERMANENT         AUTO                    128       87.44       31.69
+          2 TEMP                                                             ONLINE            TEMPORARY         UNIFORM                 128         119        7.03
+          1 SYSAUX                                                           ONLINE            PERMANENT         AUTO                    128      124.56        2.69
+          3 SWAP                                                             ONLINE            SWAP              UNIFORM                 128         127         .78
+          4 USERS                                                            ONLINE            PERMANENT         AUTO                    128         127         .78
+
+7 rows fetched.
+
+

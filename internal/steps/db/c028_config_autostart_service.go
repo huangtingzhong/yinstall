@@ -17,6 +17,9 @@ func StepC028ConfigAutostartService() *runner.Step {
 		Optional:    true,
 
 		PreCheck: func(ctx *runner.StepContext) error {
+			if err := commonos.PrivilegedAccessSkipError(ctx, "database autostart service (C-028)"); err != nil {
+				return err
+			}
 			for _, th := range ctx.HostsToRun() {
 				hctx := ctx.ForHost(th)
 				if !commonos.CheckSystemdAvailable(hctx) {
@@ -31,6 +34,7 @@ func StepC028ConfigAutostartService() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-028: Configure Autostart Service")
 			for _, th := range ctx.HostsToRun() {
 				hctx := ctx.ForHost(th)
 				beginPort := hctx.GetParamInt("db_begin_port", 1688)

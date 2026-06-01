@@ -23,6 +23,7 @@
 - `force_all`: boolean（危险）
 - `force_steps`: string[]（危险）
 - `force_delete_user`: boolean（高危，默认禁止）
+- `log_redact`: boolean（默认 false；为 true 时 session/debug 日志对 `-p`/password 等做 `***REDACTED***`）
 
 ### 目录与日志
 - `local_software_dirs`: string[]（默认 `["./software","./pkg","~/Downloads/yashan(存在才加入)"]`）
@@ -131,11 +132,17 @@
   - `db_redo_file_size_mb`(string, default `128`) → `--db-redo-file-size`
   - `db_disable_archivelog`(bool, default false) → `--db-disable-archivelog`
   - `db_custom_sql_script`(string, optional) → `--db-custom-sql-script`
-  - `yasboot_extra_args`(string, optional) → `--yasboot-extra-args`
-- **YAC（多节点/集群）参数（当 `--yac-mode` 或 targets>=2 时）**
+  - `yasboot_gen_extra_args`(string, optional) → `--yasboot-gen-extra-args`（`package se/ce gen`）
+  - `yasboot_deploy_extra_args`(string, optional) → `--yasboot-deploy-extra-args`（`cluster deploy`）
+- **YAC（多节点/集群）参数（当 `--yac` 或 targets>=2 时）**
   - `yac_systemdg`/`yac_datadg`/`yac_archdg` 等（磁盘组）
   - `yac_inter_cidr`、`yac_public_network`、`yac_access_mode(vip/scan)`、`yac_vips`、`yac_scanname`、`yac_scan_ips`
-  - `yac_disk_found_path`、auto-discovery：`yac_disk_pattern`、`yac_exclude_disks`、`yac_systemdg_size_max`、`yac_auto_confirm`
+  - `yac_disk_found_path`、磁盘发现：`yac_disk_pattern`、`yac_exclude_disks`（**B-021** 与 **`db --skip-os` 的 C-001B** 均生效；支持 `/dev/yfs/data2`、`data2`、`/dev/sdX` 等）、`yac_systemdg_size_max`、`yac_auto_confirm`
+  - **`--enable-branch` 单节点**：`datadg` 通常仅 1 块 data 盘，可用 `--yac-exclude-disks` 排除多余 `data*`
+  - **C-001B（`db --skip-os`）udev 磁盘发现**：`yac_auto_discover_disks`（`--skip-os` 时默认 true）、`yac_discover_root`（默认 `/dev/yfs`）、`yac_discover_fallback_mapper`。支持单节点 `--yac`（仅校验本机 `/dev/yfs` 布局，无跨节点 alias 比对）。前置条件：目标机已有 udev 产出的 `sys*`/`data*`（通常在 `/dev/yfs/`）；不安装 multipath、不写 udev 规则。与 B-021 互斥（全量 OS 仍走 B-021）。
+  - **产品用户密码与 SSH**：未显式 `--os-user-password` 且 `-u`/`--ssh-user` 与 `--os-user` 相同、非 `key` 认证且提供了 `--ssh-password` 时，`os_user_password` 自动与 SSH 登录密码一致（否则默认 `aaBB11@@33$$`）。
+  - **C-001P（YAC 密码）**：`yac_ensure_os_password`（`--yac-ensure-os-password`，默认 true）在 `ce gen` 前从控制端校验各节点 `os_user` 密码 SSH；失败且具备 root/sudo 时重置为 `--os-user-password`；首节点另做 sshpass 网格探测（与 yasboot scan 一致）。`--precheck` 仅校验不改密。
+  - **C-014 YAC `package ce gen`**：不传 `--memory-limit`、`--mode mysql`（与 `installer.md` YAC 示例一致）；`--db-memory-percent` 仅用于 C-014 前 kernel shm 校验。单机 `package se gen` 仍可使用 `--memory-limit` 与 `--db-mode mysql`。
   - YFS tuning：`yac_yfs_tune`、`yac_yfs_au_size`、`yac_redo_file_size`、`yac_redo_file_num`、`yac_shm_pool_size`、`yac_max_instances`
 
 ---
@@ -168,9 +175,10 @@
 - `db_port`(int, default 1688；可从主库 LISTEN_ADDR 推导) → `--db-port`
 - `db_home_path/db_data_path/db_log_path/db_stage_dir`（可选；默认与 db 一致）→ `--db-home-path/...`
 - `db_deps_package`(optional) → `--db-deps-package`
-- `yac_mode`(bool) → `--yac-mode`
+- `yac_mode`(bool) → `--yac`（`db`/`os`；单节点须显式传 `--yac`）
 - `standby_cleanup_on_failure`(bool, dangerous) → `--standby-cleanup-on-failure`
-- `yasboot_extra_args`(string) → `--yasboot-extra-args`
+- `yasboot_gen_extra_args`(string) → `--yasboot-gen-extra-args`
+- `yasboot_deploy_extra_args`(string) → `--yasboot-deploy-extra-args`
 
 ---
 
@@ -256,13 +264,31 @@
 #### Clean 关键参数（来自 `internal/cli/clean.go`）
 - `type`(db/ycm/ymp, default db) → `--type`
 - `yasdb_home/yasdb_data/yasdb_log/cluster_name/os_user`（db 清理）→ `--yasdb-home/--yasdb-data/--yasdb-log/--cluster-name/--os-user`
-- `clean_yac_disks`(auto 或显式列表) → `--clean-yac-disks`
-- `detailed_steps`(bool) → `--detailed-steps`（db 清理可分步）
+- `yac_mode`(bool) → `--yac`（单节点 YAC 清理建议显式传入；与 `db` 一致）
+- `clean_yac_disks`(auto 或显式列表) → `--clean-yac-disks`（`auto` 时 `ycsctl` 失败则回退 `/dev/yfs` 发现，支持单节点）
+- DB 清理默认执行 `CLEAN-DB-001`～`CLEAN-DB-006`；`-s CLEAN-DB` 仍可单步跑聚合步骤 `CLEAN-DB`
 - `ycm_home` → `--ycm-home`
 - `ymp_home/ymp_user` → `--ymp-home/--ymp-user`
 
+## YAC `--yac-access-mode`
+
+| 值 | VIP（C-009） | SCAN（C-011/C-013） | `ce gen` |
+|----|-------------|---------------------|----------|
+| `vip`（默认） | 校验或自动生成 | 跳过 | 含 `--vips` |
+| `scan` | 同上 | 执行 | 含 `--scanname`（及 VIP 前置逻辑） |
+| `direct` | **跳过** | 跳过 | **不含** `--vips`（单节点/直连场景） |
+
+## 终端步骤进度（`N of M`）
+
+安装类子命令（`os` / `db`，含 `--archive` 挂钩 collect）共用 `runner.StepProgress`：
+
+- **分母 M**：计划中会执行且计入进度的步骤数 = 非 `Optional` 的安装步 +（挂钩时）非 `Optional` 的 collect 步；挂钩 collect **不计** `R-001`（复用安装阶段 SSH）。
+- **分子 N**：从 1 递增；仅在实际开始某步时占用一个序号（多节点同一步只递增一次）。
+- **Optional**：`PreCheck` 判定跳过 → 终端 `skipped (not in progress total)`，不占 N/M；若实际执行则 **M 动态 +1** 并占一个序号。
+- **独立 `collect` / `stressos`**：各自 `NewStepProgress`；未接安装进度时行为与上相同。
+
 ## 安全门禁规则（必须落实）
-- **敏感字段脱敏**：`ssh_password`、`db_password`、任何 token 不得写入日志明文
+- **敏感字段脱敏**：默认日志为明文（便于排障）；生产/共享日志请加 `--log-redact` 对 password/`-p` 等脱敏
 - **命令构造白名单**：只允许 `yinstall` + 固定子命令 + 已声明 flag
 - **步进限制**：危险 step/tag（例如 `dangerous`）在 apply 前必须显式确认
 

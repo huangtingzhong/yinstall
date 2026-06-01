@@ -7,6 +7,7 @@ import (
 
 	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
+	ycmsteps "github.com/yinstall/internal/steps/ycm"
 )
 
 // StepCleanYCM Clean YCM installation
@@ -14,18 +15,21 @@ func StepCleanYCM() *runner.Step {
 	return &runner.Step{
 		ID:          "CLEAN-YCM",
 		Name:        "Clean YCM",
-		Description: "Clean YCM installation by stopping processes and removing directories",
+		Description: "Clean YCM installation: systemd autostart, processes, and directories",
 		Tags:        []string{"clean", "ycm"},
 		Optional:    false,
 
 		PreCheck: func(ctx *runner.StepContext) error {
 			ycmHome := ctx.GetParamString("ycm_home", "/opt/ycm")
 
+			svc := ycmsteps.ServiceNameFromContext(ctx)
+
 			ctx.Logger.Info("YCM cleanup parameters:")
 			ctx.Logger.Info("  YCM_HOME: %s", ycmHome)
+			ctx.Logger.Info("  systemd unit: %s", svc)
 
-			if !commonos.IsSafeUnixRmRfPath(ycmHome) {
-				return fmt.Errorf("YCM_HOME %q is not an allowed rm -rf target; refusing YCM cleanup", ycmHome)
+			if err := commonos.ValidateDeletePath(ycmHome); err != nil {
+				return fmt.Errorf("invalid YCM_HOME delete path %q: %w", ycmHome, err)
 			}
 
 			// Check if directory exists
@@ -42,12 +46,23 @@ func StepCleanYCM() *runner.Step {
 
 		Action: func(ctx *runner.StepContext) error {
 			ycmHome := ctx.GetParamString("ycm_home", "/opt/ycm")
-			if !commonos.IsSafeUnixRmRfPath(ycmHome) {
-				return fmt.Errorf("YCM_HOME %q failed safety check; refusing to remove", ycmHome)
+			if err := commonos.ValidateDeletePath(ycmHome); err != nil {
+				return fmt.Errorf("invalid YCM_HOME delete path %q: %w", ycmHome, err)
 			}
 			ycmQ := commonos.ShellSingleQuote(ycmHome)
 
 			ctx.Logger.Info("Starting YCM cleanup process")
+
+			svc := ycmsteps.ServiceNameFromContext(ctx)
+
+			// 0. Remove systemd autostart unit (installer.md §7.2；需 root 或 sudo）
+			ctx.Logger.Info("Step 0: Cleaning YCM systemd autostart service (%s)", svc)
+			autostartCleaned := ycmsteps.CleanAutostartService(ctx, svc)
+			if !autostartCleaned && commonos.IsPrivilegedSkipped(ctx) {
+				msg := "Step 0 skipped (no root/sudo): systemd unit may remain; continuing process/directory cleanup"
+				ctx.Logger.Warn("%s", msg)
+				ctx.Logger.ConsoleNotice("CLEAN-YCM", msg)
+			}
 
 			// 1. Find all YCM processes
 			ctx.Logger.Info("Step 1: Finding YCM processes")
@@ -126,6 +141,26 @@ func StepCleanYCM() *runner.Step {
 			ycmHome := ctx.GetParamString("ycm_home", "")
 
 			ctx.Logger.Info("Verifying cleanup results")
+
+			svc := ycmsteps.ServiceNameFromContext(ctx)
+
+			// 0. Verify systemd unit removed（无特权跳过时仅告警）
+			if commonos.IsPrivilegedSkipped(ctx) {
+				ctx.Logger.Warn("Skipped autostart unit verification (no root/sudo): %s", commonos.PrivilegedSkipMessage(ctx))
+			} else {
+				unitFile := ycmsteps.AutostartUnitPath(svc)
+				result, _ := ctx.Execute(fmt.Sprintf("test -f %s", commonos.ShellSingleQuote(unitFile)), false)
+				if result != nil && result.GetExitCode() == 0 {
+					return fmt.Errorf("ycm autostart unit file still exists: %s", unitFile)
+				}
+				if commonos.CheckSystemdAvailable(ctx) {
+					r, _ := ctx.Execute(fmt.Sprintf("systemctl is-enabled %s 2>/dev/null", svc), false)
+					if r != nil && strings.TrimSpace(r.GetStdout()) == "enabled" {
+						return fmt.Errorf("ycm service %s is still enabled", svc)
+					}
+					ctx.Logger.Info("[OK] ycm autostart service %s removed", svc)
+				}
+			}
 
 			// 1. Check if processes still exist
 			ycmPat := PathLiteralPrefixForPS(ycmHome)

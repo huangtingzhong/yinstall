@@ -1,0 +1,24 @@
+total 52
+drwxrwxr-x.  2 yashan yashan 4096 May 28 13:51 .
+drwx------. 18 yashan yashan 4096 May 28 13:52 ..
+-rw-------.  1 yashan yashan  179 Feb 12 22:19 huang.env
+-rw-rw-r--.  1 yashan yashan  317 May 28 13:51 yasboot.completion.bash
+-rw-------.  1 yashan yashan  187 May  7 17:34 yashandb_1788.env
+lrwxrwxrwx.  1 yashan yashan   39 May  7 17:34 yashandb_1788_yasdb_home -> /data/yashan/yasdb_home_1788/23.4.4.104
+-rw-------.  1 yashan yashan  187 Apr 28 23:28 yashandb_1988.env
+lrwxrwxrwx.  1 yashan yashan   39 Apr 28 23:28 yashandb_1988_yasdb_home -> /data/yashan/yasdb_home_1988/23.4.4.104
+-rw-------.  1 yashan yashan  187 Mar 31 21:35 yashandb_2788.env
+lrwxrwxrwx.  1 yashan yashan   39 Mar 31 21:35 yashandb_2788_yasdb_home -> /data/yashan/yasdb_home_2788/23.4.4.104
+-rw-------.  1 yashan yashan  187 Mar 31 21:59 yashandb_2988.env
+lrwxrwxrwx.  1 yashan yashan   39 Mar 31 21:59 yashandb_2988_yasdb_home -> /data/yashan/yasdb_home_2988/23.4.4.104
+-rw-------.  1 yashan yashan  187 Apr 28 17:26 yashandb_3688.env
+lrwxrwxrwx.  1 yashan yashan   39 Apr 28 17:26 yashandb_3688_yasdb_home -> /data/yashan/yasdb_home_3688/23.4.4.104
+-rw-------.  1 yashan yashan  189 May 17 16:26 yashandb_3788.env
+lrwxrwxrwx.  1 yashan yashan   40 May 17 16:26 yashandb_3788_yasdb_home -> /data/yashan/yasdb_home_3788/23.4.10.100
+lrwxrwxrwx.  1 yashan yashan   39 Apr 11 17:44 yashandb_3988_yasdb_home -> /data/yashan/yasdb_home_3988/23.4.4.104
+-rw-------.  1 yashan yashan  187 Apr 30 09:44 yashandb_3999.env
+lrwxrwxrwx.  1 yashan yashan   39 Apr 30 09:44 yashandb_3999_yasdb_home -> /data/yashan/yasdb_home_3999/23.4.4.104
+-rw-------.  1 yashan yashan  188 May 28 13:51 yashandb4688.env
+lrwxrwxrwx.  1 yashan yashan   40 May 28 13:51 yashandb4688_yasdb_home -> /data/yashan/yasdb_home_4688/23.4.10.100
+-rw-------.  1 yashan yashan  177 May 15 23:03 yashandb.env
+lrwxrwxrwx.  1 yashan yashan   34 May  7 16:02 yashandb_yasdb_home -> /data/yashan/yasdb_home/23.4.4.104

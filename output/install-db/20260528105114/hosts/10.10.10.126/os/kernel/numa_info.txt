@@ -1,0 +1,8 @@
+=== numactl --hardware ===
+(numactl not available)
+
+=== /sys/devices/system/node ===
+node0: total=31442476 kB free=30048260 kB
+
+=== /proc/sys/kernel/numa_balancing ===
+0

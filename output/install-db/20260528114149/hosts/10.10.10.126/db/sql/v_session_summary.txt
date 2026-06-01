@@ -1,0 +1,8 @@
+
+STATUS       COUNT(*) 
+--------- ----------- 
+ACTIVE             84
+
+1 row fetched.
+
+

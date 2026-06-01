@@ -46,6 +46,7 @@ func StepC007ExtractPackage() *runner.Step {
 
 		// C-005 仅在首节点执行（单机/YAC 都只需在首节点解压，yasboot package install 会自动分发到所有节点）
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-007: Extract Package")
 			pkgPath := ctx.GetParamString("db_package", "")
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			user := ctx.GetParamString("os_user", "yashan")
@@ -71,8 +72,8 @@ func StepC007ExtractPackage() *runner.Step {
 			if !isEmpty {
 				if ctx.IsForceStep() {
 					ctx.Logger.Warn("Stage directory %s is not empty; force mode enabled, cleaning before extraction", stageDir)
-					if !commonos.IsSafeUnixRmRfPath(stageDir) {
-						return fmt.Errorf("refusing to clean stage directory %q: path is not under allowed installation roots", stageDir)
+					if err := commonos.ValidateDeletePath(stageDir); err != nil {
+						return fmt.Errorf("refusing to clean stage directory %q: %w", stageDir, err)
 					}
 					// 仅删除 stage 下顶层项，避免未引号通配或 "rm -rf $dir/*" 在异常路径上扩大范围
 					cleanCmd := fmt.Sprintf(`find %s -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true`, stageQ)
@@ -96,6 +97,7 @@ func StepC007ExtractPackage() *runner.Step {
 
 			ctx.Logger.Info("Package found at: %s", fullPath)
 			ctx.Logger.Info("Extracting package: %s -> %s", fullPath, stageDir)
+			dbLogPhase(ctx, "extract-start", runner.TruncateForLog(fullPath, 80))
 
 			ctx.Execute(fmt.Sprintf("mkdir -p %s", stageQ), true)
 
@@ -112,8 +114,10 @@ func StepC007ExtractPackage() *runner.Step {
 			}
 
 			if _, err := ctx.ExecuteWithCheck(cmd, true); err != nil {
+				dbLogPhase(ctx, "extract-fail", runner.TruncateForLog(err.Error(), 80))
 				return fmt.Errorf("failed to extract package: %w", err)
 			}
+			dbLogPhase(ctx, "extract-done", stageDir)
 
 			cmd = fmt.Sprintf("chown -R %s:%s %s", user, group, stageQ)
 			if _, err := ctx.ExecuteWithCheck(cmd, true); err != nil {

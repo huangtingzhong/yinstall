@@ -38,6 +38,7 @@ func StepH009ExtractInstantclient() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ympLogPhase(ctx, "plan", "H-009: Extract Oracle Instantclient")
 			pkg := ctx.GetParamString("ymp_instantclient_basic", "")
 			installDir := ctx.GetParamString("ymp_install_dir", "/opt/ymp")
 			ympUser := ctx.GetParamString("ymp_user", "ymp")

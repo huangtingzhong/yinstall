@@ -31,6 +31,8 @@ func StepE002CheckPrimaryStatus() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			standbyLogPhase(ctx, "plan", "E-002: Check Primary Status")
+			standbyLogPhase(ctx, "check-start", "yasboot+cluster status")
 			primaryUser := GetPrimaryOSUser(ctx)
 
 			ctx.Logger.Info("Checking primary database status")
@@ -101,6 +103,7 @@ func StepE002CheckPrimaryStatus() *runner.Step {
 			// Store environment file path for subsequent steps
 			ctx.SetResult("primary_env_file", envFile)
 
+			standbyLogPhase(ctx, "check-done", fmt.Sprintf("cluster=%s port=%d", clusterName, beginPort))
 			ctx.Logger.Info("Primary database status check passed")
 			return nil
 		},

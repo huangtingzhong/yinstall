@@ -49,6 +49,7 @@ func StepG001InstallDeps() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ycmLogPhase(ctx, "plan", "G-001: Install YCM Dependencies")
 			packages := ctx.GetParamString("ycm_deps_packages", "libnsl")
 			yumMode := ctx.GetParamString("os_yum_mode", "none")
 			pkgManager := commonos.GetPkgManager(ctx.OSInfo)

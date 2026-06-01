@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/yinstall/internal/logging"
+	"github.com/yinstall/internal/ssh"
 )
 
 // ExecResult 命令执行结果接口，由 internal/ssh.ExecResult 实现，统一使用 ssh/executor.go 的封装
@@ -21,7 +22,7 @@ type Executor interface {
 	Execute(cmd string, sudo bool) (ExecResult, error)
 	Host() string
 	Close() error
-	Upload(localPath, remotePath string) error
+	Upload(localPath, remotePath string, uploadCtx *ssh.UploadContext) error
 }
 
 // Step 步骤定义
@@ -78,6 +79,7 @@ type StepContext struct {
 	CurrentStepID     string                 // 当前步骤 ID
 	StepIndex         int                    // 当前步骤序号（从 0 开始）
 	TotalSteps        int                    // 总步骤数
+	Progress          *StepProgress          // 非 nil 时由 RunStep 分配序号/总数（排除 Optional 跳过与未执行的连通步）
 	// TargetHosts 所有目标节点（YAC 时为多节点）；步骤内部可遍历在需要的节点上执行
 	TargetHosts []TargetHost
 }
@@ -119,6 +121,22 @@ func (ctx *StepContext) IsForceDeleteUser() bool {
 	return ctx.IsForceStep() && ctx.ForceDeleteUser
 }
 
+// UploadContext 构造文件上传日志上下文（进度写 debug，起止写 Info）。
+func (ctx *StepContext) UploadContext() *ssh.UploadContext {
+	if ctx == nil || ctx.Logger == nil {
+		return nil
+	}
+	host := ""
+	if ctx.Executor != nil {
+		host = ctx.Executor.Host()
+	}
+	return &ssh.UploadContext{
+		Logger: ctx.Logger,
+		StepID: ctx.CurrentStepID,
+		Host:   host,
+	}
+}
+
 // StepResult 步骤执行结果
 type StepResult struct {
 	StepID    string
@@ -154,6 +172,36 @@ func precheckStructuredIssueCoversFailure(ctx *StepContext, stepID string, err e
 	return false
 }
 
+func (ctx *StepContext) applyProgressIndex(index, total int) {
+	ctx.StepIndex = index
+	ctx.TotalSteps = total
+}
+
+func (ctx *StepContext) claimProgressBeforeRun(step *Step, optionalWillRun bool) {
+	if ctx.Progress == nil {
+		return
+	}
+	var idx, total int
+	if optionalWillRun {
+		idx, total = ctx.Progress.includeOptionalRunning()
+	} else {
+		idx, total = ctx.Progress.assignProgress()
+	}
+	ctx.applyProgressIndex(idx, total)
+}
+
+func (ctx *StepContext) logProgressStart(step *Step) {
+	ctx.Logger.ConsoleStep(step.ID, step.Name, ctx.StepIndex, ctx.TotalSteps, "start", 0)
+}
+
+func (ctx *StepContext) logProgressSkip(step *Step, dur time.Duration) {
+	ctx.Logger.ConsoleStep(step.ID, step.Name, ctx.StepIndex, ctx.TotalSteps, "skip", dur)
+}
+
+func (ctx *StepContext) logProgressSkippedNotCounted(step *Step) {
+	ctx.Logger.ConsoleStepSkipped(step.ID, step.Name)
+}
+
 // RunStep 执行单个步骤
 func RunStep(step *Step, ctx *StepContext) *StepResult {
 	host := ctx.Executor.Host()
@@ -167,12 +215,39 @@ func RunStep(step *Step, ctx *StepContext) *StepResult {
 		Artifacts: make(map[string]string),
 	}
 
-	// Log step start
-	ctx.Logger.ConsoleStep(step.ID, step.Name, ctx.StepIndex, ctx.TotalSteps, "start", 0)
 	ctx.Logger.LogStepStart(host, step.ID, step.Name)
 
-	// 1. Pre-check
-	if step.PreCheck != nil {
+	// Optional：先 PreCheck，跳过则不占进度序号/总数
+	if step.Optional && step.PreCheck != nil {
+		ctx.Logger.Debug(logging.LogEntry{
+			Host: host, StepID: step.ID, Level: "debug", Message: "Running pre-check",
+		})
+		if err := step.PreCheck(ctx); err != nil {
+			result.Success = true
+			result.Skipped = true
+			result.EndTime = time.Now()
+			result.Duration = result.EndTime.Sub(result.StartTime)
+			if !ctx.Precheck {
+				if ctx.Progress != nil {
+					ctx.logProgressSkippedNotCounted(step)
+				} else {
+					ctx.logProgressSkip(step, result.Duration)
+				}
+			}
+			ctx.Logger.LogStepEnd(host, step.ID, step.Name, true, result.Duration, "skipped: "+err.Error())
+			return result
+		}
+	}
+	if step.Optional {
+		ctx.claimProgressBeforeRun(step, true)
+		ctx.logProgressStart(step)
+	} else {
+		ctx.claimProgressBeforeRun(step, false)
+		ctx.logProgressStart(step)
+	}
+
+	// 1. Pre-check（非 Optional 或 Optional 无 PreCheck 已在上面处理）
+	if step.PreCheck != nil && !step.Optional {
 		ctx.Logger.Debug(logging.LogEntry{
 			Host:    host,
 			StepID:  step.ID,
@@ -180,16 +255,14 @@ func RunStep(step *Step, ctx *StepContext) *StepResult {
 			Message: "Running pre-check",
 		})
 		if err := step.PreCheck(ctx); err != nil {
-			// Optional step's precheck failure is treated as skip
-			if step.Optional {
+			// 显式跳过（如无 root/sudo）：终端显示 skipped，不算失败
+			if IsStepSkipped(err) {
 				result.Success = true
 				result.Skipped = true
 				result.EndTime = time.Now()
 				result.Duration = result.EndTime.Sub(result.StartTime)
-				// For --precheck: optional skip is not noise; do not print extra precheck info.
-				// Keep debug logs via LogStepEnd.
 				if !ctx.Precheck {
-					ctx.Logger.ConsoleStep(step.ID, step.Name, ctx.StepIndex, ctx.TotalSteps, "skip", result.Duration)
+					ctx.logProgressSkip(step, result.Duration)
 				}
 				ctx.Logger.LogStepEnd(host, step.ID, step.Name, true, result.Duration, "skipped: "+err.Error())
 				return result
@@ -259,8 +332,8 @@ func RunStep(step *Step, ctx *StepContext) *StepResult {
 			result.Error = fmt.Errorf("action failed: %w", err)
 			result.EndTime = time.Now()
 			result.Duration = result.EndTime.Sub(result.StartTime)
-			// 若错误来自 ExecuteWithCheck，已在该处输出命令/stdout/stderr，此处不再重复 LogErrorExit
-			if !strings.Contains(err.Error(), "command failed with exit code") {
+			// 若错误来自 ExecuteWithCheck / ExecuteAsUser*WithCheck，已在该处输出 LogErrorExit，此处不再重复。
+			if !CommandExitLogged(err) {
 				ctx.Logger.LogErrorExit(host, step.ID, step.Name, "", "", "", -1, result.Error.Error())
 			}
 			ctx.Logger.ConsoleStep(step.ID, step.Name, ctx.StepIndex, ctx.TotalSteps, "fail", result.Duration)
@@ -294,6 +367,48 @@ func RunStep(step *Step, ctx *StepContext) *StepResult {
 	ctx.Logger.ConsoleStep(step.ID, step.Name, ctx.StepIndex, ctx.TotalSteps, "success", result.Duration)
 	ctx.Logger.LogStepEnd(host, step.ID, step.Name, true, result.Duration, "")
 	return result
+}
+
+// TruncateForLog 截断过长字符串用于 phase 摘要（默认 120 字符）。
+func TruncateForLog(s string, maxLen int) string {
+	if maxLen <= 0 {
+		maxLen = 120
+	}
+	s = strings.TrimSpace(s)
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
+// LogPhase 写入结构化 debug 里程碑（仅 debug 文件，不进终端）。
+func (ctx *StepContext) LogPhase(phase, msg string) {
+	if ctx == nil || ctx.Logger == nil {
+		return
+	}
+	host := ""
+	if ctx.Executor != nil {
+		host = ctx.Executor.Host()
+	}
+	ctx.Logger.Debug(logging.LogEntry{
+		Host:    host,
+		StepID:  ctx.CurrentStepID,
+		Level:   "debug",
+		Phase:   phase,
+		Message: msg,
+	})
+}
+
+// LogScriptPreview 在执行 shell/SQL 脚本正文前写入 debug 日志（见 logging.LogScriptPreview）。
+func (ctx *StepContext) LogScriptPreview(scriptKind, label, body string) {
+	if ctx == nil || ctx.Logger == nil {
+		return
+	}
+	host := ""
+	if ctx.Executor != nil {
+		host = ctx.Executor.Host()
+	}
+	ctx.Logger.LogScriptPreview(host, ctx.CurrentStepID, scriptKind, label, body)
 }
 
 // Execute 在上下文中执行命令并记录日志
@@ -338,7 +453,7 @@ func (ctx *StepContext) ExecuteWithCheck(cmd string, sudo bool) (ExecResult, err
 			result.GetExitCode(),
 			errMsg,
 		)
-		return result, fmt.Errorf("command failed with exit code %d: %s", result.GetExitCode(), strings.TrimSpace(result.GetStderr()))
+		return result, NewCommandExitError(result.GetExitCode(), errMsg, true)
 	}
 	return result, nil
 }

@@ -14,6 +14,7 @@ func StepB019RebootCheck() *runner.Step {
 		Optional:    true,
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-019: Reboot Check")
 			needsReboot := ctx.GetParamBool("needs_reboot", false)
 			if needsReboot {
 				ctx.Logger.Info("NOTICE: System reboot is required for some changes to take effect")

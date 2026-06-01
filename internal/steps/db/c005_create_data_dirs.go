@@ -89,8 +89,11 @@ func StepC005CreateDataDirs() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			hosts := ctx.HostsToRun()
+			dbLogPhase(ctx, "plan", fmt.Sprintf("hosts=%d dirs=3-per-host", len(hosts)))
 			// YAC 模式下，force 执行需要在所有节点执行（通过 ctx.HostsToRun() 遍历所有节点）
-			for _, th := range ctx.HostsToRun() {
+			for _, th := range hosts {
+				dbLogPhase(ctx, "host-start", fmt.Sprintf("host=%s dirs=3", th.Host))
 				hctx := ctx.ForHost(th)
 				installPath := hctx.GetParamString("db_install_path", "/data/yashan/yasdb_home")
 				dataPath := hctx.GetParamString("db_data_path", "/data/yashan/yasdb_data")
@@ -110,8 +113,8 @@ func StepC005CreateDataDirs() *runner.Step {
 						if isForce {
 							// 强制模式：如果目录存在，删除它
 							hctx.Logger.Warn("Force mode: deleting existing directory %s on %s", dir, th.Host)
-							if !commonos.IsSafeUnixRmRfPath(dir) {
-								return fmt.Errorf("refusing to delete directory %s on %s: path is not under allowed installation roots", dir, th.Host)
+							if err := commonos.ValidateDeletePath(dir); err != nil {
+								return fmt.Errorf("refusing to delete directory %s on %s: %w", dir, th.Host, err)
 							}
 							if _, err := hctx.ExecuteWithCheck(fmt.Sprintf("rm -rf %s", dirQ), true); err != nil {
 								return fmt.Errorf("failed to delete directory %s on %s: %w", dir, th.Host, err)
@@ -136,6 +139,7 @@ func StepC005CreateDataDirs() *runner.Step {
 					}
 					hctx.Logger.Info("Created directory: %s (owner: %s:%s) on %s", dir, user, group, th.Host)
 				}
+				dbLogPhase(hctx, "host-done", fmt.Sprintf("host=%s", th.Host))
 			}
 			return nil
 		},

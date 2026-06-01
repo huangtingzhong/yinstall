@@ -43,6 +43,7 @@ func StepB008WriteSysctlConfig() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-008: Write Sysctl Config")
 			configFile := ctx.GetParamString("os_sysctl_file", "/etc/sysctl.d/yashandb.conf")
 
 			memKB, _ := ctx.Results["os_sysctl_mem_kb"].(int64)
@@ -70,6 +71,9 @@ func StepB008WriteSysctlConfig() *runner.Step {
 
 			config := fmt.Sprintf(`# YashanDB kernel parameters
 vm.swappiness = 0
+vm.oom-kill = 0
+vm.zone_reclaim_mode = 0
+kernel.numa_balancing = 0
 net.ipv4.ip_local_port_range = 32768 60999
 vm.max_map_count = 2000000
 net.core.somaxconn = 32768
@@ -86,9 +90,15 @@ net.core.netdev_max_backlog = 30000
 net.core.netdev_budget = 600
 `, shmall, shmmni, shmmax)
 
+			osLogPhase(ctx, "op-start", fmt.Sprintf("file=%s shmmax=%d", configFile, shmmax))
 			cmd := fmt.Sprintf("cat > %s << 'EOF'\n%sEOF", configFile, config)
 			_, err := ctx.ExecuteWithCheck(cmd, true)
-			return err
+			if err != nil {
+				osLogPhase(ctx, "op-fail", runner.TruncateForLog(err.Error(), 80))
+				return err
+			}
+			osLogPhase(ctx, "op-done", configFile)
+			return nil
 		},
 
 		PostCheck: func(ctx *runner.StepContext) error {

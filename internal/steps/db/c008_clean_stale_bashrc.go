@@ -31,6 +31,7 @@ func StepC008CleanStaleBashrc() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-008: Clean Stale Bashrc Entries")
 			user := ctx.GetParamString("os_user", "yashan")
 
 			for _, th := range ctx.HostsToRun() {

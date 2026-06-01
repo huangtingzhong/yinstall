@@ -1,0 +1,11 @@
+[global]
+ioengine=%%IOENGINE%%
+bs=%%BS%%
+rw=randread
+direct=%%DIRECT%%
+iodepth=%%IODEPTH%%
+numjobs=%%NUMJOBS%%
+
+[randread]
+filename=%%FILENAME%%
+size=%%SIZE%%

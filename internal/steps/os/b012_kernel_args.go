@@ -24,8 +24,8 @@ func StepB012WriteKernelArgs() *runner.Step {
 			result, _ := ctx.Execute("which grubby", false)
 			if result.GetExitCode() != 0 {
 				return fmt.Errorf(
-					"grubby command not found. Remediation: install grubby (e.g. `yum -y install grubby` / `dnf -y install grubby`), "+
-						"or configure kernel args via GRUB manually (update /etc/default/grub then run `grub2-mkconfig -o /boot/grub2/grub.cfg` "+
+					"grubby command not found. Remediation: install grubby (e.g. `yum -y install grubby` / `dnf -y install grubby`), " +
+						"or configure kernel args via GRUB manually (update /etc/default/grub then run `grub2-mkconfig -o /boot/grub2/grub.cfg` " +
 						"(BIOS) or `grub2-mkconfig -o /boot/efi/EFI/*/grub.cfg` (UEFI)), then reboot",
 				)
 			}
@@ -33,6 +33,7 @@ func StepB012WriteKernelArgs() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-012: Write Kernel Args")
 			enabled := ctx.GetParamBool("os_kernel_args_enable", false)
 			if !enabled {
 				ctx.Logger.Info("Kernel args configuration disabled, skipping")
@@ -59,7 +60,7 @@ func StepB012WriteKernelArgs() *runner.Step {
 			out := result.GetStdout()
 			if !strings.Contains(out, "transparent_hugepage=never") {
 				return fmt.Errorf(
-					"kernel args verification failed: expected transparent_hugepage=never to be present, but it was not found in grubby output. "+
+					"kernel args verification failed: expected transparent_hugepage=never to be present, but it was not found in grubby output. " +
 						"Remediation: re-run with `--os-kernel-args` including transparent_hugepage=never, or configure GRUB manually, then reboot",
 				)
 			}

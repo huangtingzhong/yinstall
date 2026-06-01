@@ -1,0 +1,4 @@
+NAME                UUID                                  TYPE      DEVICE 
+ens160              f9137ee8-bc56-4631-aa20-0206dfb9be68  ethernet  ens160 
+Wired connection 1  b44e942b-1757-32f8-863a-963e00afd4d2  ethernet  ens224 
+ens192              0abcca81-f302-40ef-bb7a-0567934903f4  ethernet  --     

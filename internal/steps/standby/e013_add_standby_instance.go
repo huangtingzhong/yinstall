@@ -41,6 +41,7 @@ func StepE013AddStandbyInstance() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			standbyLogPhase(ctx, "plan", "E-013: Add Standby Instance")
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			primaryUser := GetPrimaryOSUser(ctx)
 
@@ -66,6 +67,7 @@ func StepE013AddStandbyInstance() *runner.Step {
 				stageDir, clusterName, clusterAddFile)
 
 			// Execute as primary user with environment sourced
+			standbyLogPhase(ctx, "expand-start", clusterName)
 			ctx.Logger.Info("Running: yasboot node add ...")
 			ctx.Logger.Info("NOTE: This command triggers background data synchronization")
 			ctx.Logger.Info("      Command completion does not mean sync is finished")
@@ -136,6 +138,7 @@ func StepE013AddStandbyInstance() *runner.Step {
 
 			ctx.Logger.Info("Standby instance creation command completed")
 			ctx.Logger.Info("Data synchronization may still be in progress")
+			standbyLogPhase(ctx, "expand-done", clusterName)
 			return nil
 		},
 	}

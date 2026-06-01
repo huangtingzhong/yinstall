@@ -24,7 +24,10 @@ func StepC026VerifyInstall() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			for _, th := range ctx.HostsToRun() {
+			hosts := ctx.HostsToRun()
+			dbLogPhase(ctx, "plan", fmt.Sprintf("hosts=%d checks=4-per-host", len(hosts)))
+			for _, th := range hosts {
+				dbLogPhase(ctx, "host-start", fmt.Sprintf("host=%s", th.Host))
 				hctx := ctx.ForHost(th)
 				user := hctx.GetParamString("os_user", "yashan")
 				clusterName := hctx.GetParamString("db_cluster_name", "yashandb")
@@ -68,7 +71,10 @@ func StepC026VerifyInstall() *runner.Step {
 				}
 
 				hctx.Logger.Info("Step 2: Checking database connectivity...")
-				if _, err := commonsql.ExecuteSQLAsSysdbaCtx(hctx, user, envFile, clusterName, "SELECT 1 FROM dual", false); err != nil {
+				if res, err := dbRunSQLPhase(hctx, user, envFile, clusterName, "connectivity-dual", "SELECT 1 FROM dual", false); err != nil {
+					if res != nil && !runner.CommandExitLogged(err) {
+						commonsql.ReportSQLFailure(hctx, "SELECT 1 FROM dual", res)
+					}
 					return fmt.Errorf("database connectivity check failed on host %s: %w", th.Host, err)
 				}
 				hctx.Logger.Info("Database connectivity: OK")
@@ -96,6 +102,7 @@ func StepC026VerifyInstall() *runner.Step {
 				}
 
 				hctx.Logger.Info("Installation verification completed")
+				dbLogPhase(hctx, "host-done", fmt.Sprintf("host=%s", th.Host))
 			}
 			return nil
 		},

@@ -50,6 +50,9 @@ func GetAllSteps() []*runner.Step {
 
 		// 安装后：环境变量与验证（TPCC 依赖已写入的 env_file，须排在 C-024 之后）
 		StepC024SetEnvVars(),
+		StepC031ConfigureDefaultProfile(),
+		StepC032ConfigureUnifiedAudit(),
+		StepC033ApplySpfileParams(),
 		StepC025ConfigureTPCC(),
 		StepC026VerifyInstall(),
 

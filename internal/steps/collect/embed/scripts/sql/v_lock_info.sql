@@ -1,0 +1,9 @@
+-- Sessions waiting on non-idle wait events (lock contention candidates)
+-- Uses YashanDB V$SESSION column WAIT_EVENT (not EVENT as in Oracle)
+SELECT SID, SERIAL#, USERNAME, STATUS, OSUSER, PROGRAM,
+       WAIT_EVENT, WAIT_CLASS, LOCKWAIT, LOGON_TIME
+FROM V$SESSION
+WHERE WAIT_CLASS != 'Idle'
+  AND WAIT_CLASS IS NOT NULL
+  AND USERNAME IS NOT NULL
+ORDER BY SID;

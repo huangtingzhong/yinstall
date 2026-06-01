@@ -1,0 +1,11 @@
+total 0
+drwxr-x---. 10 yashan yashan 109 May 28  2026 .
+drwxr-xr-x.  4 yashan yashan  31 Mar 13 14:11 ..
+drwxr-x---.  2 yashan yashan  42 Mar 13 14:11 config
+drwxr-x---.  2 yashan yashan   6 Mar 13 14:11 data
+drwxr-x---.  5 yashan yashan  60 Mar 13 14:11 diag
+drwxr-x---.  3 yashan yashan  20 Mar 13 14:11 external
+drwxr-x---.  2 yashan yashan  57 May 28  2026 instance
+drwxr-x---.  8 yashan yashan  88 Mar 13 14:11 log
+drwxr-x---.  2 yashan yashan   6 Mar 13 14:11 run
+drwxr-xr-x.  2 yashan yashan   6 May 28  2026 tmp

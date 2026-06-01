@@ -45,6 +45,7 @@ func StepB024InstallMultipath() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-024: Install Multipath")
 			// 检查是否已安装
 			result, _ := ctx.Execute("which multipath 2>/dev/null || rpm -q device-mapper-multipath 2>/dev/null", false)
 			if result != nil && result.GetExitCode() == 0 {

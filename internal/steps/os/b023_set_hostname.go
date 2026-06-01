@@ -36,6 +36,7 @@ func StepB023SetHostname() *runner.Step {
 			hostnameParam := ctx.GetParamString("os_hostname", "")
 			hostnames := parseHostnames(hostnameParam)
 			hosts := ctx.HostsToRun()
+			osLogPhase(ctx, "plan", fmt.Sprintf("hosts=%d op=hostname+hosts-block", len(hosts)))
 
 			type nodeInfo struct {
 				ip       string
@@ -44,6 +45,7 @@ func StepB023SetHostname() *runner.Step {
 			var nodes []nodeInfo
 
 			for i, th := range hosts {
+				osLogPhase(ctx, "host-start", fmt.Sprintf("host=%s idx=%d", th.Host, i+1))
 				hctx := ctx.ForHost(th)
 				var newHostname string
 				if len(hosts) > 1 {
@@ -82,6 +84,7 @@ func StepB023SetHostname() *runner.Step {
 				}
 				nodes = append(nodes, nodeInfo{ip: ip, hostname: newHostname})
 				ctx.Logger.Info("[%s] Hostname set to: %s (hosts entry IP: %s)", th.Host, newHostname, ip)
+				osLogPhase(hctx, "host-done", fmt.Sprintf("host=%s hostname=%s", th.Host, newHostname))
 			}
 
 			if len(nodes) > 0 {
@@ -91,10 +94,12 @@ func StepB023SetHostname() *runner.Step {
 				}
 				ctx.Logger.Info("Writing hostname entries to /etc/hosts on all nodes: %v", entries)
 				for _, th := range hosts {
+					osLogPhase(ctx, "host-start", fmt.Sprintf("host=%s op=etc-hosts-block", th.Host))
 					hctx := ctx.ForHost(th)
 					if err := commonos.UpdateManagedHostsBlock(hctx, entries); err != nil {
 						return fmt.Errorf("[%s] failed to update /etc/hosts: %w", th.Host, err)
 					}
+					osLogPhase(hctx, "host-done", fmt.Sprintf("host=%s op=etc-hosts-block", th.Host))
 				}
 			}
 

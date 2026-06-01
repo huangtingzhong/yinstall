@@ -28,8 +28,12 @@ help:
 	@echo "  make build-darwin   - Build for macOS (amd64, arm64)"
 	@echo "  make build-current  - Build for current platform only"
 	@echo "  make clean          - Remove build directory"
+	@echo "  make check-debug-logging - Static check for install-step debug patterns"
 	@echo ""
 	@echo "Output directory: $(BUILD_DIR)/"
+
+check-debug-logging:
+	@bash scripts/check-debug-logging.sh
 
 update-version:
 	@echo "Updating version information..."

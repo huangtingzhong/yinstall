@@ -55,6 +55,7 @@ func StepH006InstallJDK() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ympLogPhase(ctx, "plan", "H-006: Install JDK")
 			jdkPackage := ctx.GetParamString("ymp_jdk_package", "")
 			expectedVersion := ctx.GetParamString("ymp_jdk_version", "17")
 
@@ -67,6 +68,7 @@ func StepH006InstallJDK() *runner.Step {
 
 			if jdkPackage != "" {
 				// ── 策略 1：用指定软件包安装 ──────────────────────────────────
+				ympLogPhase(ctx, "install-start", runner.TruncateForLog(jdkPackage, 80))
 				ctx.Logger.Info("Installing JDK from specified package: %s", jdkPackage)
 				fullPath, err := commonfile.FindAndDistribute(
 					ctx,
@@ -91,8 +93,10 @@ func StepH006InstallJDK() *runner.Step {
 				}
 
 				if _, err := ctx.ExecuteWithCheck(cmd, true); err != nil {
+					ympLogPhase(ctx, "install-fail", runner.TruncateForLog(err.Error(), 80))
 					return fmt.Errorf("failed to install JDK from package: %w", err)
 				}
+				ympLogPhase(ctx, "install-done", "jdk-from-package")
 				ctx.Logger.Info("JDK installed from package successfully")
 			} else {
 				// ── 策略 2：通过包管理器自动安装 ─────────────────────────────
@@ -108,13 +112,16 @@ func StepH006InstallJDK() *runner.Step {
 				isRHEL8 := commonos.IsRHEL8(ctx.OSInfo)
 				cmd := commonos.BuildInstallCmd(pkgManager, yumMode, pkgName, isRHEL8)
 
+				ympLogPhase(ctx, "install-start", fmt.Sprintf("pkg_manager=%s pkg=%s", pkgManager, pkgName))
 				ctx.Logger.Info("Installing JDK via %s: %s", pkgManager, pkgName)
 				if _, err := ctx.ExecuteWithCheck(cmd, true); err != nil {
+					ympLogPhase(ctx, "install-fail", runner.TruncateForLog(err.Error(), 80))
 					return fmt.Errorf(
 						"failed to install JDK via %s (package: %s): %w; "+
 							"provide --ymp-jdk-package=<jdk.rpm> to install from a local package instead",
 						pkgManager, pkgName, err)
 				}
+				ympLogPhase(ctx, "install-done", pkgName)
 				ctx.Logger.Info("JDK installed via %s successfully", pkgManager)
 			}
 

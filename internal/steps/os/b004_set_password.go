@@ -25,13 +25,11 @@ func StepB004SetUserPassword() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-004: Set User Password")
 			user := ctx.GetParamString("os_user", "yashan")
 			password := ctx.GetParamString("os_user_password", "")
-
-			quoted := commonos.ShellSingleQuote(password)
-			cmd := fmt.Sprintf("echo %s | passwd %s --stdin 2>/dev/null || { echo %s:%s | chpasswd; }", quoted, user, user, quoted)
-			if _, err := ctx.ExecuteWithCheck(cmd, true); err != nil {
-				return fmt.Errorf("failed to set password for %s: %w", user, err)
+			if err := commonos.SetProductUserPassword(ctx, user, password); err != nil {
+				return err
 			}
 			return nil
 		},

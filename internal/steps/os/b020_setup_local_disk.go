@@ -86,6 +86,10 @@ func StepB020SetupLocalDisk() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", fmt.Sprintf("B-020: Setup Local Disk disks=%d vg=%s mount=%s",
+				len(ctx.GetParamStringSlice("os_local_disks")),
+				ctx.GetParamString("os_local_vg", "yasvg"),
+				ctx.GetParamString("os_local_mount", "/data")))
 			disks := ctx.GetParamStringSlice("os_local_disks")
 			vgName := ctx.GetParamString("os_local_vg", "yasvg")
 			lvName := ctx.GetParamString("os_local_lv", "yaslv")
@@ -170,10 +174,12 @@ func StepB020SetupLocalDisk() *runner.Step {
 					continue
 				}
 
-				// 创建 PV
+				osLogPhase(ctx, "disk-start", fmt.Sprintf("device=%s op=pvcreate", disk))
 				if _, err := ctx.ExecuteWithCheck(fmt.Sprintf("pvcreate -f %s", disk), true); err != nil {
+					osLogPhase(ctx, "disk-fail", fmt.Sprintf("device=%s err=%s", disk, runner.TruncateForLog(err.Error(), 80)))
 					return fmt.Errorf("failed to create PV on %s: %w", disk, err)
 				}
+				osLogPhase(ctx, "disk-done", fmt.Sprintf("device=%s op=pvcreate", disk))
 				ctx.Logger.Info("  Created PV on %s", disk)
 			}
 

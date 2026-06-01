@@ -1,0 +1,6 @@
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo:     200       4    0    0    0     0          0         0      200       4    0    0    0     0       0          0
+ens160: 32445740  290973    0    0    0     0          0         0 12747920161 8427120    0    0    0     0       0          0
+ens192:    1364      14    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+ens224: 14372328   86387    0    0    0     0          0         0 119082293  148114    0    0    0     0       0          0

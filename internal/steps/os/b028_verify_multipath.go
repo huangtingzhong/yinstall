@@ -33,6 +33,7 @@ func StepB028VerifyMultipath() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-028: Verify Multipath")
 			result, err := ctx.ExecuteWithCheck("multipath -ll", true)
 			if err != nil {
 				return err

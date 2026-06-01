@@ -1,0 +1,1 @@
+-- error: yasql exit=127: bash: yasql: command not found

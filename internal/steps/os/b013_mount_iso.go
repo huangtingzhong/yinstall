@@ -37,6 +37,7 @@ func StepB013MountISO() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-013: Mount ISO")
 			device := ctx.GetParamString("os_iso_device", "/dev/cdrom")
 			mountpoint := ctx.GetParamString("os_iso_mountpoint", "/media")
 

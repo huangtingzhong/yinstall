@@ -77,6 +77,7 @@ func StepH011InstallYMP() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ympLogPhase(ctx, "plan", "H-011: Run YMP Install")
 			installDir := ctx.GetParamString("ymp_install_dir", "/opt/ymp")
 			ympUser := ctx.GetParamString("ymp_user", "ymp")
 			dbPackage := ctx.GetParamString("ymp_db_package", "")
@@ -85,8 +86,8 @@ func StepH011InstallYMP() *runner.Step {
 			// Force reinstall: cleanup old ymp.env here (write op must not be in PreCheck).
 			if isForce {
 				ympEnvFile := fmt.Sprintf("/home/%s/.yasboot/ymp.env", ympUser)
-				if !commonos.IsSafeUnixRmRfPath(ympEnvFile) {
-					return fmt.Errorf("refusing to remove ymp.env: path failed safety check: %s", ympEnvFile)
+				if err := commonos.ValidateDeletePath(ympEnvFile); err != nil {
+					return fmt.Errorf("refusing to remove ymp.env: %w", err)
 				}
 				envQ := commonos.ShellSingleQuote(ympEnvFile)
 				r, _ := ctx.Execute(fmt.Sprintf("test -f %s", envQ), false)
@@ -212,6 +213,7 @@ func StepH011InstallYMP() *runner.Step {
 			}
 
 			// ── 执行安装 ──
+			ympLogPhase(ctx, "install-start", fmt.Sprintf("db_mode=%s port=%d", dbMode, port))
 			ympSh := path.Join(installDir, "yashan-migrate-platform", "bin", "ymp.sh")
 			cmd := fmt.Sprintf("sh %s install --db %s --path %s", ympSh, dbPath, icDir)
 
@@ -244,8 +246,10 @@ func StepH011InstallYMP() *runner.Step {
 						errMsg,
 					)
 				}
+				ympLogPhase(ctx, "install-fail", runner.TruncateForLog(errMsg, 120))
 				return fmt.Errorf("ymp.sh install failed with exit code %d: %s", result.GetExitCode(), strings.TrimSpace(errMsg))
 			}
+			ympLogPhase(ctx, "install-done", fmt.Sprintf("port=%d", port))
 
 			// 安装完成后，立即配置端口（在服务完全启动之前）
 			// 如果指定了自定义端口，需要修改配置文件并重启服务

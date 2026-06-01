@@ -1,0 +1,8 @@
+[1:0:0:0]    cd/dvd  NECVMWar VMware SATA CD01 1.00  /dev/sr0 
+[N:0:0:3]    disk    VMware Virtual NVMe Disk__3                /dev/nvme0n3
+[N:0:0:5]    disk    VMware Virtual NVMe Disk__5                /dev/nvme0n5
+[N:0:0:7]    disk    VMware Virtual NVMe Disk__7                /dev/nvme0n7
+[N:0:0:2]    disk    VMware Virtual NVMe Disk__2                /dev/nvme0n2
+[N:0:0:6]    disk    VMware Virtual NVMe Disk__6                /dev/nvme0n6
+[N:0:0:4]    disk    VMware Virtual NVMe Disk__4                /dev/nvme0n4
+[N:0:0:1]    disk    VMware Virtual NVMe Disk__1                /dev/nvme0n1

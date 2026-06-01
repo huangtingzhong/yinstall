@@ -59,14 +59,17 @@ func StepC004CreateInstallDir() *runner.Step {
 					continue
 				}
 
-				// 3) 目录已存在：属主检查（只读）
+				// 3) 目录已存在（IS_DIR）：属主探测；force 时仅提示将删建；非 force 时非空目录直接失败（与 C-007 空 stage 策略一致，更早 fail-fast）
+				if !strings.Contains(kind, "IS_DIR") {
+					continue
+				}
+
 				ownerRes, _ := hctx.Execute(fmt.Sprintf("stat -c '%%U:%%G' %s 2>/dev/null", stageQ), false)
 				owner := ""
 				if ownerRes != nil {
 					owner = strings.TrimSpace(ownerRes.GetStdout())
 				}
 
-				// 若 force：Action 会删目录后重建
 				if isForce {
 					ctx.ReportPrecheckIssue(runner.PrecheckIssue{
 						StepID:      "C-004",
@@ -80,7 +83,11 @@ func StepC004CreateInstallDir() *runner.Step {
 					continue
 				}
 
-				// 非 force：属主不一致时在 Action 中 chown -R
+				if stageDirHasMinDepthEntries(hctx, stageDir) {
+					return fmt.Errorf("stage directory %s on %s is not empty; remove existing files manually or re-run with --force-steps C-004 (or global -F) to delete and recreate the directory", stageDir, th.Host)
+				}
+
+				// 非 force 且空目录：属主不一致时在 Action 中 chown -R
 				expected := fmt.Sprintf("%s:%s", user, group)
 				if owner != "" && owner != expected {
 					ctx.ReportPrecheckIssue(runner.PrecheckIssue{
@@ -98,7 +105,9 @@ func StepC004CreateInstallDir() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-004: Create Install Directory")
 			for _, th := range ctx.HostsToRun() {
+				dbLogPhase(ctx, "host-start", fmt.Sprintf("host=%s", th.Host))
 				hctx := ctx.ForHost(th)
 				stageDir := hctx.GetParamString("db_stage_dir", "/home/yashan/install")
 				user := hctx.GetParamString("os_user", "yashan")
@@ -112,13 +121,16 @@ func StepC004CreateInstallDir() *runner.Step {
 					if isForce {
 						// Force 模式：删除重建
 						hctx.Logger.Warn("Force mode: deleting existing directory %s", stageDir)
-						if !commonos.IsSafeUnixRmRfPath(stageDir) {
-							return fmt.Errorf("refusing to delete stage directory %s on %s: path is not under allowed installation roots", stageDir, th.Host)
+						if err := commonos.ValidateDeletePath(stageDir); err != nil {
+							return fmt.Errorf("refusing to delete stage directory %s on %s: %w", stageDir, th.Host, err)
 						}
 						if _, err := hctx.ExecuteWithCheck(fmt.Sprintf("rm -rf %s", stageQ), true); err != nil {
 							return fmt.Errorf("failed to delete directory %s on %s: %w", stageDir, th.Host, err)
 						}
 					} else {
+						if stageDirHasMinDepthEntries(hctx, stageDir) {
+							return fmt.Errorf("stage directory %s on %s is not empty; remove existing files manually or re-run with --force-steps C-004 (or global -F) to delete and recreate the directory", stageDir, th.Host)
+						}
 						// 非 Force 模式：检查属主
 						result, _ = hctx.Execute(fmt.Sprintf("stat -c '%%U' %s", stageQ), false)
 						owner := ""
@@ -129,6 +141,7 @@ func StepC004CreateInstallDir() *runner.Step {
 						if owner == user {
 							// 属主正确，跳过创建
 							hctx.Logger.Info("Directory %s already exists with correct ownership (%s), skipping creation", stageDir, user)
+							dbLogPhase(hctx, "host-done", fmt.Sprintf("host=%s dir=%s skip=exists", th.Host, stageDir))
 							continue
 						} else if owner != "" {
 							// 属主不正确，修复属主
@@ -138,6 +151,7 @@ func StepC004CreateInstallDir() *runner.Step {
 								return fmt.Errorf("failed to fix ownership on %s: %w", th.Host, err)
 							}
 							hctx.Logger.Info("Fixed ownership: %s (owner: %s:%s)", stageDir, user, group)
+							dbLogPhase(hctx, "host-done", fmt.Sprintf("host=%s dir=%s op=chown", th.Host, stageDir))
 							continue
 						} else {
 							// 无法获取属主信息，报错提示使用 force
@@ -157,6 +171,7 @@ func StepC004CreateInstallDir() *runner.Step {
 					return fmt.Errorf("failed to set ownership on %s: %w", th.Host, err)
 				}
 				hctx.Logger.Info("Created directory: %s (owner: %s:%s)", stageDir, user, group)
+				dbLogPhase(hctx, "host-done", fmt.Sprintf("host=%s dir=%s", th.Host, stageDir))
 			}
 			return nil
 		},
@@ -185,4 +200,16 @@ func StepC004CreateInstallDir() *runner.Step {
 			return nil
 		},
 	}
+}
+
+// stageDirHasMinDepthEntries 为 true 表示 stageDir 下存在任意子项（与 C-007 空目录判定一致）。
+// 使用 sudo 执行 find，避免目录属主非 SSH 用户时无法列举导致误判为空。
+func stageDirHasMinDepthEntries(ctx *runner.StepContext, stageDir string) bool {
+	stageQ := commonos.ShellSingleQuote(stageDir)
+	cmd := fmt.Sprintf(`test -z "$(find %s -mindepth 1 2>/dev/null | head -1)" && echo EMPTY || echo NOT_EMPTY`, stageQ)
+	res, _ := ctx.Execute(cmd, true)
+	if res == nil {
+		return false
+	}
+	return strings.Contains(strings.TrimSpace(res.GetStdout()), "NOT_EMPTY")
 }

@@ -37,6 +37,7 @@ func StepH012VerifyProcess() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ympLogPhase(ctx, "plan", "H-012: Verify YMP Process")
 			ctx.Logger.Info("Checking YMP processes...")
 
 			result, _ := ctx.Execute("ps -ef | grep -v grep | grep ymp", false)

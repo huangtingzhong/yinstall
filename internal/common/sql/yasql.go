@@ -5,8 +5,10 @@ package sql
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
@@ -35,6 +37,30 @@ func errIfYasqlOutputHasError(r *YasqlResult) error {
 	return fmt.Errorf("yasql output contains Yashan error %s", code)
 }
 
+// ReportSQLFailure 将 yasql 失败输出为终端 LogErrorExit 块（供调用方在确定非可恢复失败后调用）。
+func ReportSQLFailure(ctx *runner.StepContext, cmd string, r *YasqlResult) {
+	if ctx == nil || r == nil {
+		return
+	}
+	errMsg := strings.TrimSpace(r.Stderr)
+	if errMsg == "" {
+		errMsg = strings.TrimSpace(r.Stdout)
+	}
+	if errMsg == "" {
+		errMsg = fmt.Sprintf("exit code %d", r.ExitCode)
+	}
+	ctx.Logger.LogErrorExit(
+		ctx.Executor.Host(),
+		ctx.CurrentStepID,
+		"",
+		cmd,
+		r.Stdout,
+		r.Stderr,
+		r.ExitCode,
+		errMsg,
+	)
+}
+
 // ValidateYasqlResultSuccess 校验 yasql 结果：先检查 YAS-NNNNN，再检查退出码（供直连 ctx.Execute yasql 的路径统一使用）。
 func ValidateYasqlResultSuccess(r *YasqlResult) error {
 	if r == nil {
@@ -49,30 +75,38 @@ func ValidateYasqlResultSuccess(r *YasqlResult) error {
 	return nil
 }
 
-// buildInstallLayoutYasqlCommand 在安装介质目录尚未写入用户 env 时，通过 db_install_path / db_data_path 推导 YASDB_HOME 后执行 yasql（历史行为与 C-023 一致）。
-func buildInstallLayoutYasqlCommand(installPath, dataPath, sql string) string {
-	escapedSQL := strings.ReplaceAll(sql, "$", "\\$")
+// buildInstallLayoutEnvPrefix 在安装介质目录尚未写入用户 env 时推导 YASDB_HOME 等（与 C-023 历史布局一致）。
+func buildInstallLayoutEnvPrefix(installPath, dataPath string) string {
 	return fmt.Sprintf(
 		`export YASDB_HOME=%s/$(ls %s/ 2>/dev/null | head -1) && `+
 			`export YASCS_HOME=%s/ycs/ce-1-1 && `+
 			`export PATH=$YASDB_HOME/bin:$PATH && `+
-			`export LD_LIBRARY_PATH=$YASDB_HOME/lib:$LD_LIBRARY_PATH && `+
-			`yasql -S / as sysdba <<EOF
-%s
-EOF`,
-		installPath, installPath, dataPath, escapedSQL)
+			`export LD_LIBRARY_PATH=$YASDB_HOME/lib:$LD_LIBRARY_PATH`,
+		installPath, installPath, dataPath)
 }
 
-// ExecuteSQLAsSysdbaInstallLayoutCtx 使用安装目录布局执行 sysdba SQL（heredoc，-S），并进行退出码与 YAS-NNNNN 校验。
-func ExecuteSQLAsSysdbaInstallLayoutCtx(ctx *runner.StepContext, osUser, installPath, dataPath, sql string, showOutput bool) (*YasqlResult, error) {
-	if ctx == nil {
-		return nil, fmt.Errorf("step context is required")
+func ensureSQLFileContent(sql string) string {
+	s := strings.TrimSpace(sql)
+	if s == "" {
+		return ";\n"
 	}
-	if sql == "" {
-		return nil, fmt.Errorf("sql statement is required")
+	if !strings.HasSuffix(s, ";") {
+		return s + ";\n"
 	}
-	cmd := buildInstallLayoutYasqlCommand(installPath, dataPath, sql)
-	result, execErr := commonos.ExecuteAsUser(ctx, osUser, cmd, showOutput)
+	return s + "\n"
+}
+
+func buildYasqlConnArg(cfg *YasqlConfig) (string, error) {
+	if cfg.AsSysdba {
+		return "/ as sysdba", nil
+	}
+	if cfg.User != "" && cfg.Password != "" {
+		return fmt.Sprintf("%s/%s@%s", cfg.User, commonos.YasqlQuotePassword(cfg.Password), cfg.ClusterName), nil
+	}
+	return "", fmt.Errorf("either AsSysdba=true or User/Password must be provided")
+}
+
+func yasqlResultFromExec(result runner.ExecResult, execErr error) (*YasqlResult, error) {
 	yasqlResult := &YasqlResult{Success: false}
 	if result != nil {
 		yasqlResult.Stdout = result.GetStdout()
@@ -88,6 +122,91 @@ func ExecuteSQLAsSysdbaInstallLayoutCtx(ctx *runner.StepContext, osUser, install
 		return yasqlResult, err
 	}
 	return yasqlResult, nil
+}
+
+// executeYasqlViaRemoteFile 将 SQL 上传到目标机后用 yasql -f 执行（与 collectRunSQL 对齐）。
+func executeYasqlViaRemoteFile(ctx *runner.StepContext, cfg *YasqlConfig, sql string) (*YasqlResult, error) {
+	if ctx == nil || ctx.Executor == nil {
+		return nil, fmt.Errorf("step context and executor are required")
+	}
+	if cfg == nil {
+		return nil, fmt.Errorf("yasql config is required")
+	}
+
+	localTmp, err := os.CreateTemp("", "yinstall_sql_*.sql")
+	if err != nil {
+		return nil, fmt.Errorf("create local tmp sql file: %w", err)
+	}
+	localName := localTmp.Name()
+	defer os.Remove(localName)
+
+	if _, err := localTmp.WriteString(ensureSQLFileContent(sql)); err != nil {
+		localTmp.Close()
+		return nil, fmt.Errorf("write local tmp sql: %w", err)
+	}
+	localTmp.Close()
+
+	remotePath := fmt.Sprintf("/tmp/.yinstall_sql_%d.sql", time.Now().UnixNano())
+	ctx.LogScriptPreview("sql", "remote="+remotePath, sql)
+	if err := ctx.Executor.Upload(localName, remotePath, ctx.UploadContext()); err != nil {
+		return nil, fmt.Errorf("upload sql file: %w", err)
+	}
+	remoteQ := commonos.ShellSingleQuote(remotePath)
+
+	connStr, err := buildYasqlConnArg(cfg)
+	if err != nil {
+		return nil, err
+	}
+	yasqlBin := "yasql"
+	if cfg.Silent {
+		yasqlBin += " -S"
+	}
+	yasqlCmd := fmt.Sprintf("%s %s -f %s", yasqlBin, connStr, remoteQ)
+
+	var result runner.ExecResult
+	var execErr error
+	if cfg.EnvFile != "" {
+		result, execErr = commonos.ExecuteAsUserWithEnv(ctx, cfg.OSUser, cfg.EnvFile, yasqlCmd, cfg.ShowOutput)
+	} else {
+		result, execErr = commonos.ExecuteAsUser(ctx, cfg.OSUser, yasqlCmd, cfg.ShowOutput)
+	}
+	_, _ = ctx.Execute(fmt.Sprintf("rm -f %s", remoteQ), false)
+	return yasqlResultFromExec(result, execErr)
+}
+
+// ExecuteSQLAsSysdbaInstallLayoutCtx 使用安装目录布局执行 sysdba SQL（远端 -f），并进行退出码与 YAS-NNNNN 校验。
+func ExecuteSQLAsSysdbaInstallLayoutCtx(ctx *runner.StepContext, osUser, installPath, dataPath, sql string, showOutput bool) (*YasqlResult, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("step context is required")
+	}
+	if sql == "" {
+		return nil, fmt.Errorf("sql statement is required")
+	}
+
+	localTmp, err := os.CreateTemp("", "yinstall_sql_*.sql")
+	if err != nil {
+		return nil, fmt.Errorf("create local tmp sql file: %w", err)
+	}
+	localName := localTmp.Name()
+	defer os.Remove(localName)
+
+	if _, err := localTmp.WriteString(ensureSQLFileContent(sql)); err != nil {
+		localTmp.Close()
+		return nil, fmt.Errorf("write local tmp sql: %w", err)
+	}
+	localTmp.Close()
+
+	remotePath := fmt.Sprintf("/tmp/.yinstall_sql_%d.sql", time.Now().UnixNano())
+	ctx.LogScriptPreview("sql", "remote="+remotePath, sql)
+	if err := ctx.Executor.Upload(localName, remotePath, ctx.UploadContext()); err != nil {
+		return nil, fmt.Errorf("upload sql file: %w", err)
+	}
+	remoteQ := commonos.ShellSingleQuote(remotePath)
+
+	yasqlCmd := fmt.Sprintf("%s && yasql -S / as sysdba -f %s", buildInstallLayoutEnvPrefix(installPath, dataPath), remoteQ)
+	result, execErr := commonos.ExecuteAsUser(ctx, osUser, yasqlCmd, showOutput)
+	_, _ = ctx.Execute(fmt.Sprintf("rm -f %s", remoteQ), false)
+	return yasqlResultFromExec(result, execErr)
 }
 
 // YasqlConfig yasql 执行配置
@@ -129,78 +248,7 @@ func ExecuteSQL(ctx *runner.StepContext, cfg *YasqlConfig, sql string) (*YasqlRe
 	if sql == "" {
 		return nil, fmt.Errorf("sql statement is required")
 	}
-
-	// 构建 yasql 连接字符串
-	var connStr string
-	if cfg.AsSysdba {
-		// 使用 / as sysdba 连接（不需要密码，不需要 @cluster）
-		connStr = "/ as sysdba"
-	} else if cfg.User != "" && cfg.Password != "" {
-		connStr = fmt.Sprintf("%s/%s@%s", cfg.User, commonos.YasqlQuotePassword(cfg.Password), cfg.ClusterName)
-	} else {
-		return nil, fmt.Errorf("either AsSysdba=true or User/Password must be provided")
-	}
-
-	// 使用 heredoc 方式执行 SQL，避免引号转义问题
-	// 格式：yasql / as sysdba <<EOF
-	//       SQL语句
-	//       EOF
-	//
-	// 在 bash -c 中，使用单引号包裹 EOF 标记（<<'EOF'），避免 bash 解释 $ 符号
-	// 由于使用了 <<'EOF'，heredoc 内的内容不会被 bash 解释，所以不需要转义 $
-	escapedSQL := sql
-
-	// 构建 yasql 命令，使用 heredoc
-	// 使用单引号包裹 EOF 标记（'EOF'），这样 heredoc 内的 $ 不会被 bash 解释
-	var options []string
-	if cfg.Silent {
-		options = append(options, "-S")
-	}
-
-	// 构建完整的 yasql 命令，使用 heredoc
-	// 注意：在 bash -c "..." 中，使用 <<'EOF' 来避免 $ 被解释
-	var yasqlCmd string
-	if len(options) > 0 {
-		yasqlCmd = fmt.Sprintf("yasql %s %s <<'EOF'\n%s\nEOF",
-			strings.Join(options, " "),
-			connStr,
-			escapedSQL)
-	} else {
-		yasqlCmd = fmt.Sprintf("yasql %s <<'EOF'\n%s\nEOF",
-			connStr,
-			escapedSQL)
-	}
-
-	// 使用 commonos.ExecuteAsUserWithEnv 执行命令
-	result, err := commonos.ExecuteAsUserWithEnv(
-		ctx,
-		cfg.OSUser,
-		cfg.EnvFile,
-		yasqlCmd,
-		cfg.ShowOutput,
-	)
-
-	yasqlResult := &YasqlResult{
-		Success: false,
-	}
-
-	if result != nil {
-		yasqlResult.Stdout = result.GetStdout()
-		yasqlResult.Stderr = result.GetStderr()
-		yasqlResult.ExitCode = result.GetExitCode()
-		yasqlResult.Success = result.GetExitCode() == 0
-	}
-
-	if err != nil {
-		return yasqlResult, fmt.Errorf("failed to execute yasql: %w", err)
-	}
-
-	if err := ValidateYasqlResultSuccess(yasqlResult); err != nil {
-		yasqlResult.Success = false
-		return yasqlResult, err
-	}
-
-	return yasqlResult, nil
+	return executeYasqlViaRemoteFile(ctx, cfg, sql)
 }
 
 // ExecuteSQLAsSysdba 以 sysdba 身份执行 SQL（便捷函数）
@@ -229,7 +277,7 @@ func ExecuteSQLAsSysdba(ctx *runner.StepContext, osUser, envFile, clusterName, s
 	return ExecuteSQL(ctx, cfg, sql)
 }
 
-// ExecuteSQLAsSysdbaCtx 以 sysdba 身份执行 SQL（带 StepContext，支持日志记录）
+// ExecuteSQLAsSysdbaCtx 以 sysdba 身份执行 SQL（带 StepContext，支持日志记录）。
 //
 // 参数：
 //   - ctx: 步骤上下文
@@ -243,50 +291,7 @@ func ExecuteSQLAsSysdba(ctx *runner.StepContext, osUser, envFile, clusterName, s
 //   - YasqlResult: 执行结果
 //   - error: 错误信息
 func ExecuteSQLAsSysdbaCtx(ctx *runner.StepContext, osUser, envFile, clusterName, sql string, showOutput bool) (*YasqlResult, error) {
-	if ctx == nil {
-		return nil, fmt.Errorf("step context is required")
-	}
-	if sql == "" {
-		return nil, fmt.Errorf("sql statement is required")
-	}
-
-	// 构建 yasql 命令，使用 heredoc
-	// 使用 <<EOF（不带引号），SQL 中的 $ 需要转义为 \$，避免被 bash 解释
-	var options []string
-	options = append(options, "-S") // 静默模式
-
-	connStr := "/ as sysdba"
-	// 转义 SQL 中的 $ 符号（用于 v$parameter 等视图）
-	escapedSQL := strings.ReplaceAll(sql, "$", "\\$")
-	yasqlCmd := fmt.Sprintf("yasql %s %s <<EOF\n%s\nEOF",
-		strings.Join(options, " "),
-		connStr,
-		escapedSQL)
-
-	// 使用 ExecuteAsUserWithEnvCheckCtx 执行命令，确保日志记录
-	result, err := commonos.ExecuteAsUserWithEnvCheckCtx(ctx, osUser, envFile, yasqlCmd, showOutput)
-
-	yasqlResult := &YasqlResult{
-		Success: false,
-	}
-
-	if result != nil {
-		yasqlResult.Stdout = result.GetStdout()
-		yasqlResult.Stderr = result.GetStderr()
-		yasqlResult.ExitCode = result.GetExitCode()
-		yasqlResult.Success = result.GetExitCode() == 0
-	}
-
-	if err != nil {
-		return yasqlResult, fmt.Errorf("failed to execute yasql: %w", err)
-	}
-
-	if err := ValidateYasqlResultSuccess(yasqlResult); err != nil {
-		yasqlResult.Success = false
-		return yasqlResult, err
-	}
-
-	return yasqlResult, nil
+	return ExecuteSQLAsSysdba(ctx, osUser, envFile, clusterName, sql, showOutput)
 }
 
 // QueryParameter 查询数据库参数（便捷函数）

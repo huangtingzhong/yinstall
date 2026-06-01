@@ -29,6 +29,7 @@ func StepG010VerifyWeb() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ycmLogPhase(ctx, "plan", "G-010: Verify YCM Web Access")
 			ycmPort := ctx.GetParamInt("ycm_port", 9060)
 			host := ctx.Executor.Host()
 

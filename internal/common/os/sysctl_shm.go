@@ -1,5 +1,12 @@
 package os
 
+import (
+	"fmt"
+	"math"
+	"strconv"
+	"strings"
+)
+
 // DefaultShmmni is the usual kernel.shmmni for database hosts.
 const DefaultShmmni int64 = 4096
 
@@ -87,4 +94,21 @@ func maxInt64(a, b int64) int64 {
 		return a
 	}
 	return b
+}
+
+// ParseSysctlShmValue 解析 sysctl 输出的 shmmax/shmall 数值。
+// 新内核常返回接近 2^64-1 的“无限制”值，超出 int64 时按 MaxInt64 处理以便通过容量校验。
+func ParseSysctlShmValue(raw string) (int64, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return 0, fmt.Errorf("empty sysctl value")
+	}
+	u, err := strconv.ParseUint(s, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	if u > math.MaxInt64 {
+		return math.MaxInt64, nil
+	}
+	return int64(u), nil
 }

@@ -1,0 +1,2 @@
+3007704 /data/yashan/yasdb_home/23.6.0.1/bin/yasdb nomount -D /data/yashan/yasdb_data/ce-1-1
+3009527 yasdb -D /data/yashan/yasdb_data/ce-1-1/containers/MASTER

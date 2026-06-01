@@ -33,6 +33,8 @@ func StepE012InstallSoftware() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			standbyLogPhase(ctx, "plan", "E-012: Install Software on Standby")
+			standbyLogPhase(ctx, "install-start", "standby software")
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			primaryUser := GetPrimaryOSUser(ctx)
 			depsPackage := ctx.GetParamString("db_deps_package", "")
@@ -93,6 +95,7 @@ func StepE012InstallSoftware() *runner.Step {
 			}
 
 			ctx.Logger.Info("Software installation on standby nodes completed")
+			standbyLogPhase(ctx, "install-done", "standby software")
 			return nil
 		},
 

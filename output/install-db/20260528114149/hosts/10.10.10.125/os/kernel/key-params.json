@@ -1,0 +1,12 @@
+{
+  "fs.file-max": "3140004\n",
+  "fs.nr_open": "1048576\n",
+  "kernel.shmall": "3774873\n",
+  "kernel.shmmax": "246960619520\n",
+  "kernel.shmmni": "4096\n",
+  "net.core.somaxconn": "32768\n",
+  "net.ipv4.tcp_fin_timeout": "60\n",
+  "vm.nr_hugepages": "0\n",
+  "vm.overcommit_memory": "2\n",
+  "vm.overcommit_ratio": "90\n"
+}

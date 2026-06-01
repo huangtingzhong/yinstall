@@ -63,6 +63,7 @@ func StepC017ConfigureRedo() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-017: Configure REDO Parameters")
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
 			configPath := path.Join(stageDir, clusterName+".toml")

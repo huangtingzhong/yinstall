@@ -2,13 +2,12 @@ package clean
 
 import "github.com/yinstall/internal/runner"
 
-// GetAllSteps returns all clean steps
+// GetAllSteps returns all clean steps (DB 为分步列表；CLEAN-DB 单步仍可通过 GetStepByID 按 -s 选用)。
 func GetAllSteps() []*runner.Step {
-	return []*runner.Step{
-		StepCleanDB(),
-		StepCleanYCM(),
-		StepCleanYMP(),
-	}
+	steps := make([]*runner.Step, 0, len(GetDBCleanSteps())+2)
+	steps = append(steps, GetDBCleanSteps()...)
+	steps = append(steps, StepCleanYCM(), StepCleanYMP())
+	return steps
 }
 
 // GetDBCleanSteps returns detailed DB cleanup steps
@@ -23,23 +22,15 @@ func GetDBCleanSteps() []*runner.Step {
 	}
 }
 
-// GetStepByID returns a step by its ID
+// GetStepByID returns a step by its ID（含遗留聚合步 CLEAN-DB）。
 func GetStepByID(id string) *runner.Step {
-	// 先查找主步骤
-	steps := GetAllSteps()
-	for _, step := range steps {
+	if id == "CLEAN-DB" {
+		return StepCleanDB()
+	}
+	for _, step := range GetAllSteps() {
 		if step.ID == id {
 			return step
 		}
 	}
-
-	// 查找 DB 详细步骤
-	dbSteps := GetDBCleanSteps()
-	for _, step := range dbSteps {
-		if step.ID == id {
-			return step
-		}
-	}
-
 	return nil
 }

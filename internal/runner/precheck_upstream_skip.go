@@ -36,6 +36,7 @@ func isUpstreamArtifactMissingMessage(msg string) bool {
 		"specified primary environment file ",
 		"primary environment file not found (tried:",
 		"sysctl config file not found",
+		"yasadm not found or not executable at ",
 	}
 	for _, s := range substrings {
 		if strings.Contains(msg, s) {

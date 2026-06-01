@@ -1,0 +1,20 @@
+NAME         SIZE TYPE  FSTYPE       MOUNTPOINT UUID                                   MODEL
+sr0         1024M rom                                                                  VMware SATA CD01
+nvme0n1      100G disk                                                                 VMware Virtual NVMe Disk
+├─nvme0n1p1  600M part  vfat         /boot/efi  14FB-E503                              
+├─nvme0n1p2    1G part  xfs          /boot      e053e8ee-f40b-4e4d-9e84-d6890457890f   
+└─nvme0n1p3 98.4G part  LVM2_member             lfcPH2-yprE-N0Q0-y73q-Umo7-IBgE-0jGPCz 
+  ├─ol-root 96.4G lvm   xfs          /          619090a4-0e7c-4dac-a93a-943091f8625f   
+  └─ol-swap    2G lvm   swap         [SWAP]     d378443f-3a5a-4555-84e5-c9d98fcf047e   
+nvme0n2        2G disk  mpath_member                                                   VMware Virtual NVMe Disk
+└─sys2         2G mpath                                                                
+nvme0n3        2G disk  mpath_member                                                   VMware Virtual NVMe Disk
+└─sys3         2G mpath                                                                
+nvme0n4        2G disk  mpath_member                                                   VMware Virtual NVMe Disk
+└─sys1         2G mpath                                                                
+nvme0n5        5G disk  mpath_member                                                   VMware Virtual NVMe Disk
+└─data1        5G mpath                                                                
+nvme0n6        5G disk  mpath_member                                                   VMware Virtual NVMe Disk
+└─data2        5G mpath                                                                
+nvme0n7        1G disk  mpath_member                                                   VMware Virtual NVMe Disk
+└─arch1        1G mpath                                                                

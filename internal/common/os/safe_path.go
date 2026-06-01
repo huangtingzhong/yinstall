@@ -1,64 +1,75 @@
 package os
 
 import (
+	"fmt"
 	"path"
 	"strings"
 )
 
-// unixRmRfRoots 允许执行 rm -rf / rm -f 的路径根（远程 Linux）。采用白名单，拒绝 /etc、/usr（除 /usr/local）、/bin 等系统目录，
-// 避免配置错误或恶意参数导致扩大删除范围。
-var unixRmRfRoots = []string{
-	"/data",
-	"/home",
-	"/opt",
-	"/root",
-	"/tmp",
-	"/var",
-	"/usr/local",
-	"/srv",
-	"/mnt",
-	"/media",
-}
-
-// IsSafeUnixRmRfPath 判断绝对路径是否允许用于 rm -rf（删除目录树）或 rm -f（删除文件）。
-// 规则：必须为绝对路径、path.Clean 后非根目录、路径段不含 ".."、至少两级路径（如 /data/yashan），且必须落在 unixRmRfRoots 白名单下。
-// 控制端可能是 Windows；路径语义为远端 Unix，故使用 path 而非 filepath。
-func IsSafeUnixRmRfPath(p string) bool {
+// ValidateDeletePath 校验待删除路径是否适合用于字面量 rm/rm -rf（ShellSingleQuote 后执行）。
+// 不做安装根目录白名单；删除范围由调用方在 rm 前 test -d/-f 确认目标存在，以及业务层路径约束（如必须在 db_data_path 下）保证。
+//
+// 拒绝：空路径、根目录、相对路径、含 ".." 、shell/通配元字符、仅单段路径（如 /data、/tmp，避免误删整盘挂载点）。
+func ValidateDeletePath(p string) error {
 	p = strings.TrimSpace(p)
-	if p == "" || p == "/" {
-		return false
+	if p == "" {
+		return fmt.Errorf("empty path")
 	}
-	p = strings.ReplaceAll(p, `\`, `/`)
-	// 拒绝含 ".." 的原始路径；path.Clean 会静默消解，可能被用于绕过「看似在 /data/yashan 下」实则指向其他目录。
-	if strings.Contains(p, "/../") || strings.HasSuffix(p, "/..") || strings.HasPrefix(p, "../") {
-		return false
+	raw := strings.ReplaceAll(p, `\`, `/`)
+	if strings.Contains(raw, "..") {
+		return fmt.Errorf("path must not contain ..")
 	}
-	cleaned := path.Clean(p)
+	if strings.ContainsAny(raw, "*?[{}$`|;&<>() \t\n\\'\"!#~") {
+		return fmt.Errorf("path must not contain shell or glob metacharacters")
+	}
+	cleaned := path.Clean(raw)
 	if cleaned == "/" || cleaned == "." || cleaned == "" {
-		return false
+		return fmt.Errorf("refusing to delete filesystem root")
 	}
 	if !strings.HasPrefix(cleaned, "/") {
-		return false
+		return fmt.Errorf("path must be absolute")
 	}
 	trim := strings.TrimPrefix(cleaned, "/")
 	if trim == "" {
-		return false
+		return fmt.Errorf("invalid path")
 	}
 	parts := strings.Split(trim, "/")
 	for _, seg := range parts {
 		if seg == "" || seg == "." || seg == ".." {
-			return false
+			return fmt.Errorf("invalid path segment in %q", cleaned)
 		}
 	}
 	if len(parts) < 2 {
+		return fmt.Errorf("path must be at least two levels deep (e.g. /data/yashan), got %q", cleaned)
+	}
+	return nil
+}
+
+// CleanDeletePath 校验并返回 path.Clean 后的绝对路径。
+func CleanDeletePath(p string) (string, error) {
+	if err := ValidateDeletePath(p); err != nil {
+		return "", err
+	}
+	raw := strings.ReplaceAll(strings.TrimSpace(p), `\`, `/`)
+	return path.Clean(raw), nil
+}
+
+// DeletePathUnder 判断 child 是否等于 parent 或位于 parent 目录树内。
+// 使用 parent+"/" 边界，避免 /data1 误匹配 /data12。
+func DeletePathUnder(child, parent string) bool {
+	child = path.Clean(strings.ReplaceAll(strings.TrimSpace(child), `\`, `/`))
+	parent = path.Clean(strings.ReplaceAll(strings.TrimSpace(parent), `\`, `/`))
+	if child == "" || parent == "" || parent == "/" {
 		return false
 	}
-	for _, root := range unixRmRfRoots {
-		if cleaned == root || strings.HasPrefix(cleaned, root+"/") {
-			return true
-		}
+	if child == parent {
+		return true
 	}
-	return false
+	parentPrefix := parent
+	if !strings.HasSuffix(parentPrefix, "/") {
+		parentPrefix += "/"
+	}
+	return strings.HasPrefix(child, parentPrefix)
 }
 
 // IsSafeUnixBlockDevicePath 判断路径是否可作为 dd 等操作的块设备路径（of=...）。

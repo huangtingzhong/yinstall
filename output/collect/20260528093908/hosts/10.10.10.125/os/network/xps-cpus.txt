@@ -1,0 +1,4 @@
+/sys/class/net/ens160/queues/tx-0/xps_cpus: 
+/sys/class/net/ens192/queues/tx-0/xps_cpus: 
+/sys/class/net/ens224/queues/tx-0/xps_cpus: 
+/sys/class/net/lo/queues/tx-0/xps_cpus: 

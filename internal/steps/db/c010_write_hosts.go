@@ -27,6 +27,7 @@ func StepC010WriteHosts() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-010: Write Cluster Hosts")
 			hosts := ctx.HostsToRun()
 			accessMode := ctx.GetParamString("yac_access_mode", "vip")
 
@@ -37,7 +38,7 @@ func StepC010WriteHosts() *runner.Step {
 			newEntries = append(newEntries, existingEntries...)
 
 			vips := ctx.GetParamStringSlice("yac_vips")
-			if len(vips) > 0 {
+			if YACAccessModeRequiresVIP(accessMode) && len(vips) > 0 {
 				for i, th := range hosts {
 					hostname := getHostname(ctx.ForHost(th))
 					if hostname == "" {

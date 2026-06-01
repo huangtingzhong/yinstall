@@ -1,0 +1,13 @@
+{
+  "archive_path": "/Users/yihan/tool/develop/yasinstaller/output/collect/20260528-084824.tar.gz",
+  "collected_at": "2026-05-28T00:48:25Z",
+  "error_count": 0,
+  "errors": null,
+  "hosts": [
+    "10.10.10.130"
+  ],
+  "output_dir": "/Users/yihan/tool/develop/yasinstaller/output/collect/20260528-084824",
+  "version": "1",
+  "warning_count": 0,
+  "warnings": null
+}

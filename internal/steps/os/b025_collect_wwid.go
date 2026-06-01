@@ -53,6 +53,7 @@ func StepB025CollectWWID() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-025: Collect Disk WWID")
 			ctx.Logger.Info("Collecting disk WWID information...")
 
 			// 获取所有 YAC 磁盘组中的磁盘

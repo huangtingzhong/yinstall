@@ -7,6 +7,7 @@ import (
 
 	"github.com/yinstall/internal/logging"
 	"github.com/yinstall/internal/runner"
+	"github.com/yinstall/internal/ssh"
 )
 
 type stubExecResult struct {
@@ -29,9 +30,11 @@ func (e *stubExecutor) Execute(cmd string, sudo bool) (runner.ExecResult, error)
 	}
 	return &stubExecResult{exit: 0}, nil
 }
-func (e *stubExecutor) Host() string                              { return "stub" }
-func (e *stubExecutor) Close() error                              { return nil }
-func (e *stubExecutor) Upload(localPath, remotePath string) error { return nil }
+func (e *stubExecutor) Host() string { return "stub" }
+func (e *stubExecutor) Close() error { return nil }
+func (e *stubExecutor) Upload(localPath, remotePath string, _ *ssh.UploadContext) error {
+	return nil
+}
 
 func testLogger(t *testing.T) *logging.Logger {
 	t.Helper()

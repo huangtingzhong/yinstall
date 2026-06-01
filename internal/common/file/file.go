@@ -97,21 +97,8 @@ func FindAndDistribute(
 		if localPath == "" {
 			return "", fmt.Errorf("file '%s' not found on remote (exact path) or locally", filename)
 		}
+		return distributeLocalFile(ctx, localPath, remoteHomeDir, remoteDir)
 	} else {
-		if remoteDir != "" {
-			remotePath := path.Join(remoteDir, baseName)
-			r, _ := ctx.Execute(fmt.Sprintf("test -f '%s' && echo 'exists'", remotePath), false)
-			if r != nil && strings.Contains(r.GetStdout(), "exists") {
-				return remotePath, nil
-			}
-		}
-
-		remoteHomePath := path.Join(remoteHomeDir, baseName)
-		r, _ := ctx.Execute(fmt.Sprintf("test -f '%s' && echo 'exists'", remoteHomePath), false)
-		if r != nil && strings.Contains(r.GetStdout(), "exists") {
-			return remoteHomePath, nil
-		}
-
 		for _, dir := range localDirs {
 			candidate := filepath.Join(dir, baseName)
 			if _, err := os.Stat(candidate); err == nil {
@@ -120,24 +107,114 @@ func FindAndDistribute(
 			}
 		}
 
+		// 远端已存在：与本地比对大小，不一致则重新上传（避免残缺 ISO/安装包被误用）
+		for _, remotePath := range distributeRemoteCandidates(remoteDir, remoteHomeDir, baseName) {
+			if !FileExists(ctx, remotePath) {
+				continue
+			}
+			if localPath == "" {
+				ctx.Logger.Info("Using existing remote file: %s", remotePath)
+				return remotePath, nil
+			}
+			if !remoteFileNeedsReplace(ctx, remotePath, localPath) {
+				ctx.Logger.Info("Remote file up-to-date: %s", remotePath)
+				return remotePath, nil
+			}
+			ctx.Logger.Warn("Remote file size mismatch for %s, will re-upload from %s", remotePath, localPath)
+			break
+		}
+
 		if localPath == "" {
 			return "", fmt.Errorf("file '%s' not found in remote dirs ['%s', '%s'] or local dirs %v",
 				filename, remoteDir, remoteHomeDir, localDirs)
 		}
+		return distributeLocalFile(ctx, localPath, remoteHomeDir, remoteDir)
+	}
+}
+
+// DistributeSoftware 使用 StepContext 的 -L / -R 配置查找并分发软件包（纯文件名）。
+func DistributeSoftware(ctx *runner.StepContext, filename string) (string, error) {
+	return FindAndDistribute(ctx, filename, ctx.LocalSoftwareDirs, ctx.RemoteSoftwareDir)
+}
+
+// distributeLocalFile 将已解析的本地文件分发到远端：先查 -R/$HOME，大小一致则复用，否则上传到 -R 或 $HOME。
+func distributeLocalFile(ctx *runner.StepContext, localPath, remoteHomeDir, remoteDir string) (string, error) {
+	baseName := path.Base(filepath.ToSlash(localPath))
+	uploadDir := distributeUploadDir(remoteHomeDir, remoteDir)
+
+	for _, remotePath := range distributeRemoteCandidates(remoteDir, remoteHomeDir, baseName) {
+		if !FileExists(ctx, remotePath) {
+			continue
+		}
+		if !remoteFileNeedsReplace(ctx, remotePath, localPath) {
+			ctx.Logger.Info("Remote file up-to-date: %s", remotePath)
+			return remotePath, nil
+		}
+		ctx.Logger.Warn("Remote file size mismatch for %s, will re-upload from %s", remotePath, localPath)
+		break
 	}
 
-	uploadPath := path.Join(remoteHomeDir, baseName)
-
-	if err := ctx.Executor.Upload(localPath, uploadPath); err != nil {
-		return "", fmt.Errorf("failed to upload '%s' to '%s': %w", localPath, uploadPath, err)
+	uploadPath := path.Join(uploadDir, baseName)
+	if err := uploadLocalToRemote(ctx, localPath, uploadPath); err != nil {
+		return "", err
 	}
-
-	r, _ = ctx.Execute(fmt.Sprintf("test -f '%s' && echo 'exists'", uploadPath), false)
-	if r == nil || !strings.Contains(r.GetStdout(), "exists") {
-		return "", fmt.Errorf("file upload verification failed for '%s'", uploadPath)
-	}
-
 	return uploadPath, nil
+}
+
+// distributeUploadDir 返回上传目标目录：优先 --remote-software-dir (-R)，否则远端 $HOME。
+func distributeUploadDir(remoteHomeDir, remoteDir string) string {
+	if strings.TrimSpace(remoteDir) != "" {
+		return remoteDir
+	}
+	return remoteHomeDir
+}
+
+// distributeRemoteCandidates 返回按优先级排列的远端候选路径（用于命中已有文件）。
+func distributeRemoteCandidates(remoteDir, remoteHomeDir, baseName string) []string {
+	var out []string
+	if strings.TrimSpace(remoteDir) != "" {
+		out = append(out, path.Join(remoteDir, baseName))
+	}
+	homePath := path.Join(remoteHomeDir, baseName)
+	if len(out) == 0 || homePath != out[0] {
+		out = append(out, homePath)
+	}
+	return out
+}
+
+// remoteFileNeedsReplace 当本地文件存在且与远端大小不一致时返回 true。
+func remoteFileNeedsReplace(ctx *runner.StepContext, remotePath, localPath string) bool {
+	li, err := os.Stat(localPath)
+	if err != nil {
+		return false
+	}
+	r, _ := ctx.Execute(fmt.Sprintf("stat -c %%s '%s' 2>/dev/null", remotePath), false)
+	if r == nil || r.GetExitCode() != 0 {
+		return true
+	}
+	remoteSize := strings.TrimSpace(r.GetStdout())
+	if remoteSize == "" {
+		return true
+	}
+	var rs int64
+	if _, err := fmt.Sscanf(remoteSize, "%d", &rs); err != nil {
+		return true
+	}
+	return rs != li.Size()
+}
+
+func uploadLocalToRemote(ctx *runner.StepContext, localPath, uploadPath string) error {
+	if err := EnsureDir(ctx, path.Dir(uploadPath), true); err != nil {
+		return fmt.Errorf("ensure remote dir %s: %w", path.Dir(uploadPath), err)
+	}
+	if err := ctx.Executor.Upload(localPath, uploadPath, ctx.UploadContext()); err != nil {
+		return fmt.Errorf("failed to upload '%s' to '%s': %w", localPath, uploadPath, err)
+	}
+	r, _ := ctx.Execute(fmt.Sprintf("test -f '%s' && echo 'exists'", uploadPath), false)
+	if r == nil || !strings.Contains(r.GetStdout(), "exists") {
+		return fmt.Errorf("file upload verification failed for '%s'", uploadPath)
+	}
+	return nil
 }
 
 // FileExists 检查远程文件是否存在

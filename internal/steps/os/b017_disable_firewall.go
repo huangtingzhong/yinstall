@@ -26,6 +26,7 @@ func StepB017DisableFirewall() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-017: Disable Firewall")
 			ctx.Execute("systemctl stop firewalld 2>/dev/null", true)
 			ctx.Execute("systemctl disable firewalld 2>/dev/null", true)
 			return nil

@@ -43,6 +43,7 @@ func StepC013ScanNameCheck() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-013: Resolve SCAN Name and Check Subnet")
 			// 实际解析与网段校验在 db.go 中通过 RunScanNameResolveAndSubnetCheck 执行，此处仅占位
 			return nil
 		},

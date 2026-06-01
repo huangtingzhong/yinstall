@@ -95,6 +95,7 @@ func StepB001CheckConnectivity() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-001: Check Connectivity")
 			host := ctx.Executor.Host()
 			hostname := ctx.GetParamString("hostname", "")
 			if v, ok := ctx.Results["hostname"]; ok {
@@ -159,6 +160,13 @@ func StepB001CheckConnectivity() *runner.Step {
 			if len(osTypes) > 0 {
 				ctx.Logger.Info("  OS Type:     %s", strings.Join(osTypes, ", "))
 			}
+
+			priv := "non-root"
+			if isRoot {
+				priv = "root"
+			}
+			osLogPhase(ctx, "op-done", fmt.Sprintf("probe host=%s hostname=%s os=%s/%s arch=%s mem=%s cpus=%s priv=%s",
+				host, hostname, osInfo.Name, osInfo.Version, osInfo.Arch, totalMem, cpuCores, priv))
 
 			return nil
 		},

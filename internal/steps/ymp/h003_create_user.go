@@ -32,6 +32,7 @@ func StepH003CreateUser() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ympLogPhase(ctx, "plan", "H-003: Create YMP User")
 			user := ctx.GetParamString("ymp_user", "ymp")
 			password := ctx.GetParamString("ymp_user_password", "aaBB11@@33$$")
 

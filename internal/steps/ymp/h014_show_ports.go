@@ -30,6 +30,7 @@ func StepH014ShowPorts() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ympLogPhase(ctx, "plan", "H-014: Show YMP Ports Status")
 			ympPort := ctx.GetParamInt("ymp_port", 8090)
 			ympUser := ctx.GetParamString("ymp_user", "ymp")
 

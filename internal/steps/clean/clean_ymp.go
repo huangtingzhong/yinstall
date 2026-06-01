@@ -26,12 +26,12 @@ func StepCleanYMP() *runner.Step {
 			ctx.Logger.Info("  YMP_HOME: %s", ympHome)
 			ctx.Logger.Info("  YMP_USER: %s", ympUser)
 
-			if !commonos.IsSafeUnixRmRfPath(ympHome) {
-				return fmt.Errorf("YMP_HOME %q is not an allowed rm -rf target; refusing YMP cleanup", ympHome)
+			if err := commonos.ValidateDeletePath(ympHome); err != nil {
+				return fmt.Errorf("invalid YMP_HOME delete path %q: %w", ympHome, err)
 			}
 			ympEnvFilePre := fmt.Sprintf("/home/%s/.yasboot/ymp.env", ympUser)
-			if !commonos.IsSafeUnixRmRfPath(ympEnvFilePre) {
-				return fmt.Errorf("ymp.env path %q is not an allowed target; refusing YMP cleanup", ympEnvFilePre)
+			if err := commonos.ValidateDeletePath(ympEnvFilePre); err != nil {
+				return fmt.Errorf("invalid ymp.env delete path %q: %w", ympEnvFilePre, err)
 			}
 
 			// Check if YMP_HOME directory exists
@@ -67,12 +67,12 @@ func StepCleanYMP() *runner.Step {
 		Action: func(ctx *runner.StepContext) error {
 			ympHome := ctx.GetParamString("ymp_home", "/opt/ymp")
 			ympUser := ctx.GetParamString("ymp_user", "ymp")
-			if !commonos.IsSafeUnixRmRfPath(ympHome) {
-				return fmt.Errorf("YMP_HOME %q failed safety check; refusing cleanup", ympHome)
+			if err := commonos.ValidateDeletePath(ympHome); err != nil {
+				return fmt.Errorf("invalid YMP_HOME delete path %q: %w", ympHome, err)
 			}
 			ympEnvFile := fmt.Sprintf("/home/%s/.yasboot/ymp.env", ympUser)
-			if !commonos.IsSafeUnixRmRfPath(ympEnvFile) {
-				return fmt.Errorf("ymp.env path %q failed safety check", ympEnvFile)
+			if err := commonos.ValidateDeletePath(ympEnvFile); err != nil {
+				return fmt.Errorf("invalid ymp.env delete path %q: %w", ympEnvFile, err)
 			}
 			ympHQ := commonos.ShellSingleQuote(ympHome)
 			ympEnvQ := commonos.ShellSingleQuote(ympEnvFile)

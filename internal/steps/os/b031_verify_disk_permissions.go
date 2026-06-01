@@ -33,6 +33,7 @@ func StepB031VerifyDiskPermissions() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-031: Verify Disk Permissions")
 			// 检查 /dev/mapper/ 下的多路径设备
 			result, _ := ctx.Execute("ls -l /dev/mapper/ 2>/dev/null | grep -E 'sys|data|arch' || echo 'No matching devices in /dev/mapper/'", true)
 			ctx.Logger.Info("Multipath devices (/dev/mapper/):\n%s", result.GetStdout())

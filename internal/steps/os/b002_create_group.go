@@ -26,6 +26,7 @@ func StepB002CreateGroup() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-002: Create Groups")
 			group := ctx.GetParamString("os_group", "yashan")
 			gid := ctx.GetParamInt("os_group_gid", 701)
 			dbaGroup := ctx.GetParamString("os_dba_group", "YASDBA")

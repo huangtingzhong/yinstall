@@ -7,6 +7,7 @@ import (
 	"runtime"
 
 	"github.com/spf13/cobra"
+	"github.com/yinstall/internal/logging"
 )
 
 var (
@@ -37,6 +38,11 @@ var (
 	remoteSoftwareDir string   // 远程软件目录（目标端）
 
 	listSteps bool // -l / --list-steps：列出当前子命令的步骤说明后退出
+
+	// 归档/输出（collect、stressos、os/db 安装后挂钩共用）
+	outputDir        string // -o / --output
+	archiveOnSuccess bool   // -a / --archive
+	logRedact        bool   // --log-redact：日志中脱敏密码
 )
 
 // AppVersion 在运行时可被 cmd/yinstall/main.go 的 init() 通过构建时注入的 Version 变量覆盖
@@ -60,6 +66,7 @@ A CLI tool for automating YashanDB installation, including:
 Use  yinstall <command> -l  to print the step catalog (IDs, order, descriptions) for that command.`,
 	Version: AppVersion,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		logging.SetRedactSensitive(logRedact)
 		if err := validatePort("--ssh-port", sshPort); err != nil {
 			return err
 		}
@@ -91,6 +98,7 @@ func init() {
 	rootCmd.PersistentFlags().StringSliceVarP(&forceSteps, "force-steps", "f", nil, "Force execute specific steps (e.g. -f B-002,B-003)")
 	rootCmd.PersistentFlags().BoolVar(&forceDeleteUser, "force-delete-user", false, "Allow -F/--force or -f/--force-steps to delete and recreate existing users and groups (dangerous)")
 	rootCmd.PersistentFlags().StringVar(&logDir, "log-dir", defaultLogDir(), "Log directory")
+	rootCmd.PersistentFlags().BoolVar(&logRedact, "log-redact", false, "Redact passwords/secrets in session and debug logs (default: show plaintext)")
 	rootCmd.PersistentFlags().BoolVarP(&listSteps, "list-steps", "l", false, "List step catalog for the subcommand (IDs, order, descriptions) and exit")
 
 	// SSH 参数
@@ -107,6 +115,11 @@ func init() {
 	rootCmd.PersistentFlags().StringSliceVarP(&localSoftwareDirs, "local-software-dirs", "L", defaultLocalSoftwareDirs(), "Local software directories (control plane)")
 	rootCmd.PersistentFlags().StringVarP(&remoteSoftwareDir, "remote-software-dir", "R", "/data/yashan/soft", "Remote software directory (target host)")
 
+	rootCmd.PersistentFlags().StringVarP(&outputDir, "output", "o", "",
+		"Local output directory for collect/stress archives and install post-success archive (default: ./output/<kind>/<timestamp>)")
+	rootCmd.PersistentFlags().BoolVarP(&archiveOnSuccess, "archive", "a", false,
+		"After successful os/db install, run scoped collect into --output (default true for os/db; --archive=false to disable)")
+
 	// 添加子命令
 	rootCmd.AddCommand(osCmd)
 	rootCmd.AddCommand(dbCmd)
@@ -114,6 +127,8 @@ func init() {
 	rootCmd.AddCommand(ycmCmd)
 	rootCmd.AddCommand(ympCmd)
 	rootCmd.AddCommand(NewCleanCommand())
+	rootCmd.AddCommand(newCollectCommand())
+	rootCmd.AddCommand(stressosCmd)
 }
 
 func defaultLogDir() string {
@@ -190,6 +205,15 @@ type GlobalFlags struct {
 	LocalSoftwareDirs []string
 	RemoteSoftwareDir string
 	ListSteps         bool
+	Output            string // --output / -o
+	ArchiveOnSuccess  bool   // --archive / -a
+}
+
+// applyInstallArchiveDefault 在 os/db 子命令中，用户未显式传 -a/--archive 时默认开启安装后归档。
+func applyInstallArchiveDefault(cmd *cobra.Command) {
+	if !cmd.Flags().Changed("archive") {
+		archiveOnSuccess = true
+	}
 }
 
 func GetGlobalFlags() GlobalFlags {
@@ -219,6 +243,8 @@ func GetGlobalFlags() GlobalFlags {
 		LocalSoftwareDirs: localSoftwareDirs,
 		RemoteSoftwareDir: remoteSoftwareDir,
 		ListSteps:         listSteps,
+		Output:            outputDir,
+		ArchiveOnSuccess:  archiveOnSuccess,
 	}
 }
 

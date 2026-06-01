@@ -58,6 +58,7 @@ func StepC015SetCharacterSet() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-015: Set Character Set")
 			charset, err := canonicalYashanCharacterSet(ctx.GetParamString("db_character_set", "utf8"))
 			if err != nil {
 				return err

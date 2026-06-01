@@ -29,6 +29,7 @@ func StepC016DisableArchivelog() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-016: Configure Archive Log Mode")
 			if !ctx.GetParamBool("db_disable_archivelog", false) {
 				ctx.Logger.Info("Archive log: keeping yasboot default (ISARCHIVELOG unchanged; typically enabled)")
 				return nil

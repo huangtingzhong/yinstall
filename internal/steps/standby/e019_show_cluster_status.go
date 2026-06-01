@@ -50,6 +50,8 @@ func StepE019ShowClusterStatus() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			standbyLogPhase(ctx, "plan", "E-019: Show Cluster Status")
+			standbyLogPhase(ctx, "check-start", "yasboot cluster status -d")
 			primaryUser := GetPrimaryOSUser(ctx)
 
 			ctx.Logger.Info("Displaying cluster status on primary")
@@ -122,6 +124,7 @@ func StepE019ShowClusterStatus() *runner.Step {
 				return fmt.Errorf("failed to get cluster status: %s", errMsg)
 			}
 
+			standbyLogPhase(ctx, "check-done", fmt.Sprintf("cluster=%s", clusterName))
 			return nil
 		},
 

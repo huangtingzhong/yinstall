@@ -29,6 +29,7 @@ func StepC024SetEnvVars() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-024: Set Environment Variables")
 			for _, th := range ctx.HostsToRun() {
 				hctx := ctx.ForHost(th)
 				user := hctx.GetParamString("os_user", "yashan")

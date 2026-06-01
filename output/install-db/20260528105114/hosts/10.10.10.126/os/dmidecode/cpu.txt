@@ -1,0 +1,33 @@
+# dmidecode 3.3
+Getting SMBIOS data from sysfs.
+SMBIOS 3.2.0 present.
+
+Handle 0x0006, DMI type 4, 48 bytes
+Processor Information
+	Socket Designation: CPU 0
+	Type: Central Processor
+	Family: ARM
+	Manufacturer: Apple
+	ID: 00 00 0F 61 00 00 00 00
+	Signature: Implementor 0x61, Variant 0x0, Architecture 15, Part 0x000, Revision 0
+	Version: Apple Part 000 r0p0
+	Voltage: 5.0 V 3.3 V 2.9 V
+	External Clock: Unknown
+	Max Speed: Unknown
+	Current Speed: Unknown
+	Status: Populated, Enabled
+	Upgrade: None
+	L1 Cache Handle: 0x0004
+	L2 Cache Handle: 0x0005
+	L3 Cache Handle: Not Provided
+	Serial Number: Not Specified
+	Asset Tag: Not Specified
+	Part Number: Not Specified
+	Core Count: 4
+	Core Enabled: 4
+	Thread Count: 4
+	Characteristics:
+		64-bit capable
+		Multi-Core
+		Execute Protection
+		Enhanced Virtualization

@@ -38,7 +38,9 @@ func StepB027EnableMultipathd() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "cmds=6 op=flush-multipath+enable-multipathd")
 			ctx.Logger.Info("Flushing stale multipath devices and bindings cache...")
+			osLogPhase(ctx, "op-start", "flush-stale-multipath")
 			ctx.Execute("systemctl stop multipathd 2>/dev/null", true)
 			// multipath -F 刷新未使用的 multipath 映射，dmsetup remove_all 清除所有残留 dm 设备
 			ctx.Execute("multipath -F 2>/dev/null", true)
@@ -50,6 +52,7 @@ func StepB027EnableMultipathd() *runner.Step {
 				ctx.Execute(fmt.Sprintf("rm -f %s", path), true)
 			}
 
+			osLogPhase(ctx, "op-done", "flush-stale-multipath")
 			ctx.Execute("systemctl enable multipathd", true)
 			_, err := ctx.ExecuteWithCheck("systemctl restart multipathd", true)
 			return err

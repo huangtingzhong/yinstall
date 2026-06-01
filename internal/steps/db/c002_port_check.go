@@ -11,6 +11,7 @@ import (
 // StepC002PortCheck 检查 yinstall --db-port（yasboot --begin-port）对应端口是否已被占用；占用则报错退出
 func StepC002PortCheck() *runner.Step {
 	checkOnHost := func(ctx *runner.StepContext, th runner.TargetHost, beginPort int, installPath, clusterName string) error {
+		dbLogPhase(ctx, "host-start", fmt.Sprintf("host=%s port=%d", th.Host, beginPort))
 		hctx := ctx.ForHost(th)
 
 		// 1. 检查端口是否已被占用
@@ -67,6 +68,7 @@ func StepC002PortCheck() *runner.Step {
 		} else {
 			hctx.Logger.Info("OK: No yasdb processes found under %s on %s", installPath, th.Host)
 		}
+		dbLogPhase(hctx, "host-done", fmt.Sprintf("host=%s port=%d", th.Host, beginPort))
 		return nil
 	}
 
@@ -91,6 +93,7 @@ func StepC002PortCheck() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-002: Check Begin Port Available")
 			beginPort := ctx.GetParamInt("db_begin_port", 1688)
 			installPath := ctx.GetParamString("db_install_path", "/data/yashan/yasdb_home")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")

@@ -103,6 +103,7 @@ func StepC020InstallSoftware() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-020: Install Software")
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			depsPackage := ctx.GetParamString("db_deps_package", "")
 			user := ctx.GetParamString("os_user", "yashan")
@@ -137,9 +138,13 @@ func StepC020InstallSoftware() *runner.Step {
 			isYACMode := len(ctx.TargetHosts) > 1
 			forceCleanup := isYACMode || ctx.IsForceStep()
 			if forceCleanup {
+				dbLogPhase(ctx, "cleanup-start", fmt.Sprintf("hosts=%d yac=%v force=%v", len(hostsToClean), isYACMode, ctx.IsForceStep()))
 				ctx.Logger.Info("Cleaning up legacy artifacts before installation (force=%v, yac=%v)", ctx.IsForceStep(), isYACMode)
-				if !commonos.IsSafeUnixRmRfPath(envFile) || !commonos.IsSafeUnixRmRfPath(homeLink) {
-					return fmt.Errorf("refusing to remove legacy paths: env=%q link=%q (not under allowed installation roots)", envFile, homeLink)
+				if err := commonos.ValidateDeletePath(envFile); err != nil {
+					return fmt.Errorf("refusing to remove legacy env file %q: %w", envFile, err)
+				}
+				if err := commonos.ValidateDeletePath(homeLink); err != nil {
+					return fmt.Errorf("refusing to remove legacy home link %q: %w", homeLink, err)
 				}
 				envQ := commonos.ShellSingleQuote(envFile)
 				linkQ := commonos.ShellSingleQuote(homeLink)
@@ -152,6 +157,7 @@ func StepC020InstallSoftware() *runner.Step {
 					hctx.Execute(fmt.Sprintf("rm -f %s", envQ), true)
 					hctx.Execute(fmt.Sprintf("rm -rf %s", linkQ), true)
 				}
+				dbLogPhase(ctx, "cleanup-done", fmt.Sprintf("hosts=%d", len(hostsToClean)))
 			}
 
 			// 判断是否需要 --force 参数
@@ -179,24 +185,12 @@ func StepC020InstallSoftware() *runner.Step {
 			cmd := fmt.Sprintf("cd %s && %s", stageDir, installCmd)
 			ctx.Logger.Info("Executing as %s: %s", user, installCmd)
 
-			result, err := commonos.ExecuteAsUser(ctx, user, cmd, true)
-			if err != nil {
+			dbLogPhase(ctx, "install-start", runner.TruncateForLog(installCmd, 120))
+			if _, err := commonos.ExecuteAsUserWithCheck(ctx, user, cmd, true); err != nil {
+				dbLogPhase(ctx, "install-fail", runner.TruncateForLog(err.Error(), 120))
 				return fmt.Errorf("failed to install software: %w", err)
 			}
-
-			if result != nil && result.GetExitCode() != 0 {
-				// 输出详细错误便于定位
-				errMsg := result.GetStderr()
-				if errMsg == "" {
-					errMsg = result.GetStdout()
-				}
-				ctx.Logger.Error("Install command failed:")
-				ctx.Logger.Error("  Exit code: %d", result.GetExitCode())
-				if errMsg != "" {
-					ctx.Logger.Error("  Output: %s", errMsg)
-				}
-				return fmt.Errorf("installation failed: %s", errMsg)
-			}
+			dbLogPhase(ctx, "install-done", "yasboot package install completed")
 
 			ctx.Logger.Info("Software installation completed successfully")
 			if len(ctx.TargetHosts) > 1 {

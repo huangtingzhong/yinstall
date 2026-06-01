@@ -29,6 +29,7 @@ func StepB018OpenFirewallPorts() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-018: Open Firewall Ports")
 			portsStr := ctx.GetParamString("os_firewall_ports", "")
 			if portsStr == "" {
 				return nil

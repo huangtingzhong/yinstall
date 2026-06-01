@@ -80,7 +80,7 @@ var (
 	yacAutoConfirm     bool   // 自动发现磁盘后跳过人工确认
 
 	// YAC 模式开关（targets>=2 时也会自动启用）
-	yacMode bool // 手动启用 YAC 模式（targets>=2 时自动启用）
+	yacMode bool // --yac：手动启用 YAC（targets>=2 时亦自动启用）
 )
 
 var osCmd = &cobra.Command{
@@ -100,78 +100,7 @@ var osCmd = &cobra.Command{
 }
 
 func init() {
-	// OS 用户/组参数
-	osCmd.Flags().StringVar(&osUser, "os-user", "yashan", "Product user name")
-	osCmd.Flags().IntVar(&osUserUID, "os-user-uid", 701, "User UID")
-	osCmd.Flags().StringVar(&osGroup, "os-group", "yashan", "Primary group name")
-	osCmd.Flags().IntVar(&osGroupGID, "os-group-gid", 701, "Primary group GID")
-	osCmd.Flags().StringVar(&osDBAGroup, "os-dba-group", "YASDBA", "DBA group name")
-	osCmd.Flags().IntVar(&osDBAGroupGID, "os-dba-group-gid", 702, "DBA group GID")
-	osCmd.Flags().StringVar(&osUserShell, "os-user-shell", "/bin/bash", "User shell")
-	osCmd.Flags().StringVar(&osUserPassword, "os-user-password", "aaBB11@@33$$", "User password (yashan default)")
-	osCmd.Flags().BoolVar(&osSudoersEnable, "os-sudoers-enable", true, "Enable sudoers configuration")
-
-	// 时区/时间参数
-	osCmd.Flags().StringVar(&osTimezone, "os-timezone", "Asia/Shanghai", "System timezone")
-	osCmd.Flags().StringVar(&osNTPServer, "os-ntp-server", "", "NTP server address (empty to skip NTP configuration)")
-
-	// 内核参数
-	osCmd.Flags().StringVar(&osSysctlFile, "os-sysctl-file", "/etc/sysctl.d/yashandb.conf", "Sysctl config file path")
-	osCmd.Flags().StringVar(&osLimitsFile, "os-limits-file", "/etc/security/limits.conf", "Limits config file path")
-	osCmd.Flags().BoolVar(&osKernelArgsEnable, "os-kernel-args-enable", true, "Enable kernel args configuration")
-	osCmd.Flags().StringVar(&osKernelArgs, "os-kernel-args", "transparent_hugepage=never elevator=deadline LANG=en_US.UTF-8", "Kernel boot arguments")
-
-	// Hugepages 参数
-	osCmd.Flags().BoolVar(&osHugepagesEnable, "os-hugepages-enable", false, "Enable huge pages configuration (memory size based on db-memory-percent)")
-
-	// 与 db install 同名：填 1-100 则按 MemTotal 估算 shmmax/shmall；standalone os 省略时使用 90%% RAM 作为 shmmax，且 hugepages 使用 db_memory_percent=90。
-	osCmd.Flags().IntVar(&osDbMemoryPercent, "db-memory-percent", -1, "Planned DB memory percent (1-100) for shared memory sizing; omit on standalone os to use 90%% physical RAM")
-
-	// YUM/repo 参数
-	osCmd.Flags().StringVar(&osYumMode, "os-yum-mode", "none", "YUM mode (online/local-iso/none)")
-	osCmd.Flags().StringVar(&osISODevice, "os-iso-device", "/dev/cdrom", "ISO device or file path")
-	osCmd.Flags().StringVar(&osISOMountpoint, "os-iso-mountpoint", "/media", "ISO mount point")
-	osCmd.Flags().StringVar(&osYumRepoFile, "os-yum-repo-file", "/etc/yum.repos.d/local.repo", "Local repo file path")
-	osCmd.Flags().StringVar(&osDepsPkgs, "os-deps-db-packages", "libzstd zlib lz4 openssl openssl-devel libaio", "DB dependency packages")
-	osCmd.Flags().StringVar(&osToolsPkgs, "os-deps-tools-packages", "zip bind-utils sysstat telnet iotop openssh-clients net-tools unzip libvncserver tigervnc-server device-mapper-multipath dstat lsof psmisc redhat-lsb-core parted xhost strace showmount expect tcl sysfsutils gdisk rsync lvm2 qperf chrony tmux bpftrace perf", "Common tools packages (empty to skip)")
-	osCmd.Flags().BoolVar(&osIgnoreInstallErrors, "os-ignore-install-errors", false, "Ignore package installation errors and continue (only show warnings)")
-	osCmd.Flags().StringVar(&osZstdSourceTarball, "os-zstd-source-tarball", "", "Explicit zstd source tarball path or filename (zstd-x.y.z.tar.gz); empty=auto-discover under local/remote software dirs (EL7 libzstd fallback)")
-
-	// 防火墙参数
-	osCmd.Flags().StringVar(&osFirewallMode, "os-firewall-mode", "disable", "Firewall mode (keep/disable/open-ports)")
-	osCmd.Flags().StringVar(&osFirewallPorts, "os-firewall-ports", "", "Ports to open (comma-separated)")
-
-	// YAC multipath 参数
-	osCmd.Flags().BoolVar(&yacMultipathEnable, "yac-multipath-enable", false, "Enable multipath configuration")
-	osCmd.Flags().StringVar(&yacMultipathPkgs, "yac-multipath-packages", "device-mapper-multipath", "Multipath packages")
-	osCmd.Flags().StringVar(&yacMultipathConf, "yac-multipath-conf", "/etc/multipath.conf", "Multipath config file")
-	osCmd.Flags().BoolVar(&yacMultipathAutoWWID, "yac-multipath-auto-wwid", false, "Auto collect WWID")
-	osCmd.Flags().StringVar(&yacUdevRulesFile, "yac-udev-rules-file", "/etc/udev/rules.d/99-yashandb-permissions.rules", "Udev rules file")
-	osCmd.Flags().StringVar(&yacUdevOwner, "yac-udev-owner", "yashan", "Disk owner")
-	osCmd.Flags().StringVar(&yacUdevGroup, "yac-udev-group", "YASDBA", "Disk group")
-	osCmd.Flags().StringVar(&yacUdevMode, "yac-udev-mode", "0666", "Disk mode")
-
-	// 本地磁盘参数
-	osCmd.Flags().StringSliceVar(&osLocalDisks, "os-local-disk", nil, "Local disks for data directory (e.g., /dev/sdb,/dev/sdc)")
-	osCmd.Flags().StringVar(&osLocalVG, "os-local-vg", "yasvg", "Volume group name")
-	osCmd.Flags().StringVar(&osLocalLV, "os-local-lv", "yaslv", "Logical volume name")
-	osCmd.Flags().StringVar(&osLocalMount, "os-local-mount", "/data", "Mount point for data directory")
-
-	// YAC diskgroup 参数
-	osCmd.Flags().StringVar(&yacSystemDG, "yac-systemdg", "", "System diskgroup (format: dgname:/dev/sda,/dev/sdb)")
-	osCmd.Flags().StringVar(&yacDataDG, "yac-datadg", "", "Data diskgroup (format: dgname:/dev/sdc,/dev/sdd)")
-	osCmd.Flags().StringVar(&yacArchDG, "yac-archdg", "", "Archive diskgroup (format: dgname:/dev/sde, optional, defaults to datadg)")
-	osCmd.Flags().BoolVar(&yacArchDGEnable, "yac-archdg-enable", false, "Enable independent ArchDG creation (separate archive diskgroup)")
-	osCmd.Flags().StringVar(&yacScanIPs, "yac-scan-ips", "", "SCAN IP addresses for local SCAN mode (comma-separated, empty=auto-allocate)")
-
-	// YAC 自动发现磁盘参数
-	osCmd.Flags().StringVar(&yacDiskPattern, "yac-disk-pattern", "", "Disk path pattern for filtering (e.g., '/dev/sd[c-z]', empty=all disks)")
-	osCmd.Flags().StringVar(&yacExcludeDisks, "yac-exclude-disks", "/dev/sda,/dev/sdb", "Disks to exclude from auto-discovery (comma-separated)")
-	osCmd.Flags().StringVar(&yacSystemdgSizeMax, "yac-systemdg-size-max", "10G", "Max size threshold for systemdg classification")
-	osCmd.Flags().BoolVar(&yacAutoConfirm, "yac-auto-confirm", false, "Skip user confirmation for auto-discovered disks")
-
-	// YAC 模式开关
-	osCmd.Flags().BoolVar(&yacMode, "yac-mode", false, "Enable YAC mode (auto-enabled when targets >= 2)")
+	registerAllOSFlags(osCmd, registerOSFlagsConfig{forDB: false})
 }
 
 // HostInfo 保存主机信息。
@@ -179,9 +108,14 @@ type HostInfo struct {
 	Host     string
 	Executor ssh.Executor
 	OSInfo   *runner.OSInfo
+	// 连通性步骤（B-001/S-01/R-001）PreCheck 写入 Results 的快照，供后续归档步骤使用。
+	Hostname    string
+	CPUCores    string
+	MemoryTotal string
 }
 
 func runOS(cmd *cobra.Command, args []string) error {
+	applyInstallArchiveDefault(cmd)
 	flags := GetGlobalFlags()
 	if flags.ListSteps {
 		PrintOSStepCatalog()
@@ -195,6 +129,8 @@ func runOS(cmd *cobra.Command, args []string) error {
 	} else {
 		flags.Local = false
 	}
+
+	ResolveOSUserPassword(cmd, flags, osUser, &osUserPassword)
 
 	// 本地模式下，除非用户显式指定，否则不注入默认的 os-user-password，
 	// 避免在 local 执行时出现不必要的“登录凭据”参数。
@@ -225,6 +161,7 @@ func runOS(cmd *cobra.Command, args []string) error {
 	}
 
 	params := buildOSParams(isYACMode, len(flags.Targets))
+	params["sudo"] = flags.UseSudo
 	params["ssh_port"] = flags.SSHPort
 	params["yasboot_ssh_port"] = flags.YasbootSSHPort
 
@@ -252,11 +189,9 @@ func runOS(cmd *cobra.Command, args []string) error {
 		logger.Info("  [%s] %s", s.ID, s.Name)
 	}
 
-	// 阶段 1：连通性检查
-	var hostInfos []*HostInfo
+	// 拆出连通步与其它步骤
 	var connectivityStep *runner.Step
 	var otherSteps []*runner.Step
-
 	for _, step := range steps {
 		if step.ID == "B-001" {
 			connectivityStep = step
@@ -264,191 +199,57 @@ func runOS(cmd *cobra.Command, args []string) error {
 			otherSteps = append(otherSteps, step)
 		}
 	}
-
-	// 维护 step index（用于终端输出）
-	stepIndex := 0
-	totalSteps := len(steps)
-
-	if connectivityStep != nil {
-		logger.Info("======== Phase 1: Connectivity check ========")
-		for _, target := range flags.Targets {
-			executor, err := createExecutor(target, flags, logger, "")
-			if err != nil {
-				logger.Error("Failed to connect to %s: %v", target, err)
-				return fmt.Errorf("connectivity check failed for %s: %w", target, err)
-			}
-
-			ctx := &runner.StepContext{
-				Executor:          &runnerExecAdapter{e: executor},
-				Logger:            logger,
-				Params:            params,
-				DryRun:            flags.DryRun,
-				Precheck:          flags.Precheck,
-				Results:           make(map[string]interface{}),
-				LocalSoftwareDirs: flags.LocalSoftwareDirs,
-				RemoteSoftwareDir: flags.RemoteSoftwareDir,
-				ForceAll:          flags.ForceAll,
-				ForceSteps:        flags.ForceSteps,
-				ForceDeleteUser:   flags.ForceDeleteUser,
-				StepIndex:         stepIndex,
-				TotalSteps:        totalSteps,
-			}
-
-			result := runner.RunStep(connectivityStep, ctx)
-			if !result.Success && !result.Skipped {
-				executor.Close()
-				if flags.Precheck {
-					// precheck 模式下继续收集其它主机的问题
-					continue
-				}
-				return fmt.Errorf("connectivity check failed for %s: %w", target, result.Error)
-			}
-
-			hostInfos = append(hostInfos, &HostInfo{
-				Host:     target,
-				Executor: executor,
-				OSInfo:   ctx.OSInfo,
-			})
-		}
-		stepIndex++
-	} else {
-		for _, target := range flags.Targets {
-			executor, err := createExecutor(target, flags, logger, "")
-			if err != nil {
-				return fmt.Errorf("failed to connect to %s: %w", target, err)
-			}
-			hostInfos = append(hostInfos, &HostInfo{Host: target, Executor: executor})
-		}
+	plannedProgress := runner.CountNonOptionalSteps(steps)
+	if flags.ArchiveOnSuccess && !flags.DryRun && !flags.Precheck {
+		plannedProgress += CountArchiveCollectSteps("os", isYACMode, flags)
 	}
+	progress := runner.NewStepProgress(plannedProgress)
+	totalSteps := progress.Total()
 
-	// 阶段 2：执行 steps
-	if len(otherSteps) > 0 {
-		logger.Info("======== Phase 2: Executing steps ========")
+	// Phase 1：连通性检查
+	connResult, err := RunConnectivityPhase(connectivityStep, flags.Targets, flags, params, logger, 0, totalSteps, progress)
+	if err != nil {
+		return err
 	}
+	hostInfos := connResult.HostInfos
 
-	// 构建 TargetHosts（供 Global 步骤使用）
-	targetHosts := make([]runner.TargetHost, 0, len(hostInfos))
-	for _, info := range hostInfos {
-		targetHosts = append(targetHosts, runner.TargetHost{
-			Host:     info.Host,
-			Executor: &runnerExecAdapter{e: info.Executor},
-		})
-	}
-
-	// 分离 Global 步骤和普通步骤，保持原始顺序
-	// Global 步骤在逐主机循环之前执行一次（带 TargetHosts）
-	var globalSteps []*runner.Step
-	var perHostSteps []*runner.Step
-	for _, step := range otherSteps {
-		if step.Global {
-			globalSteps = append(globalSteps, step)
-		} else {
-			perHostSteps = append(perHostSteps, step)
-		}
-	}
-
-	var lastErr error
-	precheckFailed := false
-
-	// 执行 Global 步骤（跨节点，仅执行一次）
-	if len(globalSteps) > 0 {
-		logger.Info("-------- Global steps (all nodes) --------")
-		globalResults := make(map[string]interface{})
-		for i, step := range globalSteps {
-			ctx := &runner.StepContext{
-				Executor:          &runnerExecAdapter{e: hostInfos[0].Executor},
-				Logger:            logger,
-				Params:            params,
-				DryRun:            flags.DryRun,
-				Precheck:          flags.Precheck,
-				Results:           globalResults,
-				OSInfo:            hostInfos[0].OSInfo,
-				LocalSoftwareDirs: flags.LocalSoftwareDirs,
-				RemoteSoftwareDir: flags.RemoteSoftwareDir,
-				ForceAll:          flags.ForceAll,
-				ForceSteps:        flags.ForceSteps,
-				ForceDeleteUser:   flags.ForceDeleteUser,
-				StepIndex:         stepIndex + i,
-				TotalSteps:        totalSteps,
-				TargetHosts:       targetHosts,
-			}
-
-			result := runner.RunStep(step, ctx)
-			if !result.Success && !result.Skipped {
-				logger.Error("Step %s failed: %v", step.ID, result.Error)
-				if flags.Precheck {
-					precheckFailed = true
-					continue
-				}
-				lastErr = result.Error
-				break
-			}
-		}
-		stepIndex += len(globalSteps)
-	}
-
-	// 执行逐主机步骤
-	if lastErr == nil {
+	defer func() {
 		for _, info := range hostInfos {
-			logger.Info("-------- Host: %s --------", info.Host)
-
-			hostResults := make(map[string]interface{})
-
-			for i, step := range perHostSteps {
-				ctx := &runner.StepContext{
-					Executor:          &runnerExecAdapter{e: info.Executor},
-					Logger:            logger,
-					Params:            params,
-					DryRun:            flags.DryRun,
-					Precheck:          flags.Precheck,
-					Results:           hostResults,
-					OSInfo:            info.OSInfo,
-					LocalSoftwareDirs: flags.LocalSoftwareDirs,
-					RemoteSoftwareDir: flags.RemoteSoftwareDir,
-					ForceAll:          flags.ForceAll,
-					ForceSteps:        flags.ForceSteps,
-					ForceDeleteUser:   flags.ForceDeleteUser,
-					StepIndex:         stepIndex + i,
-					TotalSteps:        totalSteps,
-				}
-
-				result := runner.RunStep(step, ctx)
-				if !result.Success && !result.Skipped {
-					logger.Error("Step %s failed: %v", step.ID, result.Error)
-					if flags.Precheck {
-						precheckFailed = true
-						continue
-					}
-					lastErr = result.Error
-					break
-				}
-			}
-
-			if lastErr != nil {
-				break
-			}
+			info.Executor.Close()
 		}
-	}
+	}()
 
-	for _, info := range hostInfos {
-		info.Executor.Close()
-	}
+	// Phase 2：Global + 逐主机步骤
+	phaseResult := RunPerHostStepsEx(otherSteps, hostInfos, params, flags, logger, 0, totalSteps, nil, nil, progress)
 
-	if lastErr != nil {
+	if phaseResult.LastError != nil {
 		logger.Error("OS preparation completed with errors")
 		logger.Info("Check debug logs at: %s", logger.DebugLogPath())
-		return lastErr
+		return phaseResult.LastError
 	}
-	if flags.Precheck && precheckFailed {
+	if flags.Precheck && (connResult.PrecheckFailed || phaseResult.PrecheckFailed) {
 		return fmt.Errorf("precheck failed")
 	}
+
+	installSnap := buildInstallParamsSnapshot("os", rid, params, collectStepIDs(steps))
+	runInstallArchiveCollect("os", isYACMode, progress, hostInfos, installSnap, nil, flags, logger)
 
 	logger.Info("OS preparation completed successfully")
 	return nil
 }
 
-func buildOSParams(isYACMode bool, targetCount int) map[string]interface{} {
+// buildOSYumISOParams 返回 YUM/ISO 相关 ctx.Params 条目（os / db / stressos 共用）。
+func buildOSYumISOParams() map[string]interface{} {
 	return map[string]interface{}{
+		"os_yum_mode":       osYumMode,
+		"os_iso_device":     osISODevice,
+		"os_iso_mountpoint": osISOMountpoint,
+		"os_yum_repo_file":  osYumRepoFile,
+	}
+}
+
+func buildOSParams(isYACMode bool, targetCount int) map[string]interface{} {
+	params := map[string]interface{}{
 		"os_user":                  osUser,
 		"os_user_uid":              osUserUID,
 		"os_group":                 osGroup,
@@ -465,10 +266,6 @@ func buildOSParams(isYACMode bool, targetCount int) map[string]interface{} {
 		"os_kernel_args_enable":    osKernelArgsEnable,
 		"os_kernel_args":           osKernelArgs,
 		"os_hugepages_enable":      osHugepagesEnable,
-		"os_yum_mode":              osYumMode,
-		"os_iso_device":            osISODevice,
-		"os_iso_mountpoint":        osISOMountpoint,
-		"os_yum_repo_file":         osYumRepoFile,
 		"os_deps_db_packages":      osDepsPkgs,
 		"os_deps_tools_packages":   osToolsPkgs,
 		"os_ignore_install_errors": osIgnoreInstallErrors,
@@ -499,6 +296,10 @@ func buildOSParams(isYACMode bool, targetCount int) map[string]interface{} {
 		"yac_systemdg_size_max":    yacSystemdgSizeMax,
 		"yac_auto_confirm":         yacAutoConfirm,
 	}
+	for k, v := range buildOSYumISOParams() {
+		params[k] = v
+	}
+	return params
 }
 
 const (
@@ -572,6 +373,6 @@ func (a *runnerExecAdapter) Close() error {
 	return a.e.Close()
 }
 
-func (a *runnerExecAdapter) Upload(localPath, remotePath string) error {
-	return a.e.Upload(localPath, remotePath)
+func (a *runnerExecAdapter) Upload(localPath, remotePath string, uploadCtx *ssh.UploadContext) error {
+	return a.e.Upload(localPath, remotePath, uploadCtx)
 }

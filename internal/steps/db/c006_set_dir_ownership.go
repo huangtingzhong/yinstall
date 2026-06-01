@@ -35,6 +35,7 @@ func StepC006SetDirOwnership() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-006: Set Directory Ownership")
 			for _, th := range ctx.HostsToRun() {
 				hctx := ctx.ForHost(th)
 				user := hctx.GetParamString("os_user", "yashan")

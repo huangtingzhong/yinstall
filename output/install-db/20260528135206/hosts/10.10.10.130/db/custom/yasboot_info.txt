@@ -1,0 +1,8 @@
+=== yasboot banner (version) ===
+yasdb bootstrap & operation, version: Release 23.4.10.100
+
+=== yasboot monit status ===
+(yasboot monit status not available)
+
+=== yasboot monit summary ===
+(yasboot monit summary not available)

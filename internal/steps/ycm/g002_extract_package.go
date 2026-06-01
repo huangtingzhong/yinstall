@@ -74,6 +74,7 @@ func StepG002ExtractPackage() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ycmLogPhase(ctx, "plan", "G-002: Extract YCM Package")
 			pkgPath := ctx.GetParamString("ycm_package", "")
 			installDir := ctx.GetParamString("ycm_install_dir", "/opt")
 			remoteDir := ctx.RemoteSoftwareDir
@@ -114,10 +115,13 @@ func StepG002ExtractPackage() *runner.Step {
 				return fmt.Errorf("unsupported package format: %s (expected .tar.gz, .tgz, .tar, or .zip)", fullPath)
 			}
 
+			ycmLogPhase(ctx, "extract-start", runner.TruncateForLog(fullPath, 80))
 			ctx.Logger.Info("Extracting: %s -> %s", fullPath, installDir)
 			if _, err := ctx.ExecuteWithCheck(cmd, true); err != nil {
+				ycmLogPhase(ctx, "extract-fail", runner.TruncateForLog(err.Error(), 80))
 				return fmt.Errorf("failed to extract YCM package: %w", err)
 			}
+			ycmLogPhase(ctx, "extract-done", installDir)
 
 			ctx.Logger.Info("YCM package extracted successfully")
 			return nil

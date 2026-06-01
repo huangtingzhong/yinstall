@@ -1,0 +1,8 @@
+{
+  "client_host": "10.10.10.126",
+  "duration_s": 60,
+  "exit_code": 0,
+  "port": 5201,
+  "server_host": "10.10.10.125",
+  "server_ip": "10.10.10.125"
+}

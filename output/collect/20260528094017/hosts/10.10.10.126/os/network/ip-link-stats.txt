@@ -1,0 +1,27 @@
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    RX:  bytes packets errors dropped  missed   mcast           
+           200       4      0       0       0       0 
+    TX:  bytes packets errors dropped carrier collsns           
+           200       4      0       0       0       0 
+2: ens160: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP mode DEFAULT group default qlen 1000
+    link/ether 00:0c:29:7f:d7:21 brd ff:ff:ff:ff:ff:ff
+    RX:   bytes packets errors dropped  missed   mcast           
+       32664503  292569      0       0       0       0 
+    TX:   bytes packets errors dropped carrier collsns           
+    12748250569 8428207      0       0       0       0 
+    altname enp2s0
+3: ens192: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP mode DEFAULT group default qlen 1000
+    link/ether 00:0c:29:7f:d7:2b brd ff:ff:ff:ff:ff:ff
+    RX:  bytes packets errors dropped  missed   mcast           
+          1364      14      0       0       0       0 
+    TX:  bytes packets errors dropped carrier collsns           
+             0       0      0       0       0       0 
+    altname enp10s0
+4: ens224: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP mode DEFAULT group default qlen 1000
+    link/ether 00:0c:29:7f:d7:35 brd ff:ff:ff:ff:ff:ff
+    RX:  bytes packets errors dropped  missed   mcast           
+      14546112   87995      0       0       0       0 
+    TX:  bytes packets errors dropped carrier collsns           
+     119215877  149706      0       0       0       0 
+    altname enp18s0

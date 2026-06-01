@@ -55,6 +55,7 @@ func StepC021DeployDatabase() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-021: Deploy Database")
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
 			adminPassword := ctx.GetParamString("db_admin_password", "")
@@ -65,8 +66,14 @@ func StepC021DeployDatabase() *runner.Step {
 			yasbootPath := path.Join(stageDir, "bin/yasboot")
 			configPath := path.Join(stageDir, clusterName+".toml")
 
+			// 检查配置文件属主和权限，仅在不符合要求时修复
+			if err := ensureConfigFileOwnership(ctx, configPath, user); err != nil {
+				return fmt.Errorf("failed to ensure config file ownership: %w", err)
+			}
+
 			// force 模式下的破坏性清理（写操作）只能放在 Action，不能放在 PreCheck。
 			if isForce {
+				dbLogPhase(ctx, "force-clean-start", fmt.Sprintf("cluster=%s yac=%v", clusterName, isYACMode))
 				dataPath := ctx.GetParamString("db_data_path", "/data/yashan/yasdb_data")
 				ctx.Logger.Info("Force mode: cleaning up existing cluster, disk headers and password files")
 
@@ -116,6 +123,7 @@ func StepC021DeployDatabase() *runner.Step {
 					}
 
 					if len(uniqueDisks) > 0 && len(ctx.TargetHosts) > 0 {
+						dbLogPhase(ctx, "wipe-disk-start", fmt.Sprintf("disks=%d", len(uniqueDisks)))
 						firstHost := ctx.TargetHosts[0]
 						firstHctx := ctx.ForHost(firstHost)
 						ctx.Logger.Info("Wiping YFS metadata on %d shared disks from node %s (shared disks only need one node)...", len(uniqueDisks), firstHost.Host)
@@ -133,6 +141,7 @@ func StepC021DeployDatabase() *runner.Step {
 								ctx.Logger.Warn("  [%s] Failed to wipe %s", firstHost.Host, disk)
 							}
 						}
+						dbLogPhase(ctx, "wipe-disk-done", fmt.Sprintf("disks=%d", len(uniqueDisks)))
 					}
 				}
 
@@ -154,12 +163,12 @@ func StepC021DeployDatabase() *runner.Step {
 									continue
 								}
 								pc := path.Clean(strings.ReplaceAll(pwdFile, `\`, `/`))
-								if pc != dataClean && !strings.HasPrefix(pc, dataClean+"/") {
+								if !commonos.DeletePathUnder(pc, dataClean) {
 									ctx.Logger.Warn("Skipping pwd path outside db_data_path on %s: %s", th.Host, pwdFile)
 									continue
 								}
-								if !commonos.IsSafeUnixRmRfPath(pc) {
-									ctx.Logger.Warn("Skipping pwd path failed safety check on %s: %s", th.Host, pwdFile)
+								if err := commonos.ValidateDeletePath(pc); err != nil {
+									ctx.Logger.Warn("Skipping pwd path failed delete validation on %s: %s (%v)", th.Host, pwdFile, err)
 									continue
 								}
 								ctx.Logger.Info("Removing password file on %s: %s", th.Host, pwdFile)
@@ -179,12 +188,12 @@ func StepC021DeployDatabase() *runner.Step {
 								continue
 							}
 							pc := path.Clean(strings.ReplaceAll(pwdFile, `\`, `/`))
-							if pc != dataClean && !strings.HasPrefix(pc, dataClean+"/") {
+							if !commonos.DeletePathUnder(pc, dataClean) {
 								ctx.Logger.Warn("Skipping pwd path outside db_data_path: %s", pwdFile)
 								continue
 							}
-							if !commonos.IsSafeUnixRmRfPath(pc) {
-								ctx.Logger.Warn("Skipping pwd path failed safety check: %s", pwdFile)
+							if err := commonos.ValidateDeletePath(pc); err != nil {
+								ctx.Logger.Warn("Skipping pwd path failed delete validation: %s (%v)", pwdFile, err)
 								continue
 							}
 							ctx.Logger.Info("Removing password file: %s", pwdFile)
@@ -194,43 +203,32 @@ func StepC021DeployDatabase() *runner.Step {
 				}
 
 				ctx.Logger.Info("Force mode cleanup completed")
+				dbLogPhase(ctx, "force-clean-done", clusterName)
 			}
 
 			ctx.Logger.Info("Deploying database cluster: %s", clusterName)
 
 			// 组装 deploy 命令（日志中掩码密码）
 			// YAC 模式需要 --yfs-force-create，以便在共享盘上强制创建 YFS
-			deployCmd := fmt.Sprintf("%s cluster deploy -t %s -p '***'", yasbootPath, configPath)
+			deployExtra := ctx.GetParamString(ParamYasbootDeployExtraArgs, "")
 			if isYACMode {
-				deployCmd += " --yfs-force-create"
 				ctx.Logger.Info("YAC mode detected: adding --yfs-force-create parameter")
 			}
+			deployCmd := BuildClusterDeployInner(yasbootPath, configPath, "***", isYACMode, deployExtra)
 			ctx.Logger.Info("Command (run as %s): %s", user, deployCmd)
 
-			inner := fmt.Sprintf("%s cluster deploy -t %s -p %s", yasbootPath, configPath, commonos.ShellSingleQuote(adminPassword))
-			cmd := fmt.Sprintf("cd %s && %s", stageDir, inner)
-			if isYACMode {
-				cmd += " --yfs-force-create"
+			inner := BuildClusterDeployInner(yasbootPath, configPath, adminPassword, isYACMode, deployExtra)
+			if strings.TrimSpace(deployExtra) != "" {
+				ctx.Logger.Info("yasboot cluster deploy: appending extra args: %s", strings.TrimSpace(deployExtra))
 			}
+			cmd := fmt.Sprintf("cd %s && %s", stageDir, inner)
 
-			result, err := commonos.ExecuteAsUser(ctx, user, cmd, true)
-			if err != nil {
+			dbLogPhase(ctx, "deploy-start", fmt.Sprintf("cluster=%s yac=%v", clusterName, isYACMode))
+			if _, err := commonos.ExecuteAsUserWithCheck(ctx, user, cmd, true); err != nil {
+				dbLogPhase(ctx, "deploy-fail", runner.TruncateForLog(err.Error(), 120))
 				return fmt.Errorf("failed to deploy database: %w", err)
 			}
-
-			if result != nil && result.GetExitCode() != 0 {
-				// 输出详细错误信息便于排障
-				errMsg := result.GetStderr()
-				if errMsg == "" {
-					errMsg = result.GetStdout()
-				}
-				ctx.Logger.Error("Deploy command failed:")
-				ctx.Logger.Error("  Exit code: %d", result.GetExitCode())
-				if errMsg != "" {
-					ctx.Logger.Error("  Output: %s", errMsg)
-				}
-				return fmt.Errorf("deployment failed: %s", errMsg)
-			}
+			dbLogPhase(ctx, "deploy-done", clusterName)
 
 			ctx.Logger.Info("Database deployment completed")
 			return nil
@@ -272,4 +270,65 @@ func StepC021DeployDatabase() *runner.Step {
 			return nil
 		},
 	}
+}
+
+// ensureConfigFileOwnership 检查配置文件的属主和权限，仅在不符合要求时修复。
+// 属主不是 targetUser 则 chown；文件不可读则 chmod。
+func ensureConfigFileOwnership(ctx *runner.StepContext, filePath, targetUser string) error {
+	// 查询文件属主和权限
+	statFmt := `%U %a`
+	statCmd := fmt.Sprintf("stat -c '%s' %s 2>/dev/null", statFmt, commonos.ShellSingleQuote(filePath))
+	result, err := ctx.Execute(statCmd, false)
+	if err != nil || result == nil || result.GetExitCode() != 0 {
+		return fmt.Errorf("cannot stat %s: %v", filePath, err)
+	}
+
+	fields := strings.Fields(strings.TrimSpace(result.GetStdout()))
+	if len(fields) < 2 {
+		return fmt.Errorf("unexpected stat output for %s: %s", filePath, result.GetStdout())
+	}
+
+	owner := fields[0]
+	perm := fields[1]
+
+	needFix := false
+
+	// 检查属主
+	if owner != targetUser {
+		ctx.Logger.Info("Config file %s owner is %s, expected %s — fixing with chown", filePath, owner, targetUser)
+		chownCmd := fmt.Sprintf("chown %s:%s %s", targetUser, targetUser, commonos.ShellSingleQuote(filePath))
+		if r, err := ctx.Execute(chownCmd, true); err != nil || (r != nil && r.GetExitCode() != 0) {
+			return fmt.Errorf("chown %s failed: %v", filePath, err)
+		}
+		needFix = true
+	} else {
+		ctx.Logger.Info("Config file %s owner OK (%s)", filePath, owner)
+	}
+
+	// 检查权限：至少需要属主可读（r—— = 4xx）
+	// perm 是八进制字符串如 "0644" 或 "644"
+	permInt := 0
+	for _, ch := range perm {
+		if ch >= '0' && ch <= '7' {
+			permInt = permInt*8 + int(ch-'0')
+		}
+	}
+	// 取最后3位八进制（owner bits）
+	ownerBits := (permInt >> 6) & 7
+	if ownerBits&4 == 0 {
+		ctx.Logger.Info("Config file %s permission %s lacks owner read — fixing with chmod", filePath, perm)
+		chmodCmd := fmt.Sprintf("chmod 644 %s", commonos.ShellSingleQuote(filePath))
+		if r, err := ctx.Execute(chmodCmd, true); err != nil || (r != nil && r.GetExitCode() != 0) {
+			return fmt.Errorf("chmod %s failed: %v", filePath, err)
+		}
+		needFix = true
+	} else {
+		ctx.Logger.Info("Config file %s permission OK (%s)", filePath, perm)
+	}
+
+	if needFix {
+		ctx.Logger.Info("Config file %s ownership/permissions fixed", filePath)
+	}
+
+	return nil
 }

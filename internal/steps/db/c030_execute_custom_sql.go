@@ -30,6 +30,7 @@ func StepC030ExecuteCustomSQL() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "op=yasql-script-file")
 			sqlScript := ctx.GetParamString("db_custom_sql_script", "")
 			installPath := ctx.GetParamString("db_install_path", "/data/yashan/yasdb_home")
 			sysPassword := ctx.GetParamString("db_admin_password", "")
@@ -56,6 +57,7 @@ func StepC030ExecuteCustomSQL() *runner.Step {
 			cmd := fmt.Sprintf("%s %s -f %s", yasqlPath, connectStr, remotePath)
 
 			ctx.Logger.Info("Running yasql command...")
+			dbLogPhase(ctx, "query-start", fmt.Sprintf("label=custom-script path=%s", remotePath))
 			result, err := ctx.Execute(cmd, false)
 			if err != nil {
 				return fmt.Errorf("failed to execute yasql: %w", err)
@@ -68,12 +70,14 @@ func StepC030ExecuteCustomSQL() *runner.Step {
 				Success:  result.GetExitCode() == 0,
 			}
 			if err := commonsql.ValidateYasqlResultSuccess(yr); err != nil {
+				dbLogPhase(ctx, "query-fail", fmt.Sprintf("label=custom-script exit=%d", result.GetExitCode()))
 				ctx.Logger.Error("SQL script execution failed: %v", err)
 				ctx.Logger.Error("STDOUT: %s", result.GetStdout())
 				ctx.Logger.Error("STDERR: %s", result.GetStderr())
 				return fmt.Errorf("SQL script execution failed: %w", err)
 			}
 
+			dbLogPhase(ctx, "query-done", "label=custom-script exit=0")
 			ctx.Logger.Info("Custom SQL script executed successfully")
 			ctx.Logger.Info("Output: %s", result.GetStdout())
 			return nil

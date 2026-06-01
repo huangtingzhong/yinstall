@@ -23,6 +23,7 @@ func StepH004WriteLimits() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ympLogPhase(ctx, "plan", "H-004: Write YMP User Limits")
 			user := ctx.GetParamString("ymp_user", "ymp")
 			limitsFile := ctx.GetParamString("ymp_limits_file", "/etc/security/limits.conf")
 			// 默认值与 YashanDB 官方准备建议一致：

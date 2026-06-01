@@ -26,6 +26,7 @@ func StepB003CreateUser() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-003: Create User")
 			user := ctx.GetParamString("os_user", "yashan")
 			uid := ctx.GetParamInt("os_user_uid", 701)
 			group := ctx.GetParamString("os_group", "yashan")

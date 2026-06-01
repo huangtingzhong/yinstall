@@ -1,0 +1,12 @@
+=== YASDB_HOME ===
+(not set)
+
+=== YASDB_DATA ===
+(not set)
+
+=== PATH contains yasdb ===
+/home/yashan/.local/bin
+/home/yashan/bin
+
+=== yasdb binary ===
+(yasdb not in PATH)

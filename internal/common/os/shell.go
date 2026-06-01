@@ -26,8 +26,8 @@ func YasqlQuotePassword(s string) string {
 	return `'"` + s + `"'`
 }
 
-// ShellEscapeForSuC 转义字符串使其可安全嵌入 su - user -c '...' 的双层单引号中。
-// 最外层 su -c 已有一对单引号，内层参数再需要单引号时使用此函数。
+// ShellEscapeForSuC 转义字符串使其可安全嵌入 su - user -c '...' 的单层 su 引号内（内层不再经 bash -lc 整段 ShellSingleQuote）。
+// 若整条命令会先由 ExecuteAsUser → sudo bash -lc ShellSingleQuote(cmd) 包裹，内嵌 -p 等参数应使用 ShellSingleQuote，勿与本函数叠加。
 // 结果形如 '\”value'\” ，可直接拼入外层 su -c '...' 命令的 -p 参数等。
 func ShellEscapeForSuC(s string) string {
 	return "'\\''" + strings.ReplaceAll(s, "'", "'\\''") + "'\\''"

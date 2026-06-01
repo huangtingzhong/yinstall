@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	commonos "github.com/yinstall/internal/common/os"
-	commonsql "github.com/yinstall/internal/common/sql"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -37,11 +36,13 @@ func StepC025ConfigureTPCC() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
+			dbLogPhase(ctx, "plan", fmt.Sprintf("sqls=21 cluster=%s op=tpcc-spfile-batch", clusterName))
 			firstHost := ctx.HostsToRun()[0]
 			hctx := ctx.ForHost(firstHost)
 
 			user := hctx.GetParamString("os_user", "yashan")
-			clusterName := hctx.GetParamString("db_cluster_name", "yashandb")
+			clusterName = hctx.GetParamString("db_cluster_name", "yashandb")
 
 			envFile := ""
 			if envFileVal, ok := ctx.Results["env_file"]; ok {
@@ -87,7 +88,7 @@ func StepC025ConfigureTPCC() *runner.Step {
 			allSQL := strings.Join(tpccSQLs, ";\n") + ";"
 
 			hctx.Logger.Info("Executing %d TPCC optimization SQLs via yasql (/ as sysdba)...", len(tpccSQLs))
-			_, err := commonsql.ExecuteSQLAsSysdbaCtx(hctx, user, envFile, clusterName, allSQL, true)
+			_, err := dbRunSQLPhase(hctx, user, envFile, clusterName, "tpcc-spfile-batch", allSQL, true)
 			if err != nil {
 				return fmt.Errorf("TPCC SQL execution failed: %w", err)
 			}

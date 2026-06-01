@@ -1,6 +1,6 @@
 // ycm.go - YCM 安装命令实现
 // 本文件实现 yinstall ycm 命令，用于安装 YCM（YashanDB Cloud Manager）
-// 流程：OS 基线配置（可选）→ YCM 安装步骤（G-001 ~ G-010）
+// 流程：OS 基线配置（可选）→ YCM 安装步骤（G-001 ~ G-011）
 
 package cli
 
@@ -51,6 +51,10 @@ var (
 
 	// YCM 依赖包
 	ycmDepsPackages string
+
+	// YCM 自启动
+	ycmAutostart   bool
+	ycmServiceName string
 )
 
 var ycmCmd = &cobra.Command{
@@ -70,7 +74,8 @@ var ycmCmd = &cobra.Command{
   - Configure ports
   - Check port availability
   - Deploy YCM (sqlite3 or yashandb backend)
-  - Verify processes, ports and web access`,
+  - Verify processes, ports and web access
+  - Configure YCM systemd autostart (unit name derived from port/install dir)`,
 	RunE:         runYCM,
 	SilenceUsage: true,
 }
@@ -110,6 +115,10 @@ func init() {
 
 	// YCM 依赖包
 	ycmCmd.Flags().StringVar(&ycmDepsPackages, "ycm-deps-packages", "libnsl", "YCM dependency packages")
+
+	// YCM 自启动（installer.md §7.2）
+	ycmCmd.Flags().BoolVar(&ycmAutostart, "ycm-autostart", true, "Create and enable systemd autostart unit after deploy")
+	ycmCmd.Flags().StringVar(&ycmServiceName, "ycm-service-name", "", "systemd unit name override (default: ycm, or ycm_<port>, or ycm_<install-dir-slug>)")
 }
 
 // runYCM 执行 YCM 安装流程
@@ -137,6 +146,8 @@ func runYCM(cmd *cobra.Command, args []string) error {
 	} else {
 		flags.Local = false
 	}
+
+	ResolveOSUserPassword(cmd, flags, ycmOSUser, &ycmOSUserPassword)
 
 	// 本地模式下，除非用户显式指定，否则不注入默认的 os-user-password，
 	// 避免在 local 执行时出现不必要的“登录凭据”参数。
@@ -470,6 +481,10 @@ func buildYCMParams(flags GlobalFlags) map[string]interface{} {
 
 	// YCM 依赖包参数
 	params["ycm_deps_packages"] = ycmDepsPackages
+
+	params["ycm_autostart"] = ycmAutostart
+	params["ycm_service_name"] = ycmServiceName
+	params["sudo"] = flags.UseSudo
 
 	return params
 }

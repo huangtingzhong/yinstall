@@ -34,6 +34,7 @@ func StepB011ConfigureHugepages() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-011: Configure Huge Pages")
 			// 数据库内存占用百分比（来自参数 / yasboot 规划）
 			dbMemoryPercent := ctx.GetParamInt("db_memory_percent", 50)
 

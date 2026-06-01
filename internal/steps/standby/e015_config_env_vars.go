@@ -33,6 +33,7 @@ func StepE015ConfigEnvVars() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			standbyLogPhase(ctx, "plan", "E-015: Configure Standby Env Vars")
 			user := ctx.GetParamString("os_user", "yashan")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
 			dataPath := ctx.GetParamString("db_data_path", "/data/yashan/yasdb_data")

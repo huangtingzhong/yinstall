@@ -40,6 +40,7 @@ func StepH008ExtractYMP() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ympLogPhase(ctx, "plan", "H-008: Extract YMP Package")
 			ympPackage := ctx.GetParamString("ymp_package", "")
 			installDir := ctx.GetParamString("ymp_install_dir", "/opt/ymp")
 			ympUser := ctx.GetParamString("ymp_user", "ymp")
@@ -63,11 +64,14 @@ func StepH008ExtractYMP() *runner.Step {
 			ctx.Execute(fmt.Sprintf("chown %s:%s %s", ympUser, ympUser, fullPath), true)
 
 			// 解压
+			ympLogPhase(ctx, "extract-start", runner.TruncateForLog(fullPath, 80))
 			ctx.Logger.Info("Extracting: %s -> %s", fullPath, installDir)
 			cmd := fmt.Sprintf("unzip -o %s -d %s", fullPath, installDir)
 			if _, err := ctx.ExecuteWithCheck(cmd, true); err != nil {
+				ympLogPhase(ctx, "extract-fail", runner.TruncateForLog(err.Error(), 80))
 				return fmt.Errorf("failed to extract YMP package: %w", err)
 			}
+			ympLogPhase(ctx, "extract-done", installDir)
 
 			// 设置目录属主
 			ctx.Execute(fmt.Sprintf("chown -R %s:%s %s", ympUser, ympUser, installDir), true)

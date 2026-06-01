@@ -45,6 +45,7 @@ func StepB010WriteLimitsConfig() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-010: Write Limits Config")
 			user := ctx.GetParamString("os_user", "yashan")
 			limitsFile := ctx.GetParamString("os_limits_file", "/etc/security/limits.conf")
 
@@ -75,9 +76,15 @@ func StepB010WriteLimitsConfig() *runner.Step {
 %s hard memlock -1
 `, user, user, user, user, user, user, user, user, user, user, user, user)
 
+			osLogPhase(ctx, "op-start", fmt.Sprintf("file=%s user=%s", limitsFile, user))
 			cmd := fmt.Sprintf("cat >> %s << 'EOF'%sEOF", limitsFile, config)
 			_, err := ctx.ExecuteWithCheck(cmd, true)
-			return err
+			if err != nil {
+				osLogPhase(ctx, "op-fail", runner.TruncateForLog(err.Error(), 80))
+				return err
+			}
+			osLogPhase(ctx, "op-done", limitsFile)
+			return nil
 		},
 
 		PostCheck: func(ctx *runner.StepContext) error {

@@ -1,0 +1,185 @@
+version: "1"
+
+# Built-in collect rules for yinstall collect (R-035).
+# These rules are embedded in the binary and executed after the hardcoded steps (R-002~R-034).
+#
+# Rule fields:
+#   id          - Unique rule identifier; used to merge/override with --rules-file
+#   desc        - Human-readable description (ASCII only)
+#   category    - db  -> output written to <host>/db/<dest>
+#                 os  -> output written to <host>/os/<dest>
+#   type        - sql   : execute as yashan OS user via yasql / as sysdba (skipped if no DB env)
+#                 shell : execute as SSH login user
+#   dest        - Output file path, relative to category dir (supports subdirectories)
+#   timeout     - Seconds; 0 = use global --collect-sql-timeout / --collect-cmd-timeout
+#   enabled     - false by default for heavy/optional items; set true in --rules-file to activate
+#   source      - inline : SQL/shell content written directly in this file
+#                 file   : path to an embedded script under scripts/ directory
+#   path        - Script path (for source: file), relative to scripts/
+#   content     - Inline SQL or shell command (for source: inline)
+#   as_db_user  - Shell only: source DB env file and execute as yashan OS user
+#   sudo        - Shell only: prepend sudo (requires --sudo flag to be effective)
+#
+# To extend without recompiling:
+#   1. Create a YAML file with additional or overriding rules
+#   2. Run: yinstall collect -t <host> --rules-file /path/to/extra_rules.yaml
+#   Rules with the same id override the built-in; new ids are appended.
+
+rules:
+  # ============================================================
+  # DB SQL rules (executed as yashan user via yasql / as sysdba)
+  # ============================================================
+
+  - id: v_wait_events
+    desc: "Top system-level wait events by time waited"
+    category: db
+    type: sql
+    dest: sql/v_wait_events.txt
+    timeout: 30
+    enabled: true
+    source: file
+    path: sql/v_wait_events.sql
+
+  - id: v_active_sessions
+    desc: "Currently active non-idle sessions"
+    category: db
+    type: sql
+    dest: sql/v_active_sessions.txt
+    timeout: 30
+    enabled: true
+    source: file
+    path: sql/v_active_sessions.sql
+
+  - id: v_tablespace_usage
+    desc: "Tablespace usage with free space percentage"
+    category: db
+    type: sql
+    dest: sql/v_tablespace_usage.txt
+    timeout: 30
+    enabled: true
+    source: file
+    path: sql/v_tablespace_usage.sql
+
+  - id: v_redo_switch_freq
+    desc: "Redo log file status and switch info from V$LOG"
+    category: db
+    type: sql
+    dest: sql/v_redo_switch_freq.txt
+    timeout: 30
+    enabled: true
+    source: file
+    path: sql/v_redo_switch_freq.sql
+
+  - id: v_lock_info
+    desc: "Current lock information (blocking and waiting sessions)"
+    category: db
+    type: sql
+    dest: sql/v_lock_info.txt
+    timeout: 30
+    enabled: true
+    source: file
+    path: sql/v_lock_info.sql
+
+  # Disabled by default: V$OBJECTS may not exist in all YashanDB versions; adapt the SQL as needed
+  - id: v_invalid_objects
+    desc: "Invalid database objects - requires V$OBJECTS (adapt SQL for your version)"
+    category: db
+    type: sql
+    dest: sql/v_invalid_objects.txt
+    timeout: 30
+    enabled: false
+    source: file
+    path: sql/v_invalid_objects.sql
+
+  # Disabled by default (potentially slow on large databases)
+  - id: v_top_sqls
+    desc: "Top SQL statements by total elapsed time"
+    category: db
+    type: sql
+    dest: sql/v_top_sqls.txt
+    timeout: 60
+    enabled: false
+    source: file
+    path: sql/v_top_sqls.sql
+
+  # Disabled by default: V$OBJECTS may not exist in all YashanDB versions; adapt SQL as needed
+  - id: v_user_objects
+    desc: "Object count by owner and type - requires V$OBJECTS (adapt SQL for your version)"
+    category: db
+    type: sql
+    dest: sql/v_user_objects.txt
+    timeout: 60
+    enabled: false
+    source: file
+    path: sql/v_user_objects.sql
+
+  # ============================================================
+  # DB Shell rules (executed as yashan OS user with env sourced)
+  # ============================================================
+
+  - id: yasboot_info
+    desc: "yasboot version, cluster list and monit status"
+    category: db
+    type: shell
+    dest: custom/yasboot_info.txt
+    timeout: 30
+    enabled: true
+    as_db_user: true
+    source: file
+    path: shell/db/yasboot_info.sh
+
+  - id: yasdb_env
+    desc: "YashanDB environment variables"
+    category: db
+    type: shell
+    dest: custom/yasdb_env.txt
+    timeout: 15
+    enabled: true
+    as_db_user: true
+    source: file
+    path: shell/db/yasdb_env.sh
+
+  # ============================================================
+  # OS Shell rules (executed as SSH login user)
+  # ============================================================
+
+  - id: hugepages
+    desc: "HugePages and transparent hugepages configuration"
+    category: os
+    type: shell
+    dest: kernel/hugepages.txt
+    timeout: 15
+    enabled: true
+    source: file
+    path: shell/os/hugepages.sh
+
+  - id: swap_usage
+    desc: "Swap space usage and swappiness setting"
+    category: os
+    type: shell
+    dest: kernel/swap_usage.txt
+    timeout: 15
+    enabled: true
+    source: file
+    path: shell/os/swap_usage.sh
+
+  - id: numa_info
+    desc: "NUMA topology and memory distribution per node"
+    category: os
+    type: shell
+    dest: kernel/numa_info.txt
+    timeout: 15
+    enabled: true
+    source: file
+    path: shell/os/numa_info.sh
+
+  # Disabled by default (may take time on busy systems)
+  - id: io_stats
+    desc: "Disk I/O statistics snapshot (iostat)"
+    category: os
+    type: shell
+    dest: perf/io_stats.txt
+    timeout: 30
+    enabled: false
+    source: file
+    path: shell/os/io_stats.sh

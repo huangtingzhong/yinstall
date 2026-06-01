@@ -26,6 +26,7 @@ func StepB005ConfigureSudoers() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-005: Configure Sudoers")
 			user := ctx.GetParamString("os_user", "yashan")
 
 			// 备份 sudoers

@@ -151,6 +151,7 @@ func StepB022ValidateYACDiskgroups() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-022: Validate YAC Diskgroups")
 			systemdgStr := ctx.GetParamString("yac_systemdg", "")
 			datadgStr := ctx.GetParamString("yac_datadg", "")
 			archdgStr := ctx.GetParamString("yac_archdg", "")

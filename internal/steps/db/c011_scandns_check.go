@@ -142,6 +142,7 @@ func StepC011ScanDNS() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-011: Validate SCAN DNS")
 			// PreCheck 已校验 DNS/网段/ping；apply 时 Action 可为空，仅保留日志语义
 			if ctx.Precheck {
 				return nil

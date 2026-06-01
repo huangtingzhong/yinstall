@@ -42,6 +42,7 @@ func StepH005InstallDeps() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ympLogPhase(ctx, "plan", "H-005: Install YMP Dependencies")
 			// local-iso 模式：确保 ISO 已挂载、repo 文件就绪
 			if err := commonos.EnsureLocalISORepo(ctx); err != nil {
 				return fmt.Errorf("failed to prepare local ISO repo: %w", err)

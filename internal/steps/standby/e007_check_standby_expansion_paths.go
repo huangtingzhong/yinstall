@@ -83,6 +83,8 @@ func StepE007CheckStandbyExpansionPaths() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			standbyLogPhase(ctx, "plan", "E-007: Check Standby Expansion Paths")
+			standbyLogPhase(ctx, "check-start", "install/data/log paths per host")
 			install := strings.TrimSpace(ctx.GetParamString("db_install_path", ""))
 			data := strings.TrimSpace(ctx.GetParamString("db_data_path", ""))
 			logp := strings.TrimSpace(ctx.GetParamString("db_log_path", ""))
@@ -157,6 +159,7 @@ func StepE007CheckStandbyExpansionPaths() *runner.Step {
 					hctx.Logger.Info("OK: Path %s (%s) exists, is empty, and ownership set on %s", canonical, it.label, th.Host)
 				}
 			}
+			standbyLogPhase(ctx, "check-done", fmt.Sprintf("paths=%d hosts=%d", len(items), len(ctx.HostsToRun())))
 			return nil
 		},
 	}

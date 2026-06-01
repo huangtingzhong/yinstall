@@ -1,0 +1,14 @@
+{
+  "archive_format": "tar.gz",
+  "archive_path": "/Users/yihan/tool/develop/yasinstaller/output/install-db/20260528225103.tar.gz",
+  "collected_at": "2026-05-28T14:51:14Z",
+  "error_count": 0,
+  "errors": null,
+  "hosts": [
+    "10.10.10.125"
+  ],
+  "output_dir": "/Users/yihan/tool/develop/yasinstaller/output/install-db/20260528225103",
+  "version": "1",
+  "warning_count": 0,
+  "warnings": null
+}

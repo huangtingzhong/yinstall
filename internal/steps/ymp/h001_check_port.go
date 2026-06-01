@@ -48,6 +48,7 @@ func StepH001CheckPort() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ympLogPhase(ctx, "plan", "H-001: Check YMP Port Availability")
 			port := ctx.GetParamInt("ymp_port", 8090)
 
 			// 根据 YMP 端口计算所有相关端口

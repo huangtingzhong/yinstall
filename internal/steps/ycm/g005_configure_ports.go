@@ -28,6 +28,7 @@ func StepG005ConfigurePorts() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ycmLogPhase(ctx, "plan", "G-005: Configure YCM Ports")
 			deployFile := ctx.GetParamString("ycm_deploy_file", "/opt/ycm/etc/deploy.yml")
 
 			// 端口参数

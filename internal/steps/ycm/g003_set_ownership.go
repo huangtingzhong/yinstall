@@ -29,6 +29,7 @@ func StepG003SetOwnership() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ycmLogPhase(ctx, "plan", "G-003: Set YCM Directory Ownership")
 			user := ctx.GetParamString("os_user", "yashan")
 			group := ctx.GetParamString("os_group", "yashan")
 			installDir := ctx.GetParamString("ycm_install_dir", "/opt")

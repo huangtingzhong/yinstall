@@ -40,6 +40,7 @@ func StepB006ConfigureUmask() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-006: Configure Umask")
 			osUser := ctx.GetParamString("os_user", "yashan")
 			umaskValue := ctx.GetParamString("os_umask", "022")
 			homeDir := fmt.Sprintf("/home/%s", osUser)

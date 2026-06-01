@@ -29,11 +29,15 @@ func StepC012DiskCheck() *runner.Step {
 			if systemdg == "" || datadg == "" {
 				return fmt.Errorf("yac_systemdg and yac_datadg are required")
 			}
+			if err := validateYACDiskGroupsExcludeDisks(ctx); err != nil {
+				return err
+			}
 
 			return nil
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-012: Validate Shared Disks")
 			systemdgStr := ctx.GetParamString("yac_systemdg", "")
 			datadgStr := ctx.GetParamString("yac_datadg", "")
 			archdgStr := ctx.GetParamString("yac_archdg", "")
@@ -71,8 +75,13 @@ func StepC012DiskCheck() *runner.Step {
 				}
 			}
 
+			skipPathRewrite := !needMultipath && AllDiskPathsUnderYfs(allDisks)
+			if skipPathRewrite {
+				ctx.Logger.Info("All disks under /dev/yfs/ and multipath not required; skipping mapper/yfs path rewrite")
+			}
+
 			// 第二步：在所有节点上检查多路径设备映射
-			if needMultipath {
+			if needMultipath && !skipPathRewrite {
 				ctx.Logger.Info("Checking multipath device mappings on all YAC nodes...")
 
 				for _, th := range ctx.HostsToRun() {
@@ -241,59 +250,61 @@ func StepC012DiskCheck() *runner.Step {
 
 			// 第五步：/dev/mapper/ → /dev/yfs/ 路径替换
 			// B-029 已根据 diskgroup 创建 /dev/yfs/sys{i}, data{i}, arch{i} 符号链接
-			ctx.Logger.Info("Checking /dev/yfs/ symlinks...")
+			if !skipPathRewrite {
+				ctx.Logger.Info("Checking /dev/yfs/ symlinks...")
 
-			firstHost := ctx.HostsToRun()[0]
-			hctx := ctx.ForHost(firstHost)
+				firstHost := ctx.HostsToRun()[0]
+				hctx := ctx.ForHost(firstHost)
 
-			updateDiskGroupToYfs := func(dgStr, prefix string) string {
-				if dgStr == "" {
-					return ""
-				}
-				parts := strings.SplitN(dgStr, ":", 2)
-				if len(parts) != 2 {
-					return dgStr
-				}
-				dgName := parts[0]
-				disks := strings.Split(parts[1], ",")
-				var updatedDisks []string
-				for i, disk := range disks {
-					disk = strings.TrimSpace(disk)
-					if disk == "" {
-						continue
+				updateDiskGroupToYfs := func(dgStr, prefix string) string {
+					if dgStr == "" {
+						return ""
 					}
-					alias := fmt.Sprintf("%s%d", prefix, i+1)
-					yfsPath := fmt.Sprintf("/dev/yfs/%s", alias)
-					checkResult, _ := hctx.Execute(fmt.Sprintf("test -L %s || test -b %s", yfsPath, yfsPath), false)
-					if checkResult != nil && checkResult.GetExitCode() == 0 {
-						updatedDisks = append(updatedDisks, yfsPath)
-						hctx.Logger.Info("  %s -> %s", disk, yfsPath)
-					} else {
-						hctx.Logger.Warn("  /dev/yfs/%s not found, keeping path %s", alias, disk)
-						updatedDisks = append(updatedDisks, disk)
+					parts := strings.SplitN(dgStr, ":", 2)
+					if len(parts) != 2 {
+						return dgStr
 					}
+					dgName := parts[0]
+					disks := strings.Split(parts[1], ",")
+					var updatedDisks []string
+					for i, disk := range disks {
+						disk = strings.TrimSpace(disk)
+						if disk == "" {
+							continue
+						}
+						alias := fmt.Sprintf("%s%d", prefix, i+1)
+						yfsPath := fmt.Sprintf("/dev/yfs/%s", alias)
+						checkResult, _ := hctx.Execute(fmt.Sprintf("test -L %s || test -b %s", yfsPath, yfsPath), false)
+						if checkResult != nil && checkResult.GetExitCode() == 0 {
+							updatedDisks = append(updatedDisks, yfsPath)
+							hctx.Logger.Info("  %s -> %s", disk, yfsPath)
+						} else {
+							hctx.Logger.Warn("  /dev/yfs/%s not found, keeping path %s", alias, disk)
+							updatedDisks = append(updatedDisks, disk)
+						}
+					}
+					return fmt.Sprintf("%s:%s", dgName, strings.Join(updatedDisks, ","))
 				}
-				return fmt.Sprintf("%s:%s", dgName, strings.Join(updatedDisks, ","))
-			}
 
-			updatedSystemdgYfs := updateDiskGroupToYfs(systemdgStr, "sys")
-			updatedDatadgYfs := updateDiskGroupToYfs(datadgStr, "data")
-			updatedArchdgYfs := updateDiskGroupToYfs(archdgStr, "arch")
+				updatedSystemdgYfs := updateDiskGroupToYfs(systemdgStr, "sys")
+				updatedDatadgYfs := updateDiskGroupToYfs(datadgStr, "data")
+				updatedArchdgYfs := updateDiskGroupToYfs(archdgStr, "arch")
 
-			if updatedSystemdgYfs != systemdgStr {
-				ctx.Params["yac_systemdg"] = updatedSystemdgYfs
-				ctx.Logger.Info("Updated yac_systemdg: %s -> %s", systemdgStr, updatedSystemdgYfs)
-				systemdgStr = updatedSystemdgYfs
-			}
-			if updatedDatadgYfs != datadgStr {
-				ctx.Params["yac_datadg"] = updatedDatadgYfs
-				ctx.Logger.Info("Updated yac_datadg: %s -> %s", datadgStr, updatedDatadgYfs)
-				datadgStr = updatedDatadgYfs
-			}
-			if updatedArchdgYfs != archdgStr {
-				ctx.Params["yac_archdg"] = updatedArchdgYfs
-				ctx.Logger.Info("Updated yac_archdg: %s -> %s", archdgStr, updatedArchdgYfs)
-				archdgStr = updatedArchdgYfs
+				if updatedSystemdgYfs != systemdgStr {
+					ctx.Params["yac_systemdg"] = updatedSystemdgYfs
+					ctx.Logger.Info("Updated yac_systemdg: %s -> %s", systemdgStr, updatedSystemdgYfs)
+					systemdgStr = updatedSystemdgYfs
+				}
+				if updatedDatadgYfs != datadgStr {
+					ctx.Params["yac_datadg"] = updatedDatadgYfs
+					ctx.Logger.Info("Updated yac_datadg: %s -> %s", datadgStr, updatedDatadgYfs)
+					datadgStr = updatedDatadgYfs
+				}
+				if updatedArchdgYfs != archdgStr {
+					ctx.Params["yac_archdg"] = updatedArchdgYfs
+					ctx.Logger.Info("Updated yac_archdg: %s -> %s", archdgStr, updatedArchdgYfs)
+					archdgStr = updatedArchdgYfs
+				}
 			}
 
 			allDisks = []string{}

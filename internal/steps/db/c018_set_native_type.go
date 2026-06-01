@@ -40,6 +40,7 @@ func StepC018SetNativeType() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-018: Set Native Type")
 			useNativeType := ctx.GetParamBool("db_use_native_type", false)
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
@@ -240,7 +241,7 @@ func writeRemoteTextViaUpload(ctx *runner.StepContext, dstPath, content string) 
 	}
 
 	remoteTmp := dstPath + ".yinstalltmp"
-	if err := ctx.Executor.Upload(tmpLocal, remoteTmp); err != nil {
+	if err := ctx.Executor.Upload(tmpLocal, remoteTmp, ctx.UploadContext()); err != nil {
 		return fmt.Errorf("upload temp cluster toml: %w", err)
 	}
 	q := strconv.Quote(dstPath)

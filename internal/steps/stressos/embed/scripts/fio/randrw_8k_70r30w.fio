@@ -1,0 +1,12 @@
+[global]
+ioengine=%%IOENGINE%%
+bs=%%BS%%
+rw=randrw
+rwmixread=%%RWMIXREAD%%
+direct=%%DIRECT%%
+iodepth=%%IODEPTH%%
+numjobs=%%NUMJOBS%%
+
+[randrw_mixed]
+filename=%%FILENAME%%
+size=%%SIZE%%

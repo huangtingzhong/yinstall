@@ -1,0 +1,43 @@
+
+EVENT                             WAIT_CLASS                  TOTAL_WAITS        TOTAL_TIMEOUTS           TIME_WAITED AVERAGE_WAIT 
+--------------------------------- ----------------- --------------------- --------------------- --------------------- ------------ 
+gc cr block 2 way                 Cluster                            4482                     0                  2558          .57
+gc current block 2 way            Cluster                            7240                     0                  2516          .35
+wait remote cmd                   Other                                75                     0                  2508        33.44
+gc lwlock X                       Cluster                             106                     0                  2486        23.45
+gc lwlock S                       Cluster                            4350                     0                  1772          .41
+remote dml start                  Other                                18                     0                   545        30.28
+gc cr block grant 2 way           Cluster                             474                     0                   518         1.09
+row xact wait                     Application                           1                     0                   396          396
+remote xact wait                  Cluster                               1                     0                   396          396
+db file scattered read            User I/O                           1368                     0                   333          .24
+gc upgrade block 2 way            Cluster                             306                     0                   333         1.09
+log file sync                     Commit                              128                     0                   196         1.53
+gc current grant 2 way            Cluster                             198                     0                   184          .93
+db file parallel write            System I/O                            7                     0                   174        24.86
+gc current grant                  Cluster                             260                     0                   144          .55
+log file parallel write           System I/O                          213                     0                   116          .54
+gc cr block grant                 Cluster                             620                     0                   113          .18
+gc mutex                          Cluster                             108                     0                    85          .79
+gc boc wait                       Cluster                             106                     0                    81          .76
+gc current block busy             Cluster                              26                     0                    53         2.04
+get remote xact status            Cluster                              86                     0                    40          .47
+wait remote result                Other                                36                     0                    40         1.11
+SQL*Net message from client       Idle                                241                     0                    17          .07
+log file switch completion        Configuration                         1                     0                     9            9
+deadlock detection wait           Other                              1361                     0                     7          .01
+get remote xact info              Cluster                               7                     0                     5          .71
+read by other session             User I/O                              2                     0                     4            2
+log file single write             System I/O                            2                     0                     1           .5
+wait distributed result           Distributed                           1                     0                     1            1
+buffer busy wait                  Concurrency                           3                     0                     0            0
+SQL*Net message to client         Network                             199                     0                     0            0
+alloc gc pool wait                Cluster                             378                     0                     0            0
+gc send block                     Cluster                             123                     0                     0            0
+gc invalid block                  Cluster                             174                     0                     0            0
+ctrl file                         Concurrency                           1                     0                     0            0
+connecting remote node            Other                                37                     0                     0            0
+
+36 rows fetched.
+
+

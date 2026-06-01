@@ -33,6 +33,7 @@ func StepC014GenConfig() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-014: Generate Config")
 			if err := checkKernelShmMeetsDBRequirements(ctx); err != nil {
 				return err
 			}
@@ -91,6 +92,7 @@ func checkKernelShmMeetsDBRequirements(ctx *runner.StepContext) error {
 	dbPct := ctx.GetParamInt("db_memory_percent", 50)
 
 	for _, th := range ctx.HostsToRun() {
+		dbLogPhase(ctx, "host-start", fmt.Sprintf("host=%s op=shm-check", th.Host))
 		sub := ctx.ForHost(th)
 		memKB, err := parseMemTotalKBFromProc(sub)
 		if err != nil {
@@ -108,6 +110,7 @@ func checkKernelShmMeetsDBRequirements(ctx *runner.StepContext) error {
 		ok, reason := commonos.ShmMeetsDBRequirement(memKB, pageSize, useMaxRAM, dbPct, curShmmax, curShmall)
 		if ok {
 			sub.Logger.Info("host %s: kernel shared memory sysctl OK (shmmax=%d shmall=%d)", th.Host, curShmmax, curShmall)
+			dbLogPhase(sub, "host-done", fmt.Sprintf("host=%s op=shm-check", th.Host))
 			continue
 		}
 		msg := fmt.Sprintf("host %s: %s (shmmax=%d shmall=%d, MemTotal=%d kB, db_memory_percent=%d, os_sysctl_shm_use_max_ram_only=%v)",
@@ -158,11 +161,11 @@ func parseShmSysctlFromHost(ctx *runner.StepContext) (shmmax, shmall int64, err 
 	if e2 != nil || r2 == nil || r2.GetExitCode() != 0 {
 		return 0, 0, fmt.Errorf("read kernel.shmall (sysctl)")
 	}
-	shmmax, err = strconv.ParseInt(strings.TrimSpace(r1.GetStdout()), 10, 64)
+	shmmax, err = commonos.ParseSysctlShmValue(r1.GetStdout())
 	if err != nil {
 		return 0, 0, fmt.Errorf("parse kernel.shmmax")
 	}
-	shmall, err = strconv.ParseInt(strings.TrimSpace(r2.GetStdout()), 10, 64)
+	shmall, err = commonos.ParseSysctlShmValue(r2.GetStdout())
 	if err != nil {
 		return 0, 0, fmt.Errorf("parse kernel.shmall")
 	}
@@ -208,16 +211,18 @@ func genStandaloneConfig(ctx *runner.StepContext, yasbootPath, clusterName, user
 		genCmd += " \\\n--mode mysql"
 	}
 
-	extra := ctx.GetParamString("yasboot_extra_args", "")
-	genCmd = commonos.YasbootAppendExtraArgs(genCmd, extra, false)
+	extra := ctx.GetParamString(ParamYasbootGenExtraArgs, "")
+	genCmd = AppendYasbootGenExtraArgs(genCmd, extra)
 	if strings.TrimSpace(extra) != "" {
 		ctx.Logger.Info("yasboot package se gen: appending extra args: %s", strings.TrimSpace(extra))
 	}
 
-	// 以产品用户执行
+	dbLogPhase(ctx, "config-gen-start", "standalone package se gen")
 	if _, err := commonos.ExecuteAsUserWithCheck(ctx, user, genCmd, true); err != nil {
+		dbLogPhase(ctx, "config-gen-fail", runner.TruncateForLog(err.Error(), 120))
 		return fmt.Errorf("failed to generate config: %w", err)
 	}
+	dbLogPhase(ctx, "config-gen-done", "standalone")
 
 	ctx.Logger.Info("Standalone configuration generated successfully")
 	return nil
@@ -225,13 +230,11 @@ func genStandaloneConfig(ctx *runner.StepContext, yasbootPath, clusterName, user
 
 func genYACConfig(ctx *runner.StepContext, yasbootPath, clusterName, user, password, installPath, dataPath, logPath string, beginPort int) error {
 	stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
-	memoryPercent := ctx.GetParamInt("db_memory_percent", 50)
 	accessMode := ctx.GetParamString("yac_access_mode", "vip")
 	interCIDR := ctx.GetParamString("yac_inter_cidr", "")
 	publicNetwork := ctx.GetParamString("yac_public_network", "")
 	systemdgStr := ctx.GetParamString("yac_systemdg", "")
 	datadgStr := ctx.GetParamString("yac_datadg", "")
-	dbMode := ctx.GetParamString("db_mode", "")
 
 	// 解析 diskgroup：yasboot 仅接受逗号分隔盘路径填入 --system-data / --data
 	systemdg, _ := parseYACDiskGroup(systemdgStr)
@@ -257,96 +260,48 @@ func genYACConfig(ctx *runner.StepContext, yasbootPath, clusterName, user, passw
 	ctx.Logger.Info("  Install path: %s", installPath)
 	ctx.Logger.Info("  System DG: %s", systemdgStr)
 	ctx.Logger.Info("  Data DG: %s", datadgStr)
-	ctx.Logger.Info("  Memory limit: %d%%", memoryPercent)
 
-	// yasboot package ce gen：--system-data 与 --data 为逗号分隔盘路径；gen 阶段不含 arch
+	// yasboot package ce gen：--system-data 与 --data 为逗号分隔盘路径；gen 阶段不含 arch。
+	// ce gen 不支持 --memory-limit / --mode mysql（与 installer.md YAC 章节一致）；内存比例见生成后的 toml 或 --db-memory-percent 仅用于 C-014 shm 校验。
 	systemDisks := formatDiskList(systemdg)
 	dataDisks := formatDiskList(datadg)
 	diskFoundPath := ctx.GetParamString("yac_disk_found_path", "/dev/mapper/")
 
-	// 组装 package ce gen（以产品用户执行）
-	var genCmd string
-	if accessMode == "scan" {
-		scanName := ctx.GetParamString("yac_scanname", "")
-		genCmd = fmt.Sprintf(`cd %s && %s package ce gen -c %s -f \
--u %s -p %s --ip %s --port %d \
--i %s \
---data-path %s \
---log-path %s \
---begin-port %d \
---memory-limit %d \
---node %d \
---inter-cidr %s \
---public-network %s \
---scanname %s \
---disk-found-path %s \
---system-data %s \
---data %s`,
-			stageDir, yasbootPath, clusterName,
-			user, commonos.ShellEscapeForSuC(password), ips, ctx.YasbootRemoteSSHPort(22),
-			installPath, dataPath, logPath,
-			beginPort, memoryPercent, nodeCount,
-			interCIDR, publicNetwork, scanName,
-			diskFoundPath,
-			systemDisks, dataDisks)
-	} else {
-		vips := ctx.GetParamStringSlice("yac_vips")
-		// yasboot 期望 VIP 形如 ip/前缀长度，例如 10.10.10.127/24（可选带网卡）
-		vipNetmask := publicNetwork
-		if vipNetmask == "" {
-			vipNetmask = interCIDR
-		}
-		prefixLen := 24
-		if vipNetmask != "" {
-			if pl, err := commonos.CIDRPrefixLen(vipNetmask); err == nil {
-				prefixLen = pl
-			}
-		}
-		var vipParts []string
-		for _, v := range vips {
-			v = strings.TrimSpace(v)
-			if v != "" {
-				vipParts = append(vipParts, fmt.Sprintf("%s/%d", v, prefixLen))
-			}
-		}
-		vipStr := strings.Join(vipParts, ",")
-		genCmd = fmt.Sprintf(`cd %s && %s package ce gen -c %s -f \
--u %s -p %s --ip %s --port %d \
--i %s \
---data-path %s \
---log-path %s \
---begin-port %d \
---memory-limit %d \
---node %d \
---inter-cidr %s \
---public-network %s \
---vips %s \
---disk-found-path %s \
---system-data %s \
---data %s`,
-			stageDir, yasbootPath, clusterName,
-			user, commonos.ShellSingleQuote(password), ips, ctx.YasbootRemoteSSHPort(22),
-			installPath, dataPath, logPath,
-			beginPort, memoryPercent, nodeCount,
-			interCIDR, publicNetwork, vipStr,
-			diskFoundPath,
-			systemDisks, dataDisks)
-	}
+	genCmd := BuildYACCeGenCommand(YACCeGenParams{
+		StageDir:      stageDir,
+		YasbootPath:   yasbootPath,
+		ClusterName:   clusterName,
+		User:          user,
+		Password:      password,
+		IPs:           ips,
+		SSHPort:       ctx.YasbootRemoteSSHPort(22),
+		InstallPath:   installPath,
+		DataPath:      dataPath,
+		LogPath:       logPath,
+		BeginPort:     beginPort,
+		NodeCount:     nodeCount,
+		InterCIDR:     interCIDR,
+		PublicNetwork: publicNetwork,
+		AccessMode:    accessMode,
+		ScanName:      ctx.GetParamString("yac_scanname", ""),
+		VIPs:          ctx.GetParamStringSlice("yac_vips"),
+		DiskFoundPath: diskFoundPath,
+		SystemDisks:   systemDisks,
+		DataDisks:     dataDisks,
+	})
 
-	if dbMode == "mysql" {
-		genCmd += " \\\n--mode mysql"
-	}
-
-	extra := ctx.GetParamString("yasboot_extra_args", "")
-	genCmd = commonos.YasbootAppendExtraArgs(genCmd, extra, false)
+	extra := ctx.GetParamString(ParamYasbootGenExtraArgs, "")
+	genCmd = AppendYasbootGenExtraArgs(genCmd, extra)
 	if strings.TrimSpace(extra) != "" {
 		ctx.Logger.Info("yasboot package ce gen: appending extra args: %s", strings.TrimSpace(extra))
 	}
 
-	// 以产品用户执行
+	dbLogPhase(ctx, "config-gen-start", fmt.Sprintf("yac nodes=%d access=%s", nodeCount, accessMode))
 	if _, err := commonos.ExecuteAsUserWithCheck(ctx, user, genCmd, true); err != nil {
+		dbLogPhase(ctx, "config-gen-fail", runner.TruncateForLog(err.Error(), 120))
 		return fmt.Errorf("failed to generate YAC config: %w", err)
 	}
+	dbLogPhase(ctx, "config-gen-done", "yac")
 
 	ctx.Logger.Info("YAC configuration generated successfully")
 	return nil

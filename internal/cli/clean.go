@@ -16,20 +16,21 @@ import (
 // NewCleanCommand 创建 clean 子命令。
 func NewCleanCommand() *cobra.Command {
 	var (
-		cleanType     string
-		yasdbHome     string
-		yasdbData     string
-		yasdbLog      string
-		clusterName   string
-		osUser        string
-		ycmHome       string
-		ympHome       string
-		ympUser       string
-		cleanYACDisks string
-		detailedSteps bool
-		dbCleanPort   int
-		ycmCleanPort  int
-		ympCleanPort  int
+		cleanType           string
+		yasdbHome           string
+		yasdbData           string
+		yasdbLog            string
+		clusterName         string
+		osUser              string
+		ycmHome             string
+		ympHome             string
+		ympUser             string
+		cleanYACDisks       string
+		cleanEnvFile        string
+		dbCleanPort         int
+		ycmCleanPort        int
+		ycmCleanServiceName string
+		ympCleanPort        int
 	)
 
 	cmd := &cobra.Command{
@@ -40,21 +41,7 @@ func NewCleanCommand() *cobra.Command {
 Supported cleanup types:
   - db:  Clean YashanDB installation (default). Paths align with yinstall db: non-default --db-port infers *_<port> dirs when paths not overridden.
   - ycm: Clean YCM installation. Non-default --ycm-port infers /opt/ycm_<port> when --ycm-home not set (same idea as db port suffix).
-  - ymp: Clean YMP installation. Non-default --ymp-port infers /opt/ymp_<port> when --ymp-home not set.
-
-Examples:
-  # Clean YashanDB on multiple nodes (default type). For standby nodes, use the SAME --yasdb-home/--yasdb-data
-  # as yinstall db / yinstall standby (--db-home-path / --db-data-path), or yasboot host add may fail with "should be empty".
-  yinstall clean --targets 10.10.10.125,10.10.10.126 \
-    --yasdb-home /data/yashan/yasdb_home --yasdb-data /data/yashan/yasdb_data \
-    --yasdb-log /data/yashan/log --cluster-name yashandb
-
-  # Clean YCM on single node
-  yinstall clean -t ycm --targets 10.10.10.125 --ycm-home /opt/ycm
-
-  # Clean YMP on multiple nodes
-  yinstall clean -t ymp --targets 10.10.10.125,10.10.10.126 \
-    --ymp-home /opt/ymp`,
+  - ymp: Clean YMP installation. Non-default --ymp-port infers /opt/ymp_<port> when --ymp-home not set.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -118,8 +105,8 @@ Examples:
 				ympCleanPort, &ympHome,
 			)
 
-			// 创建 target hosts
-			var targetHosts []runner.TargetHost
+			// 创建目标主机连接（与 db/os 一致，由 RunPerHostStepsEx 执行步骤）
+			var hostInfos []*HostInfo
 			for _, target := range parsedTargets {
 				cfg := ssh.Config{
 					Host:       target,
@@ -149,9 +136,9 @@ Examples:
 					fmt.Fprintf(os.Stderr, "Error: failed to create SSH executor for %s: %v\n", target, err)
 					return fmt.Errorf("failed to create SSH executor for %s: %w", target, err)
 				}
-				targetHosts = append(targetHosts, runner.TargetHost{
+				hostInfos = append(hostInfos, &HostInfo{
 					Host:     target,
-					Executor: &runnerExecAdapter{e: exec},
+					Executor: exec,
 				})
 			}
 
@@ -159,13 +146,7 @@ Examples:
 			var steps []*runner.Step
 			switch cleanType {
 			case "db":
-				if detailedSteps {
-					// 使用详细步骤
-					steps = clean.GetDBCleanSteps()
-				} else {
-					// 使用单一步骤
-					steps = []*runner.Step{clean.GetStepByID("CLEAN-DB")}
-				}
+				steps = clean.GetDBCleanSteps()
 			case "ycm":
 				steps = []*runner.Step{clean.GetStepByID("CLEAN-YCM")}
 			case "ymp":
@@ -180,17 +161,26 @@ Examples:
 
 			// 构造参数 map
 			params := make(map[string]interface{})
+			params["sudo"] = globalFlags.UseSudo
 			params["yasdb_home"] = yasdbHome
 			params["yasdb_data"] = yasdbData
 			params["yasdb_log"] = yasdbLog
 			params["db_cluster_name"] = clusterName
 			params["os_user"] = osUser
 			params["ycm_home"] = ycmHome
+			if cleanType == "ycm" {
+				params["ycm_port"] = ycmCleanPort
+				params["ycm_service_name"] = ycmCleanServiceName
+			}
 			params["ymp_home"] = ympHome
 			params["ymp_user"] = ympUser
 			params["clean_yac_disks"] = cleanYACDisks
 			if cleanType == "db" {
+				params["yac_mode"] = yacMode
 				params["db_begin_port"] = dbCleanPort
+				if strings.TrimSpace(cleanEnvFile) != "" {
+					params["clean_env_file"] = cleanEnvFile
+				}
 			}
 
 			// 初始化 cleanup 日志
@@ -202,77 +192,24 @@ Examples:
 			}
 			defer logger.Close()
 
-			// 在所有 target hosts 上执行清理
-			fmt.Printf("Starting %s cleanup on %d target(s)...\n", strings.ToUpper(cleanType), len(targetHosts))
-			logger.Info("Starting %s cleanup on %d target(s)...", strings.ToUpper(cleanType), len(targetHosts))
-
-			for _, th := range targetHosts {
-				fmt.Printf("\n=== Cleaning %s on %s ===\n", strings.ToUpper(cleanType), th.Host)
-				logger.Info("=== Cleaning %s on %s ===", strings.ToUpper(cleanType), th.Host)
-
-				// 针对当前主机构造 StepContext
-				ctx := &runner.StepContext{
-					Executor:    th.Executor,
-					TargetHosts: []runner.TargetHost{th},
-					Params:      params,
-					Logger:      logger,
-					DryRun:      globalFlags.DryRun,
-					Precheck:    globalFlags.Precheck,
-					ForceAll:    globalFlags.ForceAll,
-					ForceSteps:  globalFlags.ForceSteps,
+			defer func() {
+				for _, info := range hostInfos {
+					info.Executor.Close()
 				}
+			}()
 
-				// 依次执行全部步骤
-				precheckFailed := false
-				for i, step := range steps {
-					fmt.Printf("\n[%d/%d] Executing: %s\n", i+1, len(steps), step.Name)
-					logger.Info("[%d/%d] Executing: %s", i+1, len(steps), step.Name)
+			progress := runner.NewStepProgress(runner.CountNonOptionalSteps(steps))
+			logger.Info("======== %s cleanup on %d target(s) ========", strings.ToUpper(cleanType), len(hostInfos))
 
-					result := runner.RunStep(step, ctx)
-					if !result.Success {
-						// 判断是否为跳过（skip）而非失败
-						if result.Skipped {
-							fmt.Printf("[SKIP] %s skipped on %s: %v\n", step.Name, th.Host, result.Error)
-							logger.Info("[SKIP] %s skipped on %s: %v", step.Name, th.Host, result.Error)
-							continue
-						}
-
-						// precheck 模式：继续执行剩余步骤，最后再汇总错误并退出
-						if globalFlags.Precheck {
-							precheckFailed = true
-							if result.Error != nil {
-								fmt.Printf("[PRECHECK-FAIL] %s failed on %s: %v\n", step.Name, th.Host, result.Error)
-								logger.Error("[PRECHECK-FAIL] %s failed on %s: %v", step.Name, th.Host, result.Error)
-							} else {
-								fmt.Printf("[PRECHECK-FAIL] %s failed on %s\n", step.Name, th.Host)
-								logger.Error("[PRECHECK-FAIL] %s failed on %s", step.Name, th.Host)
-							}
-							// 继续执行后续步骤
-							continue
-						}
-
-						if result.Error != nil {
-							fmt.Printf("[ERROR] %s failed on %s: %v\n", step.Name, th.Host, result.Error)
-							logger.Error("[ERROR] %s failed on %s: %v", step.Name, th.Host, result.Error)
-							return result.Error
-						}
-						fmt.Printf("[ERROR] %s failed on %s\n", step.Name, th.Host)
-						logger.Error("[ERROR] %s failed on %s", step.Name, th.Host)
-						return fmt.Errorf("%s failed on %s", step.Name, th.Host)
-					}
-
-					fmt.Printf("[OK] %s completed on %s\n", step.Name, th.Host)
-					logger.Info("[OK] %s completed on %s", step.Name, th.Host)
-				}
-
-				if globalFlags.Precheck && precheckFailed {
-					return fmt.Errorf("precheck failed on %s", th.Host)
-				}
-
-				fmt.Printf("[OK] All cleanup tasks completed successfully on %s\n", th.Host)
+			phaseResult := RunPerHostStepsEx(steps, hostInfos, params, globalFlags, logger, 0, progress.Total(), nil, nil, progress)
+			if phaseResult.PrecheckFailed {
+				return fmt.Errorf("precheck failed during %s cleanup", cleanType)
+			}
+			if phaseResult.LastError != nil {
+				return phaseResult.LastError
 			}
 
-			fmt.Printf("\n=== All cleanup tasks completed successfully ===\n")
+			logger.Info("All %s cleanup tasks completed successfully", cleanType)
 			return nil
 		},
 	}
@@ -285,19 +222,39 @@ Examples:
 	cmd.Flags().StringVar(&yasdbData, "yasdb-data", "/data/yashan/yasdb_data", "YashanDB data directory (for DB cleanup)")
 	cmd.Flags().StringVar(&yasdbLog, "yasdb-log", "/data/yashan/log", "YashanDB log directory (for DB cleanup)")
 	cmd.Flags().StringVar(&clusterName, "cluster-name", "yashandb", "YashanDB cluster name (for DB cleanup)")
+	cmd.Flags().MarkHidden("cluster-name")
 	cmd.Flags().StringVar(&osUser, "os-user", "yashan", "OS user for YashanDB installation (for DB cleanup)")
+	cmd.Flags().StringVar(&cleanEnvFile, "env-file", "", "Explicit path to YashanDB env file on remote host (auto-discovered if omitted; sourced before DB commands)")
 	cmd.Flags().StringVar(&cleanYACDisks, "clean-yac-disks", "", "Clean YAC shared disks: 'auto' to query via ycsctl, or comma-separated paths like '/dev/mapper/sys1,/dev/mapper/sys2'")
-	cmd.Flags().BoolVar(&detailedSteps, "detailed-steps", false, "Use detailed cleanup steps (DB only, allows step-by-step execution)")
+	registerYACModeFlag(cmd)
 	cmd.Flags().IntVar(&dbCleanPort, "db-port", 1688, "Database begin port (for DB cleanup): like yinstall db, non-default port infers yasdb_home/data/log_* and cluster name unless paths explicitly set")
 
 	// YCM 专用 flags
 	cmd.Flags().StringVar(&ycmHome, "ycm-home", "/opt/ycm", "YCM installation directory (for YCM cleanup, default: /opt/ycm)")
 	cmd.Flags().IntVar(&ycmCleanPort, "ycm-port", 9060, "YCM web port: when not default (9060) and --ycm-home unchanged, infer /opt/ycm_<port>")
+	cmd.Flags().StringVar(&ycmCleanServiceName, "ycm-service-name", "", "systemd unit to remove (default: derived from --ycm-port and --ycm-home)")
 
 	// YMP 专用 flags
 	cmd.Flags().StringVar(&ympHome, "ymp-home", "/opt/ymp", "YMP installation directory (for YMP cleanup, default: /opt/ymp)")
 	cmd.Flags().IntVar(&ympCleanPort, "ymp-port", 8090, "YMP web port: when not default (8090) and --ymp-home unchanged, infer /opt/ymp_<port>")
 	cmd.Flags().StringVar(&ympUser, "ymp-user", "ymp", "YMP user name (for YMP cleanup, default: ymp)")
+
+	cmd.Example = `  # Clean YashanDB on multiple nodes (default type)
+  yinstall clean --targets 10.10.10.125,10.10.10.126
+
+  # Clean YashanDB with non-default port (auto-infers yasdb_home_2688 etc.)
+  yinstall clean --db-port 2688 --targets 10.10.10.125
+
+  # Single-node YAC cleanup (explicit --yac; shared disks via auto or manual paths)
+  yinstall clean -t 10.10.10.125 --yac --clean-yac-disks auto \
+    --yasdb-home /data/yashan/yasdb_home/23.4.7.106 --yasdb-data /data/yashan/yasdb_data
+
+  # Clean YCM on single node
+  yinstall clean -t ycm --targets 10.10.10.125 --ycm-home /opt/ycm
+
+  # Clean YMP on multiple nodes
+  yinstall clean -t ymp --targets 10.10.10.125,10.10.10.126 \
+    --ymp-home /opt/ymp`
 
 	return cmd
 }

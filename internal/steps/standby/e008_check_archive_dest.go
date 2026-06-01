@@ -206,6 +206,8 @@ func StepE008CheckArchiveDest() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			standbyLogPhase(ctx, "plan", "E-008: Check Archive Destination")
+			standbyLogPhase(ctx, "check-start", "archive_dest vs standby targets")
 			primaryUser := GetPrimaryOSUser(ctx)
 			targets := ctx.GetParamStringSlice("standby_targets")
 
@@ -279,6 +281,7 @@ func StepE008CheckArchiveDest() *runner.Step {
 
 			if len(archiveHits) == 0 {
 				ctx.Logger.Info("OK: No standby targets found in archive destination configuration")
+				standbyLogPhase(ctx, "check-done", "archive_hits=0")
 				return nil
 			}
 
@@ -361,6 +364,7 @@ func StepE008CheckArchiveDest() *runner.Step {
 			}
 
 			ctx.Logger.Info("OK: archive referenced target(s) but cluster status shows instance not open or missing nodeid row - not blocking as already-configured standby")
+			standbyLogPhase(ctx, "check-done", "archive=referenced instance_not_open")
 			return nil
 		},
 

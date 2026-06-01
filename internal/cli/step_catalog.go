@@ -8,6 +8,7 @@ import (
 
 	"github.com/yinstall/internal/runner"
 	"github.com/yinstall/internal/steps/clean"
+	collectsteps "github.com/yinstall/internal/steps/collect"
 	dbsteps "github.com/yinstall/internal/steps/db"
 	ossteps "github.com/yinstall/internal/steps/os"
 	standbysteps "github.com/yinstall/internal/steps/standby"
@@ -120,11 +121,29 @@ func PrintYMPStepCatalog(skipOS bool) {
 	fmt.Fprintln(os.Stdout, "")
 }
 
+// PrintCollectStepCatalog 打印 collect 命令的步骤目录（按 profile 过滤）。
+func PrintCollectStepCatalog(profile string) {
+	fmt.Fprintln(os.Stdout, "yinstall collect - step catalog")
+	if profile == "" {
+		profile = "full"
+	}
+	cats := ExpandProfile(profile)
+	steps := FilterStepsByCategories(collectsteps.GetAllSteps(), cats)
+	title := fmt.Sprintf("Collect steps (profile: %s)", profile)
+	printStepSection(title, steps)
+	fmt.Fprintf(os.Stdout, "Available profiles: %s\n", strings.Join(ListProfiles(), ", "))
+	fmt.Fprintln(os.Stdout, "Use -s/--include-steps to further narrow the step list.")
+	fmt.Fprintln(os.Stdout, "")
+}
+
 // PrintCleanStepCatalog 打印 clean 命令的 steps。
 func PrintCleanStepCatalog() {
 	fmt.Fprintln(os.Stdout, "yinstall clean - step catalog")
-	printStepSection("Top-level clean (orchestration)", clean.GetAllSteps())
-	printStepSection("DB detailed substeps (--type db with --detailed-steps)", clean.GetDBCleanSteps())
-	fmt.Fprintln(os.Stdout, "For --type ycm / ymp, only the matching top-level step runs, then its internal actions.")
+	printStepSection("DB cleanup (--type db, default)", clean.GetDBCleanSteps())
+	printStepSection("YCM / YMP cleanup", []*runner.Step{
+		clean.GetStepByID("CLEAN-YCM"),
+		clean.GetStepByID("CLEAN-YMP"),
+	})
+	fmt.Fprintln(os.Stdout, "Use -s/--include-steps (e.g. CLEAN-DB-002) to run a single DB cleanup phase.")
 	fmt.Fprintln(os.Stdout, "")
 }

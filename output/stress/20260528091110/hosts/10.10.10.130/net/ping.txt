@@ -1,0 +1,7 @@
+=== ping -c 100 -i 0.1 10.10.10.130 ===
+PING 10.10.10.130 (10.10.10.130) 56(84) bytes of data.
+
+--- 10.10.10.130 ping statistics ---
+100 packets transmitted, 100 received, 0% packet loss, time 10319ms
+rtt min/avg/max/mdev = 0.015/0.051/0.455/0.044 ms
+

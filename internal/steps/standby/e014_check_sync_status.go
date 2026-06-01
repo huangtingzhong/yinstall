@@ -55,6 +55,8 @@ func StepE014CheckSyncStatus() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			standbyLogPhase(ctx, "plan", "E-014: Check Sync Status")
+			standbyLogPhase(ctx, "check-start", "archive switch + sync status")
 			primaryUser := GetPrimaryOSUser(ctx)
 
 			ctx.Logger.Info("Checking standby synchronization status")
@@ -125,6 +127,7 @@ func StepE014CheckSyncStatus() *runner.Step {
 			}
 
 			ctx.Logger.Info("Sync status check completed")
+			standbyLogPhase(ctx, "check-done", "sync status")
 			return nil
 		},
 	}

@@ -250,6 +250,9 @@ timedatectl set-timezone "Asia/Shanghai"
 cat > /etc/sysctl.d/yashandb.conf << 'HTZ' 
 # YashanDB matching parameters
 vm.swappiness = 0
+vm.oom-kill = 0
+vm.zone_reclaim_mode = 0
+kernel.numa_balancing = 0
 net.ipv4.ip_local_port_range=32768 60999
 vm.max_map_count=2000000
 net.core.somaxconn=32768
@@ -265,7 +268,6 @@ vm.dirty_expire_centisecs=500
 vm.min_free_kbytes=524288
 net.core.netdev_max_backlog = 30000
 net.core.netdev_budget = 600
-vm.oom-kill = 0
 vm.overcommit_memory = 2
 HTZ
 sysctl --system
@@ -2378,4 +2380,44 @@ ORDER BY
 	OBJECT_NAME,
 	OBJECT_STATUS;
 ```
+
+---
+
+## 附录：排障 — 阅读 yinstall debug 日志
+
+`yinstall` 使用**双通道**日志：
+
+| 通道 | 路径 | 内容 |
+|------|------|------|
+| Session | `~/.yinstall/logs/yinstall_<type>_<timestamp>.log` | 与终端一致的步骤起止、失败摘要（如 `yinstall_db_20260528222915.log`） |
+| Debug | `~/.yinstall/logs/yinstall_<type>_debug_<timestamp>.log` | 全量命令、`phase=` 里程碑、`script=` 预览 |
+
+**不在终端输出** `phase=` 与 `script=` 正文；排障时打开 `*_debug.log`。
+
+### `phase=` 关键字（安装域）
+
+| phase | 含义 |
+|-------|------|
+| `plan` | 步骤 Action 入口：目的与关键参数 |
+| `op-start` / `op-done` / `op-fail` | 批量/循环子操作 |
+| `host-start` / `host-done` | 多主机逐步执行 |
+| `query-start` / `query-done` / `query-fail` | SQL（`dbRunSQLPhase`） |
+| `build-start` / `build-done` | 源码编译等（如 B-015 zstd） |
+| `disk-start` / `disk-done` | 磁盘/LVM 子步骤（B-020） |
+| `install-start` / `install-done` | 软件安装（C-020、H-011） |
+| `deploy-start` / `deploy-done` | 部署（C-021、G-007） |
+| `config-gen-start` / `config-gen-done` | yasboot 生成配置（C-014） |
+| `expand-start` / `expand-done` | 备库扩容（E-013 等） |
+
+示例：
+
+```bash
+grep -E 'phase=plan|phase=.*-start|script=(shell|sql)' ~/.yinstall/logs/*_debug.log | tail -80
+```
+
+### `script=` 预览
+
+多行 shell / SQL 执行前会写入 `script=shell` 或 `script=sql`，正文以 `>>>` 多行块呈现（与 collect/stress 一致）。安装域多行 shell 经 `RunShellScript` 上传临时文件；SQL 经 `commonsql` 远端 `-f`。
+
+开发合并前可运行：`make check-debug-logging`。
 

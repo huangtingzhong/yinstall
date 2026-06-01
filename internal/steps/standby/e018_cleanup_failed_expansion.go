@@ -34,6 +34,8 @@ func StepE018CleanupFailedExpansion() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			standbyLogPhase(ctx, "plan", "E-018: Cleanup Failed Expansion")
+			standbyLogPhase(ctx, "check-start", "cluster status for cleanup guidance")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
 			user := ctx.GetParamString("os_user", "yashan")
 			beginPort := ctx.GetParamInt("db_begin_port", 1688)
@@ -73,6 +75,7 @@ func StepE018CleanupFailedExpansion() *runner.Step {
 			// and execute yasboot node remove for each failed standby node
 			// This is intentionally not automated to prevent accidental data loss
 
+			standbyLogPhase(ctx, "check-done", "guidance=manual yasboot node remove")
 			return nil
 		},
 

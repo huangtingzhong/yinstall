@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	commonfile "github.com/yinstall/internal/common/file"
+	commoninstall "github.com/yinstall/internal/common/install"
 	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
@@ -149,9 +150,12 @@ command -v zstd >/dev/null
 test -f /usr/local/lib/libzstd.so.1 -o -f /usr/local/lib/libzstd.so -o -f /usr/local/lib64/libzstd.so.1 -o -f /usr/local/lib64/libzstd.so
 `, qTar)
 
-	if _, err := ctx.ExecuteWithCheck(script, true); err != nil {
+	osLogPhase(ctx, "build-start", "libzstd from zstd source EL7")
+	if _, err := commoninstall.RunShellScript(ctx, script, true); err != nil {
+		osLogPhase(ctx, "build-fail", runner.TruncateForLog(err.Error(), 120))
 		return fmt.Errorf("zstd build/install failed (requires gcc and make on target; see debug log for details): %w", err)
 	}
+	osLogPhase(ctx, "build-done", "libzstd installed under /usr/local")
 	ctx.Logger.Info("zstd built from source under /usr/local; ldconfig run")
 	return nil
 }
@@ -225,6 +229,7 @@ func StepB015InstallDeps() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-015: Install Dependencies")
 			dbPackages := ctx.GetParamString("os_deps_db_packages", "libzstd zlib lz4 openssl openssl-devel libaio")
 			toolsPackages := ctx.GetParamString("os_deps_tools_packages", "")
 			yumMode := ctx.GetParamString("os_yum_mode", "none")

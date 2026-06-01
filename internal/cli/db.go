@@ -14,48 +14,32 @@ import (
 
 var (
 	// DB 通用参数
-	dbClusterName       string
-	dbPort              int
-	dbMemoryPercent     int
-	dbCharacterSet      string
-	dbUseNativeType     bool
-	dbMode              string
-	dbSysPassword       string
-	dbInstallPath       string
-	dbDataPath          string
-	dbLogPath           string
-	dbStageDir          string
-	dbPackage           string
-	dbDepsPackage       string
-	dbNodes             int
-	dbRedoFileNum       int    // REDO 文件个数
-	dbRedoFileSize      string // REDO 文件大小
-	dbDisableArchivelog bool   // 关闭归档：将 yashandb.toml 中 ISARCHIVELOG 设为 false
-	dbCustomSQLScript   string // 自定义 SQL 脚本路径
-	dbTPCC              bool   // TPCC 参数优化
-	dbYasbootExtraArgs  string // 追加到 yasboot package se/ce gen 等命令的额外参数
-
-	// OS 用户参数（DB：gen-config 等流程需要）
-	dbOSUser         string
-	dbOSUserPassword string
-	dbOSGroup        string
+	dbClusterName            string
+	dbPort                   int
+	dbMemoryPercent          int
+	dbCharacterSet           string
+	dbUseNativeType          bool
+	dbMode                   string
+	dbSysPassword            string
+	dbInstallPath            string
+	dbDataPath               string
+	dbLogPath                string
+	dbStageDir               string
+	dbPackage                string
+	dbDepsPackage            string
+	dbNodes                  int
+	dbRedoFileNum            int    // REDO 文件个数
+	dbRedoFileSize           string // REDO 文件大小
+	dbDisableArchivelog      bool   // 关闭归档：将 yashandb.toml 中 ISARCHIVELOG 设为 false
+	dbCustomSQLScript        string // 自定义 SQL 脚本路径
+	dbTPCC                   bool   // TPCC 参数优化
+	dbUnifiedAudit           bool   // 统一审计与清理策略
+	dbSpfileParams           string // 自定义 SPFILE 参数 name=value|...
+	dbYasbootGenExtraArgs    string // 追加到 yasboot package se/ce gen 的额外参数
+	dbYasbootDeployExtraArgs string // 追加到 yasboot cluster deploy 的额外参数
 
 	// 是否跳过 OS 基线配置
-	dbSkipOS              bool
-	dbIgnoreInstallErrors bool
-
-	// OS 基线参数（仅在 --skip-os=false 时生效）
-	dbOSTimezone        string
-	dbOSNTPServer       string
-	dbOSYumMode         string
-	dbOSISODevice       string
-	dbOSISOMountpoint   string
-	dbOSYumRepoFile     string
-	dbOSDepsPkgs        string
-	dbOSToolsPkgs       string
-	dbOSFirewallMode    string
-	dbOSFirewallPorts   string
-	dbOSHugepagesEnable bool
+	dbSkipOS bool
 
 	// YAC 网络参数
 	yacInterCIDR     string
@@ -64,6 +48,12 @@ var (
 	yacVIPs          []string
 	yacScanName      string
 	yacDiskFoundPath string
+
+	// YAC db skip-os 下 C-001B udev 磁盘发现
+	yacAutoDiscoverDisks      bool
+	yacDiscoverRoot           string
+	yacDiscoverFallbackMapper bool
+	yacEnsureOSPassword       bool
 
 	// YAC YFS 调优参数
 	yacYFSTuneEnable bool
@@ -94,25 +84,9 @@ func init() {
 	// skip-os 参数
 	dbCmd.Flags().BoolVar(&dbSkipOS, "skip-os", false, "Skip OS baseline preparation")
 
-	// OS 用户参数（gen-config 与安装流程需要）
-	dbCmd.Flags().StringVar(&dbOSUser, "os-user", "yashan", "Product user name")
-	dbCmd.Flags().StringVar(&dbOSUserPassword, "os-user-password", defaultOSUserPassword, "Product user SSH password (for yasboot, yashan default)")
-	dbCmd.Flags().StringVar(&dbOSGroup, "os-group", "yashan", "Primary group name")
-
-	// OS 基线参数（仅在 --skip-os=false 时生效）
-	dbCmd.Flags().BoolVar(&dbIgnoreInstallErrors, "os-ignore-install-errors", false, "[OS] Ignore package installation errors and continue (only effective when --skip-os=false)")
-	dbCmd.Flags().StringVar(&dbOSTimezone, "os-timezone", "Asia/Shanghai", "[OS] System timezone (only effective when --skip-os=false)")
-	dbCmd.Flags().StringVar(&dbOSNTPServer, "os-ntp-server", "", "[OS] NTP server address (empty to skip NTP configuration; only effective when --skip-os=false)")
-	dbCmd.Flags().StringVar(&dbOSYumMode, "os-yum-mode", "none", "[OS] YUM mode: online/local-iso/none (only effective when --skip-os=false)")
-	dbCmd.Flags().StringVar(&dbOSISODevice, "os-iso-device", "/dev/cdrom", "[OS] ISO file path/name or block device used when --os-yum-mode=local-iso (auto-searched if filename only)")
-	dbCmd.Flags().StringVar(&dbOSISOMountpoint, "os-iso-mountpoint", "/media", "[OS] Mount point for ISO when --os-yum-mode=local-iso")
-	dbCmd.Flags().StringVar(&dbOSYumRepoFile, "os-yum-repo-file", "/etc/yum.repos.d/local.repo", "[OS] YUM repo file path for local-iso mode")
-	dbCmd.Flags().StringVar(&dbOSDepsPkgs, "os-deps-db-packages", "libzstd zlib lz4 openssl openssl-devel libaio", "[OS] DB dependency packages (only effective when --skip-os=false)")
-	dbCmd.Flags().StringVar(&dbOSToolsPkgs, "os-deps-tools-packages", "", "[OS] Common tools packages (only effective when --skip-os=false)")
-	dbCmd.Flags().StringVar(&osZstdSourceTarball, "os-zstd-source-tarball", "", "[OS] Explicit zstd source tarball (zstd-x.y.z.tar.gz); empty=auto-discover (EL7 libzstd fallback; only when --skip-os=false)")
-	dbCmd.Flags().StringVar(&dbOSFirewallMode, "os-firewall-mode", "disable", "[OS] Firewall mode: keep/disable/open-ports (only effective when --skip-os=false)")
-	dbCmd.Flags().StringVar(&dbOSFirewallPorts, "os-firewall-ports", "", "[OS] Ports to open, comma-separated (only effective when --skip-os=false)")
-	dbCmd.Flags().BoolVar(&dbOSHugepagesEnable, "os-hugepages-enable", false, "[OS] Enable huge pages configuration (only effective when --skip-os=false)")
+	// OS 参数（与 yinstall os 共用变量，--skip-os=false 时参与 OS 基线步骤）
+	registerAllOSFlags(dbCmd, registerOSFlagsConfig{forDB: true})
+	registerYACModeFlag(dbCmd)
 
 	// DB 通用参数（flag 注册）
 	dbCmd.Flags().StringVar(&dbClusterName, "db-cluster-name", "yashandb", "Cluster name")
@@ -120,7 +94,7 @@ func init() {
 	dbCmd.Flags().IntVar(&dbMemoryPercent, "db-memory-percent", 50, "Memory percentage (0-100)")
 	dbCmd.Flags().StringVar(&dbCharacterSet, "db-character-set", "utf8", "Character set: UTF8, GBK, ASCII, GB18030, BINARY, LATIN1, UTF8MB3, UTF8MB4 (case-insensitive)")
 	dbCmd.Flags().BoolVar(&dbUseNativeType, "db-use-native-type", false, "Set USE_NATIVE_TYPE in cluster TOML (native column types when true) (default: false)")
-	dbCmd.Flags().StringVar(&dbMode, "db-mode", "", "Database mode for yasboot gen-config: empty (default = YashanDB mode, do not pass --mode) or mysql (case-insensitive; pass --mode mysql)")
+	dbCmd.Flags().StringVar(&dbMode, "db-mode", "", "Standalone only: empty (default) or mysql (passes --mode mysql to yasboot package se gen; not supported for YAC/ce gen)")
 	dbCmd.Flags().StringVar(&dbSysPassword, "db-sys-password", "Yashan1!", "Database SYS password")
 	dbCmd.Flags().StringVar(&dbInstallPath, "db-home-path", "/data/yashan/yasdb_home", "Software installation path (auto-appends _<port> for non-default ports, e.g., yasdb_home_2688)")
 	dbCmd.Flags().StringVar(&dbDataPath, "db-data-path", "/data/yashan/yasdb_data", "Data directory path (auto-appends _<port> for non-default ports, e.g., yasdb_data_2688)")
@@ -135,28 +109,26 @@ func init() {
 	dbCmd.Flags().StringVar(&dbCustomSQLScript, "db-custom-sql-script", "", "Custom SQL script to execute after installation (supports: remote:/path, local:/path, /absolute/path, relative/path)")
 	dbCmd.Flags().BoolVar(&dbTPCC, "db-tpcc", false, "Enable TPCC parameter optimization (default: false)")
 	dbCmd.Flags().MarkHidden("db-tpcc")
-	dbCmd.Flags().StringVar(&dbYasbootExtraArgs, "yasboot-extra-args", "", "Extra arguments appended to yasboot package se gen / package ce gen (space-separated, e.g. '--disk-found-path /dev/foo')")
-
-	// YAC diskgroup 参数（与 os 子命令共用）
-	dbCmd.Flags().StringVar(&yacSystemDG, "yac-systemdg", "", "System diskgroup (format: dgname:/dev/sda,/dev/sdb, required for YAC)")
-	dbCmd.Flags().StringVar(&yacDataDG, "yac-datadg", "", "Data diskgroup (format: dgname:/dev/sdc,/dev/sdd, required for YAC)")
-	dbCmd.Flags().StringVar(&yacArchDG, "yac-archdg", "", "Archive diskgroup (format: dgname:/dev/sde, optional)")
-	dbCmd.Flags().BoolVar(&yacArchDGEnable, "yac-archdg-enable", false, "Enable independent ArchDG creation (separate archive diskgroup)")
+	dbCmd.Flags().BoolVar(&dbUnifiedAudit, "db-unified-audit", false, "Enable unified auditing, audit policies, and purge jobs (default: false)")
+	dbCmd.Flags().StringVar(&dbSpfileParams, "db-spfile-params", "", "Custom SPFILE parameters as name=value|name=value (empty=skip C-033; values may include quotes, e.g. date_format='yyyy-mm-dd hh24:mi:ss')")
+	dbCmd.Flags().StringVar(&dbYasbootGenExtraArgs, "yasboot-gen-extra-args", "", "Extra arguments appended to yasboot package se gen / package ce gen (space-separated)")
+	dbCmd.Flags().StringVar(&dbYasbootDeployExtraArgs, "yasboot-deploy-extra-args", "", "Extra arguments appended to yasboot cluster deploy (space-separated)")
 
 	// YAC 网络参数
 	dbCmd.Flags().StringVar(&yacInterCIDR, "yac-inter-cidr", "", "YAC inter-connect CIDR (required for YAC)")
 	dbCmd.Flags().StringVar(&yacPublicNetwork, "yac-public-network", "", "YAC public network CIDR or interface (required for YAC)")
-	dbCmd.Flags().StringVar(&yacAccessMode, "yac-access-mode", "vip", "YAC access mode (vip/scan)")
-	dbCmd.Flags().StringSliceVar(&yacVIPs, "yac-vips", nil, "VIP addresses for YAC (required for vip mode)")
+	dbCmd.Flags().StringVar(&yacAccessMode, "yac-access-mode", "vip", "YAC access mode (vip/scan/direct; direct skips VIP)")
+	dbCmd.Flags().StringSliceVar(&yacVIPs, "yac-vips", nil, "VIP addresses for YAC (vip/scan mode; auto-generated if omitted)")
 	dbCmd.Flags().StringVar(&yacScanName, "yac-scanname", "", "SCAN name for YAC (dns:name for DNS mode, name or empty for local mode)")
-	dbCmd.Flags().StringVar(&yacScanIPs, "yac-scan-ips", "", "SCAN IP addresses for local SCAN mode (comma-separated, empty=auto-allocate)")
 	dbCmd.Flags().StringVar(&yacDiskFoundPath, "yac-disk-found-path", "/dev/yfs/", "Disk found path for yasboot package ce gen")
-
-	// YAC 自动发现磁盘参数（仅在 --skip-os=false 时生效）
-	dbCmd.Flags().StringVar(&yacDiskPattern, "yac-disk-pattern", "", "[OS] Disk path pattern for filtering (e.g., '/dev/sd[c-z]', empty=all disks)")
-	dbCmd.Flags().StringVar(&yacExcludeDisks, "yac-exclude-disks", "/dev/sda,/dev/sdb", "[OS] Disks to exclude from auto-discovery (comma-separated)")
-	dbCmd.Flags().StringVar(&yacSystemdgSizeMax, "yac-systemdg-size-max", "10G", "[OS] Max size threshold for systemdg classification")
-	dbCmd.Flags().BoolVar(&yacAutoConfirm, "yac-auto-confirm", false, "[OS] Skip user confirmation for auto-discovered disks")
+	dbCmd.Flags().BoolVar(&yacAutoDiscoverDisks, "yac-auto-discover-disks", false,
+		"Auto-discover YAC disk groups from /dev/yfs when --skip-os (default: true if --skip-os is set)")
+	dbCmd.Flags().StringVar(&yacDiscoverRoot, "yac-discover-root", "/dev/yfs",
+		"Root directory for C-001B udev disk discovery (default: /dev/yfs)")
+	dbCmd.Flags().BoolVar(&yacDiscoverFallbackMapper, "yac-discover-fallback-mapper", true,
+		"When /dev/yfs is empty, discover sys*/data* under /dev/mapper")
+	dbCmd.Flags().BoolVar(&yacEnsureOSPassword, "yac-ensure-os-password", true,
+		"YAC: verify product user SSH password before ce gen; reset to --os-user-password on mismatch when login user has root/sudo (default: true)")
 
 	// YAC YFS 调优参数
 	dbCmd.Flags().BoolVar(&yacYFSTuneEnable, "yac-yfs-tune", false, "Enable YFS tuning")
@@ -165,9 +137,8 @@ func init() {
 	dbCmd.Flags().IntVar(&yacRedoFileNum, "yac-redo-file-num", 6, "Number of redo files")
 	dbCmd.Flags().StringVar(&yacShmPoolSize, "yac-shm-pool-size", "2G", "Shared memory pool size")
 	dbCmd.Flags().IntVar(&yacMaxInstances, "yac-max-instances", 64, "Maximum instances")
-}
 
-const defaultOSUserPassword = "aaBB11@@33$$"
+}
 
 func runDB(cmd *cobra.Command, args []string) error {
 	if err := validatePorts(map[string]int{
@@ -179,6 +150,7 @@ func runDB(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	applyInstallArchiveDefault(cmd)
 	flags := GetGlobalFlags()
 	if flags.ListSteps {
 		PrintDBStepCatalog(dbSkipOS)
@@ -193,10 +165,6 @@ func runDB(cmd *cobra.Command, args []string) error {
 		dbMode = normalized
 	}
 
-	if dbOSUserPassword == "" {
-		dbOSUserPassword = defaultOSUserPassword
-	}
-
 	// 未指定 --targets 时，默认本地执行。
 	if len(flags.Targets) == 0 {
 		flags.Local = true
@@ -205,25 +173,24 @@ func runDB(cmd *cobra.Command, args []string) error {
 		flags.Local = false
 	}
 
-	// 当端口不为 1688 时，若用户未显式指定 home/data/log/cluster-name，
-	// 则使用带端口后缀的默认值，避免与默认实例冲突（如 yasdb_home_<port> 等）。
-	if dbPort != 1688 {
-		if !cmd.Flags().Changed("db-home-path") {
-			dbInstallPath = fmt.Sprintf("/data/yashan/yasdb_home_%d", dbPort)
-		}
-		if !cmd.Flags().Changed("db-data-path") {
-			dbDataPath = fmt.Sprintf("/data/yashan/yasdb_data_%d", dbPort)
-		}
-		if !cmd.Flags().Changed("db-log-path") {
-			dbLogPath = fmt.Sprintf("/data/yashan/log_%d", dbPort)
-		}
-		if !cmd.Flags().Changed("db-cluster-name") {
-			dbClusterName = fmt.Sprintf("yashandb_%d", dbPort)
-		}
-	}
+	ResolveOSUserPassword(cmd, flags, osUser, &osUserPassword)
+
+	// 未显式指定的 stage/home/data/log 按 --os-user 与 --db-port 推导（避免 tpcc 用户仍用 /home/yashan/...）。
+	applyDBUserPathDefaults(cmd)
 
 	// 判定 YAC 模式
 	isYACMode := yacMode || len(flags.Targets) >= 2
+	yacAccessMode = dbsteps.NormalizeYACAccessMode(yacAccessMode)
+
+	if isYACMode {
+		if err := dbsteps.ValidateYACAccessMode(yacAccessMode); err != nil {
+			return err
+		}
+	}
+
+	if isYACMode && dbMode == "mysql" {
+		return fmt.Errorf("--db-mode mysql is not supported for YAC cluster installation (yasboot package ce gen does not accept --mode mysql)")
+	}
 
 	// 校验必填参数
 	if dbSysPassword == "" && !flags.DryRun && !flags.Precheck {
@@ -231,19 +198,25 @@ func runDB(cmd *cobra.Command, args []string) error {
 	}
 	// 远程模式下 yasboot gen-config 需要以产品用户 SSH 到 targets；
 	// 本地模式（未指定 --targets）不要求 os-user-password。
-	if !flags.Local && dbOSUserPassword == "" && !flags.DryRun && !flags.Precheck {
+	if !flags.Local && osUserPassword == "" && !flags.DryRun && !flags.Precheck {
 		return fmt.Errorf("--os-user-password is required for yasboot gen-config (SSH password of product user)")
+	}
+
+	// --skip-os 时默认开启 C-001B udev 磁盘发现（除非用户显式改过 flag）
+	if dbSkipOS && !cmd.Flags().Changed("yac-auto-discover-disks") {
+		yacAutoDiscoverDisks = true
 	}
 
 	// YAC 专属校验
 	if isYACMode {
 		if yacSystemDG == "" || yacDataDG == "" {
-			if dbSkipOS {
+			if dbSkipOS && !yacAutoDiscoverDisks {
 				return fmt.Errorf("--yac-systemdg and --yac-datadg are required for YAC mode when --skip-os is set\n" +
-					"  Hint: run without --skip-os to enable auto disk discovery (B-021),\n" +
-					"        or run 'yinstall os' first to discover disks, then 'yinstall db --skip-os' with discovered disk groups")
+					"  Hint: enable --yac-auto-discover-disks (default with --skip-os) after /dev/yfs is ready,\n" +
+					"        or run without --skip-os to use OS step B-021 auto discovery,\n" +
+					"        or pass --yac-systemdg and --yac-datadg explicitly")
 			}
-			// --skip-os=false：OS 步骤中的 B-021 会自动发现磁盘
+			// --skip-os=false：OS 步骤中的 B-021 会自动发现磁盘；skip-os + auto-discover：C-001B
 		}
 		// SCAN 模式的 scanname 解析在下方构建 params 之后进行
 	}
@@ -261,6 +234,11 @@ func runDB(cmd *cobra.Command, args []string) error {
 
 	logger.Info("Starting DB installation (RunID: %s)", rid)
 	logger.Info("Targets: %v", flags.Targets)
+	logger.Info("Product user: %s (group: %s, uid: %d)", osUser, osGroup, osUserUID)
+	if !cmd.Flags().Changed("os-user-password") && strings.TrimSpace(flags.SSHUser) == strings.TrimSpace(osUser) && strings.TrimSpace(flags.SSHPassword) != "" && !strings.EqualFold(strings.TrimSpace(flags.SSHAuth), "key") {
+		logger.Info("Product user password: aligned with --ssh-password (SSH login user matches --os-user)")
+	}
+	logger.Info("Paths: stage=%s home=%s data=%s log=%s", dbStageDir, dbInstallPath, dbDataPath, dbLogPath)
 	if dbMode == "" {
 		logger.Info("DB mode: (empty)")
 	} else {
@@ -281,6 +259,7 @@ func runDB(cmd *cobra.Command, args []string) error {
 
 	// 构建 params
 	params := buildDBParams(isYACMode, len(flags.Targets))
+	params["sudo"] = flags.UseSudo
 	params["target_ips"] = flags.Targets
 	params["ssh_port"] = flags.SSHPort
 	params["yasboot_ssh_port"] = flags.YasbootSSHPort
@@ -346,14 +325,20 @@ func runDB(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// 维护 step index（终端输出用）
-	stepIndex := 0
-	totalSteps := len(steps)
+	// 进度：分母 = 非 Optional 安装步 +（--archive 时）非 Optional 且跳过 R-001 的 collect 步
+	plannedProgress := runner.CountNonOptionalSteps(steps)
+	if flags.ArchiveOnSuccess && !flags.DryRun && !flags.Precheck {
+		plannedProgress += CountArchiveCollectSteps("db", isYACMode, flags)
+	}
+	progress := runner.NewStepProgress(plannedProgress)
+	totalSteps := progress.Total()
 
 	if connectivityStep != nil {
 		logger.Info("======== Phase 1: Connectivity check ========")
 		precheckFailed := false
-		for _, target := range flags.Targets {
+		var connProgIdx, connProgTot int
+		connProgFrozen := false
+		for ti, target := range flags.Targets {
 			executor, err := createExecutor(target, flags, logger, "")
 			if err != nil {
 				logger.Error("Failed to connect to %s: %v", target, err)
@@ -372,11 +357,19 @@ func runDB(cmd *cobra.Command, args []string) error {
 				ForceAll:          flags.ForceAll,
 				ForceSteps:        flags.ForceSteps,
 				ForceDeleteUser:   flags.ForceDeleteUser,
-				StepIndex:         stepIndex,
-				TotalSteps:        totalSteps,
+				Progress:          progress,
+			}
+			if progress != nil && ti > 0 && connProgFrozen {
+				ctx.Progress = nil
+				ctx.StepIndex = connProgIdx
+				ctx.TotalSteps = connProgTot
 			}
 
 			result := runner.RunStep(connectivityStep, ctx)
+			if progress != nil && !connProgFrozen {
+				connProgIdx, connProgTot = ctx.StepIndex, ctx.TotalSteps
+				connProgFrozen = true
+			}
 			if !result.Success && !result.Skipped {
 				executor.Close()
 				if flags.Precheck {
@@ -396,7 +389,6 @@ func runDB(cmd *cobra.Command, args []string) error {
 			// 继续执行其它 precheck 以收集全部问题，但最终仍以非零退出码结束。
 			logger.Error("Connectivity precheck has failures; continuing to collect all issues.")
 		}
-		stepIndex++
 	} else {
 		for _, target := range flags.Targets {
 			executor, err := createExecutor(target, flags, logger, "")
@@ -422,6 +414,11 @@ func runDB(cmd *cobra.Command, args []string) error {
 	// 合并 OS 步骤时列表首项常为 B-021 而非 C-001，故只要计划中包含 C-001 即执行全局预检，并去掉第一个 C-001 占位步骤以免重复。
 	var stepsToRun []*runner.Step
 	if len(otherSteps) > 0 && stepsContainID(otherSteps, "C-001") {
+		(&runner.StepContext{
+			Logger:        logger,
+			Params:        params,
+			CurrentStepID: "C-001",
+		}).LogPhase("plan", fmt.Sprintf("global-precheck hosts=%d yac=%v", len(hostExecs), isYACMode))
 		if err := dbsteps.RunConnectivityAndYACPrecheck(hostExecs, params, logger, isYACMode); err != nil {
 			if flags.Precheck {
 				pc := &runner.StepContext{Logger: logger, Params: params, Results: make(map[string]interface{}), Precheck: flags.Precheck}
@@ -439,6 +436,7 @@ func runDB(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("C-001 precheck failed: %w", err)
 			}
 		} else {
+			(&runner.StepContext{Logger: logger, CurrentStepID: "C-001"}).LogPhase("op-done", "global-connectivity-precheck")
 			logger.Info("C-001: global connectivity/YAC precheck completed (placeholder step C-001 is not repeated in the numbered list below)")
 		}
 		stepsToRun = removeFirstStepWithID(otherSteps, "C-001")
@@ -467,8 +465,50 @@ func runDB(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// C-009-VIP runs once when YAC mode（与步骤 C-009 VIP 占位对应）
-	if isYACMode {
+	// C-001P：YAC 产品用户密码校验；错误时按 --os-user-password 自动改密（需 root/sudo）
+	if isYACMode && !flags.DryRun {
+		if err := dbsteps.RunYACProductUserPasswordEnsure(hostExecs, params, logger, flags.Precheck); err != nil {
+			if flags.Precheck {
+				pc := &runner.StepContext{Logger: logger, Params: params, Results: make(map[string]interface{}), Precheck: flags.Precheck}
+				pc.ReportPrecheckIssue(runner.PrecheckIssue{
+					StepID:   "C-001P",
+					StepName: "Ensure product user password",
+					Severity: runner.PrecheckSeverityError,
+					Code:     "PC.DB.C001P",
+					Message:  err.Error(),
+				})
+			} else {
+				for _, info := range hostInfos {
+					info.Executor.Close()
+				}
+				return fmt.Errorf("C-001P product user password ensure failed: %w", err)
+			}
+		}
+	}
+
+	// C-001B：skip-os 时从 /dev/yfs（或 mapper）发现 diskgroup
+	if isYACMode && dbSkipOS {
+		if err := dbsteps.RunYACUdevDiskDiscovery(hostExecs, params, logger); err != nil {
+			if flags.Precheck {
+				pc := &runner.StepContext{Logger: logger, Params: params, Results: make(map[string]interface{}), Precheck: flags.Precheck}
+				pc.ReportPrecheckIssue(runner.PrecheckIssue{
+					StepID:   "C-001B",
+					StepName: "YAC udev disk discovery",
+					Severity: runner.PrecheckSeverityError,
+					Code:     "PC.DB.C001B",
+					Message:  err.Error(),
+				})
+			} else {
+				for _, info := range hostInfos {
+					info.Executor.Close()
+				}
+				return fmt.Errorf("C-001B udev disk discovery failed: %w", err)
+			}
+		}
+	}
+
+	// C-009-VIP：vip/scan 模式执行；direct 模式跳过 VIP
+	if isYACMode && dbsteps.YACAccessModeRequiresVIP(yacAccessMode) {
 		if err := dbsteps.RunVIPValidationOrAutoGenerate(hostExecs, params, logger); err != nil {
 			if flags.Precheck {
 				pc := &runner.StepContext{Logger: logger, Params: params, Results: make(map[string]interface{}), Precheck: flags.Precheck}
@@ -550,108 +590,18 @@ func runDB(cmd *cobra.Command, args []string) error {
 	var lastErr error
 	precheckFailed := false
 
-	// OS 步骤：分离 Global 步骤和逐主机步骤
+	// OS 步骤：使用共享的 RunPerHostSteps 处理 Global/PerHost 步骤
 	if len(osStepsToRun) > 0 {
-		// 构建 TargetHosts（供 Global 步骤使用）
-		targetHosts := make([]runner.TargetHost, 0, len(hostInfos))
-		for _, info := range hostInfos {
-			targetHosts = append(targetHosts, runner.TargetHost{
-				Host:     info.Host,
-				Executor: &runnerExecAdapter{e: info.Executor},
-			})
+		osResult := RunPerHostStepsEx(osStepsToRun, hostInfos, params, flags, logger, 0, totalSteps, nil, nil, progress)
+		if osResult.PrecheckFailed {
+			precheckFailed = true
 		}
-
-		var globalOSSteps []*runner.Step
-		var perHostOSSteps []*runner.Step
-		for _, step := range osStepsToRun {
-			if step.Global {
-				globalOSSteps = append(globalOSSteps, step)
-			} else {
-				perHostOSSteps = append(perHostOSSteps, step)
-			}
-		}
-
-		// 执行 Global OS 步骤（跨节点，仅执行一次）
-		if len(globalOSSteps) > 0 {
-			logger.Info("-------- Global OS steps (all nodes) --------")
-			globalResults := make(map[string]interface{})
-			for i, step := range globalOSSteps {
-				ctx := &runner.StepContext{
-					Executor:          &runnerExecAdapter{e: hostInfos[0].Executor},
-					Logger:            logger,
-					Params:            params,
-					DryRun:            flags.DryRun,
-					Precheck:          flags.Precheck,
-					Results:           globalResults,
-					OSInfo:            hostInfos[0].OSInfo,
-					LocalSoftwareDirs: flags.LocalSoftwareDirs,
-					RemoteSoftwareDir: flags.RemoteSoftwareDir,
-					ForceAll:          flags.ForceAll,
-					ForceSteps:        flags.ForceSteps,
-					ForceDeleteUser:   flags.ForceDeleteUser,
-					StepIndex:         stepIndex + i,
-					TotalSteps:        totalSteps,
-					TargetHosts:       targetHosts,
-				}
-
-				result := runner.RunStep(step, ctx)
-				if !result.Success && !result.Skipped {
-					logger.Error("Step %s failed: %v", step.ID, result.Error)
-					if flags.Precheck {
-						precheckFailed = true
-						continue
-					}
-					lastErr = result.Error
-					break
-				}
-			}
-			stepIndex += len(globalOSSteps)
-		}
-
-		// 执行逐主机 OS 步骤
-		if lastErr == nil && len(perHostOSSteps) > 0 {
-			for _, info := range hostInfos {
-				logger.Info("-------- Host: %s --------", info.Host)
-
-				hostResults := make(map[string]interface{})
-
-				for i, step := range perHostOSSteps {
-					ctx := &runner.StepContext{
-						Executor:          &runnerExecAdapter{e: info.Executor},
-						Logger:            logger,
-						Params:            params,
-						DryRun:            flags.DryRun,
-						Precheck:          flags.Precheck,
-						Results:           hostResults,
-						OSInfo:            info.OSInfo,
-						LocalSoftwareDirs: flags.LocalSoftwareDirs,
-						RemoteSoftwareDir: flags.RemoteSoftwareDir,
-						ForceAll:          flags.ForceAll,
-						ForceSteps:        flags.ForceSteps,
-						ForceDeleteUser:   flags.ForceDeleteUser,
-						StepIndex:         stepIndex + i,
-						TotalSteps:        totalSteps,
-					}
-
-					result := runner.RunStep(step, ctx)
-					if !result.Success && !result.Skipped {
-						logger.Error("Step %s failed: %v", step.ID, result.Error)
-						if flags.Precheck {
-							precheckFailed = true
-							continue
-						}
-						lastErr = result.Error
-						break
-					}
-				}
-
-				if lastErr != nil {
-					break
-				}
-			}
-			stepIndex += len(perHostOSSteps)
+		if osResult.LastError != nil {
+			lastErr = osResult.LastError
 		}
 	}
+
+	var dbInstallResults map[string]interface{}
 
 	// DB 步骤：使用 TargetHosts 方式（步骤内部自行决定在哪些节点执行）
 	if lastErr == nil && len(dbStepsToRun) > 0 {
@@ -678,11 +628,10 @@ func runDB(cmd *cobra.Command, args []string) error {
 			ForceSteps:        flags.ForceSteps,
 			ForceDeleteUser:   flags.ForceDeleteUser,
 			TargetHosts:       targetHosts,
+			Progress:          progress,
 		}
 
-		for i, step := range dbStepsToRun {
-			ctx.StepIndex = stepIndex + i
-			ctx.TotalSteps = totalSteps
+		for _, step := range dbStepsToRun {
 			result := runner.RunStep(step, ctx)
 			// 如果步骤失败（不是跳过），即使是 Optional 的也要退出
 			if !result.Success && !result.Skipped {
@@ -695,6 +644,7 @@ func runDB(cmd *cobra.Command, args []string) error {
 				break
 			}
 		}
+		dbInstallResults = ctx.Results
 	}
 
 	if lastErr != nil {
@@ -707,6 +657,27 @@ func runDB(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("precheck failed")
 	}
 
+	installResults := map[string]interface{}{}
+	if dbInstallResults != nil {
+		for k, v := range dbInstallResults {
+			installResults[k] = v
+		}
+	}
+	if cn, ok := params["db_cluster_name"].(string); ok && cn != "" {
+		installResults["cluster_name"] = cn
+	}
+	executedIDs := make([]string, 0, len(stepsToRun))
+	for _, s := range stepsToRun {
+		executedIDs = append(executedIDs, s.ID)
+	}
+	if !dbSkipOS {
+		for _, s := range osStepsToRun {
+			executedIDs = append(executedIDs, s.ID)
+		}
+	}
+	installSnap := buildInstallParamsSnapshot("db", rid, params, executedIDs)
+	runInstallArchiveCollect("db", isYACMode, progress, hostInfos, installSnap, installResults, flags, logger)
+
 	logger.Info("DB installation completed successfully")
 	return nil
 }
@@ -715,72 +686,22 @@ func buildDBParams(isYACMode bool, targetCount int) map[string]interface{} {
 	// 先继承 OS 侧参数（buildOSParams）
 	params := buildOSParams(isYACMode, targetCount)
 
-	// 按端口号自动调整路径（非默认 1688）
-	// 非默认端口追加 _<port> 后缀，避免路径冲突
-	if dbPort != 1688 {
-		portSuffix := fmt.Sprintf("_%d", dbPort)
-
-		// 仅当用户未显式设置这些路径时自动调整（通过与默认值比较判断）
+	// 兜底：若仍残留 yashan 硬编码默认路径，按当前 os_user 重写（兼容未走 runDB 的调用路径）。
+	user := dbProductUser(osUser)
+	if dbStageDir == "/home/yashan/install" || (dbPort != dbDefaultBeginPort && dbStageDir == fmt.Sprintf("/home/yashan/install_%d", dbPort)) {
+		dbStageDir = defaultDBStageDir(user, dbPort)
+	}
+	if dbPort != dbDefaultBeginPort {
 		if dbInstallPath == "/data/yashan/yasdb_home" {
-			dbInstallPath = dbInstallPath + portSuffix
+			dbInstallPath = defaultDBInstallPath(user, dbPort)
 		}
 		if dbDataPath == "/data/yashan/yasdb_data" {
-			dbDataPath = dbDataPath + portSuffix
+			dbDataPath = defaultDBDataPath(user, dbPort)
 		}
 		if dbLogPath == "/data/yashan/log" {
-			dbLogPath = dbLogPath + portSuffix
-		}
-		if dbStageDir == "/home/yashan/install" {
-			dbStageDir = dbStageDir + portSuffix
+			dbLogPath = defaultDBLogPath(user, dbPort)
 		}
 	}
-
-	// 若提供 DB 专用参数，则覆盖 OS 用户相关参数
-	if dbOSUser != "" {
-		params["os_user"] = dbOSUser
-	}
-	if dbOSUserPassword != "" {
-		params["os_user_password"] = dbOSUserPassword
-	}
-	if dbOSGroup != "" {
-		params["os_group"] = dbOSGroup
-	}
-
-	// 若在 DB 命令中指定，则覆盖 OS ignore install errors 参数
-	params["os_ignore_install_errors"] = dbIgnoreInstallErrors
-
-	// 若在 DB 命令中指定，则覆盖 OS 基线参数
-	if dbOSTimezone != "" {
-		params["os_timezone"] = dbOSTimezone
-	}
-	if dbOSNTPServer != "" {
-		params["os_ntp_server"] = dbOSNTPServer
-	}
-	if dbOSYumMode != "" {
-		params["os_yum_mode"] = dbOSYumMode
-	}
-	if dbOSISODevice != "" {
-		params["os_iso_device"] = dbOSISODevice
-	}
-	if dbOSISOMountpoint != "" {
-		params["os_iso_mountpoint"] = dbOSISOMountpoint
-	}
-	if dbOSYumRepoFile != "" {
-		params["os_yum_repo_file"] = dbOSYumRepoFile
-	}
-	if dbOSDepsPkgs != "" {
-		params["os_deps_db_packages"] = dbOSDepsPkgs
-	}
-	if dbOSToolsPkgs != "" {
-		params["os_deps_tools_packages"] = dbOSToolsPkgs
-	}
-	if dbOSFirewallMode != "" {
-		params["os_firewall_mode"] = dbOSFirewallMode
-	}
-	if dbOSFirewallPorts != "" {
-		params["os_firewall_ports"] = dbOSFirewallPorts
-	}
-	params["os_hugepages_enable"] = dbOSHugepagesEnable
 
 	// 追加 DB 专用参数
 	params["db_cluster_name"] = dbClusterName
@@ -803,7 +724,10 @@ func buildDBParams(isYACMode bool, targetCount int) map[string]interface{} {
 	params["db_disable_archivelog"] = dbDisableArchivelog
 	params["db_custom_sql_script"] = dbCustomSQLScript
 	params["db_tpcc"] = dbTPCC
-	params["yasboot_extra_args"] = dbYasbootExtraArgs
+	params["db_unified_audit"] = dbUnifiedAudit
+	params["db_spfile_params"] = dbSpfileParams
+	params[dbsteps.ParamYasbootGenExtraArgs] = dbYasbootGenExtraArgs
+	params[dbsteps.ParamYasbootDeployExtraArgs] = dbYasbootDeployExtraArgs
 
 	// YAC 网络相关参数
 	params["yac_inter_cidr"] = yacInterCIDR
@@ -813,6 +737,10 @@ func buildDBParams(isYACMode bool, targetCount int) map[string]interface{} {
 	params["yac_scanname"] = yacScanName
 	params["yac_scan_ips"] = yacScanIPs
 	params["yac_disk_found_path"] = yacDiskFoundPath
+	params["yac_auto_discover_disks"] = yacAutoDiscoverDisks
+	params["yac_discover_root"] = yacDiscoverRoot
+	params["yac_discover_fallback_mapper"] = yacDiscoverFallbackMapper
+	params["yac_ensure_os_password"] = yacEnsureOSPassword
 
 	// YAC YFS 相关参数
 	params["yac_yfs_tune_enable"] = yacYFSTuneEnable

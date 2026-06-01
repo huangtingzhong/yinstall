@@ -1,0 +1,3 @@
+182273 /data/yashan/yasdb_home_4688/23.4.10.100/bin/yasagent --init -c yashandb4688 -l 10.10.10.130:4676 --host-id host0001 -k                  -L /data/yashan/log_4688 -d
+182293 /data/yashan/yasdb_home_4688/23.4.10.100/bin/yasom --init -c yashandb4688 -l 10.10.10.130:4675 -k                  -L /data/yashan/log_4688 -d
+189322 bash -c pgrep -a -f yashandb4688 2>/dev/null | grep -E 'yasdb|yasagent' || true

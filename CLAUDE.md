@@ -2,11 +2,118 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Maintaining These Rules (Required)
+
+Development rules exist in **two copies**—keep them identical:
+
+| File | Audience |
+|------|----------|
+| **`CLAUDE.md`** § Development Workflow (Mandatory) | Claude Code; committed to repo |
+| **`.cursor/rules/yinstall-development.mdc`** | Cursor **project** rules (`alwaysApply` when this repo is open) |
+
+**Project-only, not global:** These rules live in **this repository** under `.cursor/rules/` (tracked by git). **Do not** copy them to `~/.cursor/rules` or Cursor user-global Rules—that causes drift and cross-project conflicts.
+
+**Any change to workflow, testing, file layout, test hosts, etc. must update BOTH files.** Updating only one copy is incomplete.
+
+See also `.cursor/rules/README.md`.
+
+---
+
 ## Project Overview
 
 **yinstaller** is a Go-based CLI tool for automating YashanDB installation across multiple target hosts via SSH. It orchestrates complex multi-step installation workflows for OS baseline preparation, database installation (single/YAC cluster), standby database setup, and YCM/YMP deployment.
 
 The main binary is named `yinstall` (previously `yasinstall`).
+
+## Development Workflow (Mandatory)
+
+### BUG fixes / new features
+
+1. **Plan first, then code**: root cause, scope, affected steps, risks, verification. If the user message already contains an explicit implementation directive (e.g. “implement B1+B2”, “merge into logger.go”), treat that as approval and skip a separate plan step.
+2. **Verify before claiming done**:
+   ```bash
+   go fmt ./...
+   go vet ./...
+   go test ./... -count=1          # existing tests under internal/, etc.
+   go test ./tmp/... -count=1      # ad-hoc tests in tmp/ (omit if none)
+   ```
+3. **Testing policy**:
+   - Write tests for pure logic / parsing / step mocks when useful; skip trivial assertions.
+   - **Ad-hoc verification**: put test files only under repo root **`tmp/`** (e.g. `tmp/c031_profile_test.go`), `package xxx_test` + `import "github.com/yinstall/..."`. **Do not** add temporary `*_test.go` under `internal/` or `cmd/`.
+   - `tmp/` is **gitignored**; after `go test ./tmp/...` passes, **delete those test files** (keep `tmp/.gitkeep`).
+   - **`internal/*_test.go`**: add or keep only when the user explicitly wants long-term regression tests—not for one-off verification.
+4. **E2E**: validate with `build/yinstall_*` using `-s` single-step or minimal path on real hosts (see Test environments below).
+5. **Git**: do not commit, open PRs, or commit `build/` binaries unless the user asks.
+
+### Scope & file organization
+
+- **Minimal diff**; no drive-by edits.
+- **DRY**: one implementation; extract to `internal/common/*` or an existing domain util only when a **second** call site exists.
+
+**When to create new `.go` files**
+
+| Allowed | Forbidden |
+|---------|-----------|
+| **New step**: `c0xx_*.go` / `b0xx_*.go` + `registry.go` | One-off bugfix/small feature files like `*_helpers.go`, `*_extra.go` |
+| **Shared by 2+ steps or packages** → `internal/common/*` or domain `*_util.go` | ≤30-line helpers used in one file → **inline** |
+| **Refactor split** (see file size) | One-off fragments left after task → **merge back** into domain file |
+
+When extracting for DRY/debug, prefer **existing** files (`yasboot_cmd.go`, `logger.go`, `*_util.go`, `debug_log.go`) before creating new ones.
+
+**File size**
+
+| Lines | Strategy |
+|-------|----------|
+| **<500** | Edit in place |
+| **500–800** | OK to edit; if adding **>50** lines, consider same-domain util |
+| **≥800** | Prefer small patches; large additions → **refactor/split** first (not “small feature new file”) |
+| **~1000** | Do not keep stacking; split then edit |
+
+### Checklist (new work)
+
+- [ ] Plan approved or user gave explicit implement directive
+- [ ] Step IDs / registry / CLI Params correct
+- [ ] No new `.go` for small one-off changes (except new steps, 2+ reuse, refactor split)
+- [ ] Reused common/runner/domain utils; reasonable file size
+- [ ] Upload, SQL, debug phases per conventions below
+- [ ] `go fmt` / `go vet` / `go test ./...` (and `./tmp/...` if used) passed; ad-hoc tests removed from `tmp/`
+- [ ] Real host smoke test: single-node **130**; YAC changes also **125/126** when applicable
+
+### Coding constraints (summary)
+
+| Scenario | Use |
+|----------|-----|
+| Remote commands | `ctx.Execute` / `ctx.ExecuteWithCheck` |
+| Product user | `commonos.ExecuteAsUserWithCheck` / `ExecuteAsUserWithEnvCheckCtx` |
+| SQL sysdba | `commonsql.ExecuteSQLAsSysdbaCtx` |
+| Upload | `ctx.Executor.Upload(..., ctx.UploadContext())`; packages `file.FindAndDistribute` |
+| Safe delete | `commonos.ValidateDeletePath` + `DeletePathUnder` |
+| Multi-line shell/SQL | collect/stressos `*RunShell`/`*RunSQL`; install domain Execute + `LogScriptPreview` |
+
+**Forbidden in steps**: hand-written scp, duplicated yasql wiring, raw `Executor.Execute` (except framework), `fmt.Print` instead of Logger.
+
+**Debug logging (changed steps)**: commands via Execute* (`>>> cmd`, exit, stdout/stderr); `LogScriptPreview` before multi-line scripts/SQL; multi-subtask steps use `phase=plan` + `*-start`/`*-done`; terminal shows step summary only—not full stdout or phase bodies; redact secrets via `logging.redact`.
+
+**Optional steps**: PreCheck error + `Optional: true`; missing upstream in dry-run/precheck → `runner.SkipPrecheckDryRunWhenUpstreamArtifactMissing`.
+
+### Test environments
+
+Control machine macOS/Linux → SSH targets; users `root` / `yashan` (key-based); product user default `--os-user yashan`.
+
+| Scenario | Hosts | Notes |
+|----------|-------|-------|
+| Single-node | `10.10.10.130` (aarch64) | `db`/`os`/`ycm`/`ymp`/`collect`/`stressos` `-t 10.10.10.130` |
+| YAC multi-node | `10.10.10.125`, `10.10.10.126` | Multi `-t`; `stressos --net` ping mesh + iperf3 |
+| YAC single-node | e.g. `10.10.10.125` + `--yac` | `--yac-access-mode direct`, `--yac-exclude-disks`, etc. |
+
+```bash
+make build-current
+./build/yinstall_$(uname -s | tr A-Z a-z)_$(uname -m) db -t 10.10.10.130 --precheck -s C-007
+```
+
+Logs: `--log-dir` default `~/.yinstall/logs`; files `yinstall_<type>_<ts>.log` / `yinstall_<type>_debug_<ts>.log`. collect/stressos output: `./output/<collect|stress>/<timestamp>/`.
+
+Detailed API tables, Params keys, and phase naming: **`installer.md`** (appendix debug troubleshooting).
 
 ## Build & Development Commands
 
@@ -21,13 +128,15 @@ Output binaries go to `build/` directory with naming convention: `yinstall_<os>_
 The binary is named `yinstall` (changed from `yasinstall` in v0.1.0+). All references in code, documentation, and build scripts have been updated accordingly.
 
 ### Run Tests
-- **All tests**: `go test ./...`
-- **Single test file**: `go test ./internal/cli -run TestParseStepRanges`
-- **Verbose output**: `go test -v ./...`
+- **Regression**: `go test ./... -count=1`
+- **Ad-hoc (tmp/)**: `go test ./tmp/... -count=1` — tests live only under repo root `tmp/`; delete after pass (see Development Workflow)
+- **Single package**: `go test ./internal/cli -run TestParseStepRanges -v`
+- **Verbose**: `go test -v ./...`
 
 ### Lint & Format
 - **Format code**: `go fmt ./...`
 - **Vet code**: `go vet ./...`
+- **Debug logging static check**: `make check-debug-logging`
 
 ## Architecture & Key Concepts
 
@@ -75,7 +184,7 @@ Each installation type has a registry function that returns ordered steps:
 
 ### CLI Structure
 - **Root command**: `internal/cli/root.go` defines global flags (SSH, execution control, logging)
-- **Subcommands**: `os.go`, `db.go`, `ycm.go`, `ymp.go`, `standby.go`, `clean.go`
+- **Subcommands**: `os.go`, `db.go`, `ycm.go`, `ymp.go`, `standby.go`, `clean.go`, `collect.go`, `stressos.go`
 - Each subcommand:
   - Defines its own flags
   - Builds a step list from the registry
@@ -97,7 +206,7 @@ Each installation type has a registry function that returns ordered steps:
 - **Session log**: Mirrors terminal output (human-readable)
 - **Debug log**: Detailed logs including all commands, stdout, stderr, exit codes
 - Both logs are created in `--log-dir` (default: `~/.yinstall/logs`)
-- Logs are named: `yinstall_<timestamp>_<runID>.log` and `yinstall_<timestamp>_<runID>_debug.log`
+- Logs are named: `yinstall_<type>_<timestamp>.log` and `yinstall_<type>_debug_<timestamp>.log` (e.g. `yinstall_db_20260528222915.log`)
 
 ## Common Development Tasks
 
@@ -168,10 +277,9 @@ Each installation type has a registry function that returns ordered steps:
 
 ## Testing
 
-The codebase includes unit tests for step filtering logic:
-- `internal/cli/steps_util_test.go` tests `parseStepRanges()` function
-- Tests cover single steps, ranges, comma-separated lists, and mixed formats
-- Run with: `go test ./internal/cli -run TestParseStepRanges -v`
+- **Long-term tests** live next to code under `internal/` (e.g. `internal/cli/steps_util_test.go` for `parseStepRanges()`).
+- **Ad-hoc verification** during development: **`tmp/*_test.go` only** — never add temporary tests under `internal/`; see **Development Workflow (Mandatory)**.
+- Example ad-hoc test location: `tmp/feature_test.go` with `package tmp_test` importing `github.com/yinstall/...`.
 
 ## Version & Build Info
 

@@ -1,0 +1,8 @@
+yashan    322463  0.0  0.1 1922476 34788 ?       Ssl  11:39   0:00 /data/yashan/yasdb_home/23.4.7.106/bin/yasagent --init -c yashandb -l 10.10.10.125:1676 --host-id host0001 -k                  -L /data/yashan/log -d
+yashan    322593  0.1  0.1 1837452 31908 ?       Ssl  11:39   0:00 /data/yashan/yasdb_home/23.4.7.106/bin/yasom --init -c yashandb -l 10.10.10.125:1675 -k                  -L /data/yashan/log -d
+yashan    323254  0.0  0.0  76548  2188 ?        Sl   11:40   0:00 /home/yashan/.yasboot/yashandb_yasdb_home/om/bin/monit -c /home/yashan/.yasboot/yashandb_yasdb_home/om/monit/monitrc
+root      323799  0.0  0.0  17240  7112 ?        S    11:40   0:00 sudo env LD_LIBRARY_PATH=/data/yashan/yasdb_home/23.4.7.106/lib /data/yashan/yasdb_home/23.4.7.106/bin/ycsrootagent start -H /data/yashan/yasdb_data/ycs/ce-1-1
+root      323801  0.5  0.0 139812  6288 ?        Sl   11:40   0:00 /data/yashan/yasdb_home/23.4.7.106/bin/ycsrootagent start -H /data/yashan/yasdb_data/ycs/ce-1-1
+yashan    324320  0.5  0.0 142160  5300 ?        Ssl  11:41   0:00 yascsm -H /data/yashan/yasdb_data/ycs/ce-1-1 -m NOMOUNT
+yashan    324329  1.8  1.7 2349184 538304 ?      Sl   11:41   0:00 yascs -H /data/yashan/yasdb_data/ycs/ce-1-1 -m NOMOUNT
+yashan    324456  5.8  7.9 7573320 2489156 ?     Sl   11:41   0:02 /data/yashan/yasdb_home/23.4.7.106/bin/yasdb NOMOUNT -D /data/yashan/yasdb_data/ce-1-1

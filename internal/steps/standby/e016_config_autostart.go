@@ -34,6 +34,8 @@ func StepE016ConfigAutostart() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			standbyLogPhase(ctx, "plan", "E-016: Configure Standby Autostart")
+			standbyLogPhase(ctx, "autostart-start", "autostart")
 			user := ctx.GetParamString("os_user", "yashan")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
 			beginPort := ctx.GetParamInt("db_begin_port", 1688)
@@ -87,6 +89,7 @@ func StepE016ConfigAutostart() *runner.Step {
 			}
 			ctx.Logger.Info("Autostart service configured: %s", result.ServiceName)
 
+			standbyLogPhase(ctx, "autostart-done", "autostart")
 			return nil
 		},
 

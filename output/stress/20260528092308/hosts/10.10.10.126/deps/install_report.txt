@@ -1,0 +1,35 @@
+=== Dependency Installation Report ===
+host:      10.10.10.126
+time:      2026-05-28T01:23:25Z
+pkg_mgr:   dnf
+yum_mode:  none
+
+--- fio build dependencies (early) ---
+WARNING: fio build deps: required fio build dependencies missing: libaio-devel, libaio-devel
+  fio source build may lack libaio engine; IO bench default --io-engine=libaio will fail
+
+--- Package installation ---
+  fio          pkg install failed, attempting source build...
+  NOTE: fio is typically in EPEL and not in the base ISO
+  fio          source build FAILED: fio build dependencies: required fio build dependencies missing: libaio-devel, libaio-devel
+  fio          WARN (IO benchmarks will be skipped)
+  sysstat      WARN (install failed, stress tests may be affected)
+--- numactl (OS packages) ---
+  packages:  numactl libnuma
+  numactl      WARN (install failed; NUMA CPU/MEM bind tests may be skipped)
+
+  iperf3       pkg install failed, attempting source build...
+  NOTE: iperf3 is typically in EPEL and not in the base ISO
+  iperf3       OK  (source build)
+
+--- sysbench ---
+  sysbench not in repo, attempting source build (sysbench-1.0.20)...
+  sysbench source build FAILED: required build tool 'autoconf' not available after install; cannot compile sysbench from source (ISO repos may lack this tool)
+  CPU/MEM benchmarks will be skipped.
+
+--- Post-install verification ---
+  fio          MISSING    (some benchmarks will be skipped)
+  sysstat      MISSING    (some benchmarks will be skipped)
+  numactl      MISSING    (some benchmarks will be skipped)
+  iperf3       AVAILABLE  (iperf 3.21 (cJSON 1.7.15))
+  sysbench     MISSING    (some benchmarks will be skipped)

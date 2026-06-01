@@ -37,6 +37,7 @@ func StepC023CreateArchDG() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "sqls=2 op=create-archdg+set-dest node=first")
 			archdgStr := ctx.GetParamString("yac_archdg", "")
 			user := ctx.GetParamString("os_user", "yashan")
 			installPath := ctx.GetParamString("db_install_path", "/data/yashan/yasdb_home")
@@ -73,7 +74,7 @@ func StepC023CreateArchDG() *runner.Step {
 			firstHost := hosts[0]
 			firstCtx := ctx.ForHost(firstHost)
 
-			res, err := commonsql.ExecuteSQLAsSysdbaInstallLayoutCtx(firstCtx, user, installPath, dataPath, createSQL, true)
+			res, err := dbRunSQLInstallLayoutPhase(firstCtx, user, installPath, dataPath, "create-archdg", createSQL, true)
 			if err != nil {
 				stdout := ""
 				if res != nil {
@@ -83,6 +84,9 @@ func StepC023CreateArchDG() *runner.Step {
 					ctx.Logger.Info("Archive diskgroup ARCH already exists, skipping creation")
 					return nil
 				}
+				if res != nil {
+					commonsql.ReportSQLFailure(firstCtx, createSQL, res)
+				}
 				return fmt.Errorf("failed to create archive diskgroup: %w\nOutput: %s", err, stdout)
 			}
 
@@ -91,7 +95,7 @@ func StepC023CreateArchDG() *runner.Step {
 			alterSQL := "ALTER DATABASE SET ARCHIVELOG DEST '+ARCH';"
 			ctx.Logger.Info("Setting archive destination to +ARCH...")
 
-			if _, err := commonsql.ExecuteSQLAsSysdbaInstallLayoutCtx(firstCtx, user, installPath, dataPath, alterSQL, true); err != nil {
+			if _, err := dbRunSQLInstallLayoutPhase(firstCtx, user, installPath, dataPath, "set-archive-dest", alterSQL, true); err != nil {
 				return fmt.Errorf("failed to set archive destination: %w", err)
 			}
 			ctx.Logger.Info("Archive destination set to +ARCH")
@@ -108,7 +112,7 @@ func StepC023CreateArchDG() *runner.Step {
 			firstCtx := ctx.ForHost(hosts[0])
 
 			checkSQL := "SELECT name, state, total_mb, free_mb FROM v\\$yfs_diskgroup WHERE name = 'ARCH';"
-			res, err := commonsql.ExecuteSQLAsSysdbaInstallLayoutCtx(firstCtx, user, installPath, dataPath, checkSQL, true)
+			res, err := dbRunSQLInstallLayoutPhase(firstCtx, user, installPath, dataPath, "verify-archdg", checkSQL, true)
 			if err != nil {
 				return fmt.Errorf("archive diskgroup verification query failed: %w", err)
 			}

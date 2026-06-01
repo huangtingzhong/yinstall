@@ -30,6 +30,7 @@ func StepH007ValidateJDK() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ympLogPhase(ctx, "plan", "H-007: Validate JDK Version")
 			expectedVersion := ctx.GetParamString("ymp_jdk_version", "17")
 
 			// 检测 CPU 架构

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -55,6 +56,7 @@ func StepB021AutoDiscoverSharedDisks() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-021: Auto Discover Shared Disks")
 			ctx.Logger.Info("Starting automatic shared disk discovery...")
 
 			// 获取配置参数
@@ -62,16 +64,7 @@ func StepB021AutoDiscoverSharedDisks() *runner.Step {
 			excludeDisksStr := ctx.GetParamString("yac_exclude_disks", "")
 			systemdgSizeMaxStr := ctx.GetParamString("yac_systemdg_size_max", "10G")
 
-			// 解析排除列表
-			var excludeDisks []string
-			if excludeDisksStr != "" {
-				for _, disk := range strings.Split(excludeDisksStr, ",") {
-					disk = strings.TrimSpace(disk)
-					if disk != "" {
-						excludeDisks = append(excludeDisks, disk)
-					}
-				}
-			}
+			excludeDisks := commonos.ParseYACExcludeDisks(excludeDisksStr)
 
 			// 解析 systemdg 大小阈值
 			systemdgSizeMax, err := parseSizeToBytes(systemdgSizeMaxStr)
@@ -247,8 +240,8 @@ func scanDisksOnNode(ctx *runner.StepContext, diskPattern string, excludeDisks [
 			continue
 		}
 
-		// 跳过排除列表中的磁盘
-		if contains(excludeDisks, diskPath) {
+		// 跳过排除列表中的磁盘（与 C-001B 共用匹配规则）
+		if commonos.IsDiskPathExcluded(diskPath, excludeDisks) {
 			continue
 		}
 

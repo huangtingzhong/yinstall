@@ -189,6 +189,8 @@ func StepE010CheckAndCleanupExistingNodes() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			standbyLogPhase(ctx, "plan", "E-010: Check and Cleanup Existing Nodes")
+			standbyLogPhase(ctx, "check-start", "cluster nodes vs standby targets")
 			primaryUser := GetPrimaryOSUser(ctx)
 			targets := ctx.GetParamStringSlice("standby_targets")
 			if len(targets) == 0 {
@@ -227,6 +229,7 @@ func StepE010CheckAndCleanupExistingNodes() *runner.Step {
 
 			if len(targetsToCleanup) == 0 {
 				ctx.Logger.Info("All standby targets are not in cluster, no cleanup needed")
+				standbyLogPhase(ctx, "check-done", "cleanup=none")
 				return nil
 			}
 
@@ -281,6 +284,7 @@ func StepE010CheckAndCleanupExistingNodes() *runner.Step {
 				ctx.Logger.Info("Successfully removed host %s (hostid: %s)", targetIP, hostID)
 			}
 
+			standbyLogPhase(ctx, "check-done", fmt.Sprintf("removed=%d", len(targetsToCleanup)))
 			ctx.Logger.Info("Cleanup completed successfully")
 			return nil
 		},

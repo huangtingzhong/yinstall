@@ -43,6 +43,7 @@ func StepC001Check() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-001: Check Connectivity and YAC Prerequisites")
 			ctx.Logger.Info("Connectivity and prerequisites check completed (standalone mode)")
 			return nil
 		},

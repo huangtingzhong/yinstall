@@ -89,6 +89,7 @@ func StepH002CheckInstallDir() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ympLogPhase(ctx, "plan", "H-002: Check YMP Install Directory")
 			installDir := ctx.GetParamString("ymp_install_dir", "/opt/ymp")
 			isForce := ctx.IsForceStep()
 
@@ -119,8 +120,8 @@ func StepH002CheckInstallDir() *runner.Step {
 					if isForce {
 						// 强制模式：删除整个目录
 						ctx.Logger.Warn("Force mode: deleting existing directory %s", installDir)
-						if !commonos.IsSafeUnixRmRfPath(installDir) {
-							return fmt.Errorf("refusing to delete install directory %s: path is not under allowed installation roots", installDir)
+						if err := commonos.ValidateDeletePath(installDir); err != nil {
+							return fmt.Errorf("refusing to delete install directory %s: %w", installDir, err)
 						}
 						// 使用绝对路径，防止误删除（如 /opt/ymp 不会删除 /opt/ymp2）
 						// 先检查路径是否确实是目录，再删除

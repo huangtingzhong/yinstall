@@ -27,6 +27,7 @@ func StepG004CheckDeployConfig() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ycmLogPhase(ctx, "plan", "G-004: Check Deploy Config")
 			deployFile := ctx.GetParamString("ycm_deploy_file", "/opt/ycm/etc/deploy.yml")
 
 			ctx.Logger.Info("Checking deploy config: %s", deployFile)

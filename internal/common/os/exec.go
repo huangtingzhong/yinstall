@@ -59,7 +59,56 @@ func ExecuteAsUser(ctx *runner.StepContext, targetUser string, command string, s
 	if err != nil {
 		return nil, err
 	}
-	return ctx.Execute(cmd, showOutput)
+	_ = showOutput // reserved; do not pass as ctx.Execute(sudo) — user switch is already in cmd
+	return ctx.Execute(cmd, false)
+}
+
+func commandFailureMessage(result runner.ExecResult) string {
+	errMsg := result.GetStderr()
+	if errMsg == "" {
+		errMsg = result.GetStdout()
+	}
+	if errMsg == "" {
+		errMsg = fmt.Sprintf("exit code %d", result.GetExitCode())
+	}
+	return strings.TrimSpace(errMsg)
+}
+
+// reportCommandFailure 与 runner.StepContext.ExecuteWithCheck 一致。
+// logToTerminal=false 时不写 LogErrorExit（用于可恢复重试前的探测）。
+func reportCommandFailure(ctx *runner.StepContext, cmd string, result runner.ExecResult, logToTerminal bool) error {
+	errMsg := commandFailureMessage(result)
+	if logToTerminal {
+		ctx.Logger.LogErrorExit(
+			ctx.Executor.Host(),
+			ctx.CurrentStepID,
+			"",
+			cmd,
+			result.GetStdout(),
+			result.GetStderr(),
+			result.GetExitCode(),
+			errMsg,
+		)
+	}
+	return runner.NewCommandExitError(result.GetExitCode(), errMsg, logToTerminal)
+}
+
+// LogTerminalCommandFailure 将已有 ExecResult 按 LogErrorExit 格式输出到终端（不返回 error、不重复执行命令）。
+func LogTerminalCommandFailure(ctx *runner.StepContext, cmd string, result runner.ExecResult) {
+	if ctx == nil || result == nil || result.GetExitCode() == 0 {
+		return
+	}
+	errMsg := commandFailureMessage(result)
+	ctx.Logger.LogErrorExit(
+		ctx.Executor.Host(),
+		ctx.CurrentStepID,
+		"",
+		cmd,
+		result.GetStdout(),
+		result.GetStderr(),
+		result.GetExitCode(),
+		errMsg,
+	)
 }
 
 // ExecuteAsUserWithCheck 以指定用户身份执行命令（带退出码检查）。
@@ -67,12 +116,34 @@ func ExecuteAsUser(ctx *runner.StepContext, targetUser string, command string, s
 //
 // 参数含义同 ExecuteAsUser。
 func ExecuteAsUserWithCheck(ctx *runner.StepContext, targetUser string, command string, showOutput bool) (runner.ExecResult, error) {
-	result, err := ExecuteAsUser(ctx, targetUser, command, showOutput)
+	cmd, err := buildRunAsUserCommand(ctx, targetUser, command)
+	if err != nil {
+		return nil, err
+	}
+	_ = showOutput // reserved; privilege switching is handled in cmd, not ctx.Execute(sudo)
+	result, err := ctx.Execute(cmd, false)
 	if err != nil {
 		return result, err
 	}
-	if result.GetExitCode() != 0 {
-		return result, fmt.Errorf("command failed with exit code %d: %s", result.GetExitCode(), result.GetStderr())
+	if result != nil && result.GetExitCode() != 0 {
+		return result, reportCommandFailure(ctx, cmd, result, true)
+	}
+	return result, nil
+}
+
+// ExecuteAsUserWithCheckQuiet 同 ExecuteAsUserWithCheck，但失败时不输出 LogErrorExit（供重试逻辑使用）。
+func ExecuteAsUserWithCheckQuiet(ctx *runner.StepContext, targetUser string, command string, showOutput bool) (runner.ExecResult, error) {
+	cmd, err := buildRunAsUserCommand(ctx, targetUser, command)
+	if err != nil {
+		return nil, err
+	}
+	_ = showOutput
+	result, err := ctx.Execute(cmd, false)
+	if err != nil {
+		return result, err
+	}
+	if result != nil && result.GetExitCode() != 0 {
+		return result, reportCommandFailure(ctx, cmd, result, false)
 	}
 	return result, nil
 }
@@ -92,7 +163,8 @@ func ExecuteAsUserWithEnv(ctx *runner.StepContext, targetUser string, envFile st
 	if err != nil {
 		return nil, err
 	}
-	return ctx.Execute(cmd, showOutput)
+	_ = showOutput
+	return ctx.Execute(cmd, false)
 }
 
 // ExecuteAsUserWithEnvCheck 以指定用户身份执行命令（先加载环境文件 + 检查退出码）。
@@ -100,12 +172,36 @@ func ExecuteAsUserWithEnv(ctx *runner.StepContext, targetUser string, envFile st
 //
 // 参数含义同 ExecuteAsUserWithEnv。
 func ExecuteAsUserWithEnvCheck(ctx *runner.StepContext, targetUser string, envFile string, command string, showOutput bool) (runner.ExecResult, error) {
-	result, err := ExecuteAsUserWithEnv(ctx, targetUser, envFile, command, showOutput)
+	fullCmd := fmt.Sprintf("source %s && %s", envFile, command)
+	cmd, err := buildRunAsUserCommand(ctx, targetUser, fullCmd)
+	if err != nil {
+		return nil, err
+	}
+	_ = showOutput
+	result, err := ctx.Execute(cmd, false)
 	if err != nil {
 		return result, err
 	}
-	if result.GetExitCode() != 0 {
-		return result, fmt.Errorf("command failed with exit code %d: %s", result.GetExitCode(), result.GetStderr())
+	if result != nil && result.GetExitCode() != 0 {
+		return result, reportCommandFailure(ctx, cmd, result, true)
+	}
+	return result, nil
+}
+
+// ExecuteAsUserWithEnvCheckQuiet 同 ExecuteAsUserWithEnvCheck，失败时不输出 LogErrorExit。
+func ExecuteAsUserWithEnvCheckQuiet(ctx *runner.StepContext, targetUser string, envFile string, command string, showOutput bool) (runner.ExecResult, error) {
+	fullCmd := fmt.Sprintf("source %s && %s", envFile, command)
+	cmd, err := buildRunAsUserCommand(ctx, targetUser, fullCmd)
+	if err != nil {
+		return nil, err
+	}
+	_ = showOutput
+	result, err := ctx.Execute(cmd, false)
+	if err != nil {
+		return result, err
+	}
+	if result != nil && result.GetExitCode() != 0 {
+		return result, reportCommandFailure(ctx, cmd, result, false)
 	}
 	return result, nil
 }
@@ -120,6 +216,13 @@ func ExecuteAsUserWithEnvCheckCtx(ctx *runner.StepContext, targetUser string, en
 // 统一通过 ctx.Execute() 记录 DEBUG 日志
 func ExecuteAsUserWithEnvCtx(ctx *runner.StepContext, targetUser string, envFile string, command string, showOutput bool) (runner.ExecResult, error) {
 	return ExecuteAsUserWithEnv(ctx, targetUser, envFile, command, showOutput)
+}
+
+// BuildAsUserEnvCommand 构造以指定用户执行带 env 的命令字符串（不执行）。
+// collect 子命令用此函数构造命令后通过 SSH session 超时执行（方案D）。
+func BuildAsUserEnvCommand(ctx *runner.StepContext, targetUser, envFile, command string) (string, error) {
+	fullCmd := fmt.Sprintf("source %s && %s", envFile, command)
+	return buildRunAsUserCommand(ctx, targetUser, fullCmd)
 }
 
 // GetCurrentUser 获取当前执行用户

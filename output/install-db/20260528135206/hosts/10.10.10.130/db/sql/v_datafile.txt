@@ -1,0 +1,13 @@
+
+         ID NAME                                                             CREATION_TIME                                                            TS#      BLOCKS  BLOCK_SIZE       BYTES STATUS    RELATIVE_FNO AUTO_EXTEND   NEXT_SIZE    MAX_SIZE FREE_BLOCKS  DISK_BYTES SHADOW          FILE# 
+----------- ---------------------------------------------------------------- ---------------------------------------------------------------- ----------- ----------- ----------- ----------- --------- ------------ ----------- ----------- ----------- ----------- ----------- --------- ----------- 
+          0 /data/yashan/yasdb_data_4688/db-1-1/dbfiles/system               2026-05-28 13:51:54.835960                                                 0        8192        8192    67108864 ONLINE               0 ON             67108864  5.4976E+11        3040    67108864 FALSE               0
+          1 /data/yashan/yasdb_data_4688/db-1-1/dbfiles/sysaux               2026-05-28 13:51:54.879877                                                 1        8192        8192    67108864 ONLINE               0 ON             67108864  5.4976E+11        7832    67108864 FALSE               1
+          2 /data/yashan/yasdb_data_4688/db-1-1/dbfiles/temp                 2026-05-28 13:51:54.926081                                                 2        8192        8192    67108864 ONLINE               0 ON             67108864  5.4976E+11        7552    67108864 FALSE               2
+          3 /data/yashan/yasdb_data_4688/db-1-1/dbfiles/swap                 2026-05-28 13:51:54.974771                                                 3        8192        8192    67108864 ONLINE               0 ON             67108864  5.4976E+11        8064    67108864 FALSE               3
+          4 /data/yashan/yasdb_data_4688/db-1-1/dbfiles/users                2026-05-28 13:51:55.014660                                                 4        8192        8192    67108864 ONLINE               0 ON             67108864  5.4976E+11        8064    67108864 FALSE               4
+          5 /data/yashan/yasdb_data_4688/db-1-1/dbfiles/undo                 2026-05-28 13:51:55.064677                                                 5        8192        8192    67108864 ONLINE               0 ON             67108864  6.8719E+10           0    67108864 FALSE               5
+
+6 rows fetched.
+
+

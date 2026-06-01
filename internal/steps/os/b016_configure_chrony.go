@@ -47,6 +47,7 @@ func StepB016ConfigureChrony() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-016: Configure Chrony")
 			ntpServer := strings.TrimSpace(ctx.GetParamString("os_ntp_server", ""))
 
 			// 备份原配置

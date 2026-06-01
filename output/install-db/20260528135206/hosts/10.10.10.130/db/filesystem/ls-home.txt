@@ -1,0 +1,18 @@
+total 44
+drwxr-xr-x. 14 yashan yashan  4096 May  7 16:00 .
+drwxr-xr-x.  3 yashan yashan    24 Apr 29 09:52 ..
+drwxr-xr-x.  7 yashan yashan    84 Nov  6  2025 admin
+drwxr-xr-x.  2 yashan yashan  4096 Apr 29 09:53 bin
+drwxr-xr-x.  2 yashan yashan    50 Apr 29 09:53 client
+drwxr-xr-x.  2 yashan yashan    49 Apr 29 09:53 conf
+-rw-r--r--.  1 yashan yashan 10729 Nov  6  2025 gitmoduleversion.dat
+drwxr-xr-x.  2 yashan yashan    64 Nov  6  2025 include
+drwxr-xr-x.  3 yashan yashan    17 Nov  6  2025 java
+drwxr-xr-x.  2 yashan yashan  4096 Apr 29 09:53 lib
+-rw-r-----.  1 yashan yashan 14989 Nov  6  2025 LICENSE
+drwxr-xr-x.  7 yashan yashan    91 Apr 29 09:53 om
+drwxr-xr-x.  5 yashan yashan    94 Apr 29 09:52 .pkg
+drwxr-xr-x.  4 yashan yashan    36 Nov  6  2025 plug-in
+drwxr-xr-x.  2 yashan yashan   127 Nov  6  2025 scripts
+drwxr-xr-x. 18 yashan yashan  4096 Apr 29 09:53 third
+lrwxrwxrwx.  1 yashan yashan    19 May  7 16:00 yashandb_yasdb_home -> yashandb_yasdb_home

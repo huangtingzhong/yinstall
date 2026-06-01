@@ -53,6 +53,7 @@ func StepG006CheckPorts() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ycmLogPhase(ctx, "plan", "G-006: Check YCM Ports")
 			ports := []struct {
 				name     string
 				paramKey string

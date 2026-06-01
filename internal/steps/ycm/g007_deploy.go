@@ -75,6 +75,7 @@ func StepG007Deploy() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ycmLogPhase(ctx, "plan", "G-007: Deploy YCM")
 			deployFile := ctx.GetParamString("ycm_deploy_file", "/opt/ycm/etc/deploy.yml")
 			driver := ctx.GetParamString("ycm_db_driver", "sqlite3")
 			ycmInit := ctx.GetParamString("ycm_init_path", "")
@@ -125,6 +126,7 @@ func StepG007Deploy() *runner.Step {
 				cmd = fmt.Sprintf("%s deploy --conf %s", ycmInit, deployFile)
 			}
 
+			ycmLogPhase(ctx, "deploy-start", fmt.Sprintf("driver=%s", driver))
 			ctx.Logger.Info("Executing YCM deploy command...")
 			result, err := ctx.Execute(cmd, true)
 			if err != nil {
@@ -138,6 +140,7 @@ func StepG007Deploy() *runner.Step {
 				ctx.Logger.Info("YCM deploy output: %s", result.GetStdout())
 			}
 
+			ycmLogPhase(ctx, "deploy-done", driver)
 			ctx.Logger.Info("YCM deployment completed successfully")
 			return nil
 		},

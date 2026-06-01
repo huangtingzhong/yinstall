@@ -14,18 +14,25 @@ import (
 func IsPackageInstalled(ctx *runner.StepContext, pkg, pkgManager string) bool {
 	var checkCmd string
 	if pkgManager == "apt" {
-		checkCmd = fmt.Sprintf("dpkg -l %s 2>/dev/null | grep -q '^ii'", pkg)
+		// 保留 dpkg-query 的 stdout/stderr，便于 debug 日志分析；不再用 grep -q 吞掉输出
+		checkCmd = fmt.Sprintf("dpkg-query -W -f '${db:Status-Status}' %s 2>&1", pkg)
 	} else {
-		checkCmd = fmt.Sprintf("rpm -q %s >/dev/null 2>&1", pkg)
+		checkCmd = fmt.Sprintf("rpm -q %s 2>&1", pkg)
 	}
 
 	result, _ := ctx.Execute(checkCmd, false)
-	return result != nil && result.GetExitCode() == 0
+	if result == nil {
+		return false
+	}
+	if pkgManager == "apt" {
+		return result.GetExitCode() == 0 && strings.TrimSpace(result.GetStdout()) == "installed"
+	}
+	return result.GetExitCode() == 0
 }
 
 // libzstdSourceSatisfiedRHEL7 判断 EL7 系列是否已通过源码安装获得 libzstd（仓库常无 libzstd RPM）
 func libzstdSourceSatisfiedRHEL7(ctx *runner.StepContext) bool {
-	r1, _ := ctx.Execute("command -v zstd >/dev/null 2>&1", false)
+	r1, _ := ctx.Execute("command -v zstd 2>&1", false)
 	if r1 == nil || r1.GetExitCode() != 0 {
 		return false
 	}
@@ -39,11 +46,25 @@ func libzstdSatisfiedByZstdRPM(ctx *runner.StepContext, pkgManager string) bool 
 	if pkgManager == "apt" {
 		return false
 	}
-	r, _ := ctx.Execute("rpm -q zstd >/dev/null 2>&1", false)
+	r, _ := ctx.Execute("rpm -q zstd 2>&1", false)
 	return r != nil && r.GetExitCode() == 0
 }
 
-// IsDepPackageSatisfied 判断依赖包是否已满足（含 libzstd：EL7 源码等价、RPM 系 zstd 主包等价）
+// libzstdSatisfiedByAptAliases Debian/Ubuntu 上 dpkg 常为 libzstd1（共享库），CLI 为 zstd 元包；
+// 无独立 ii 记录名为 libzstd 时仍应视为 libzstd 依赖已满足。
+func libzstdSatisfiedByAptAliases(ctx *runner.StepContext, pkgManager string) bool {
+	if pkgManager != "apt" {
+		return false
+	}
+	for _, name := range []string{"libzstd1", "zstd"} {
+		if IsPackageInstalled(ctx, name, "apt") {
+			return true
+		}
+	}
+	return false
+}
+
+// IsDepPackageSatisfied 判断依赖包是否已满足（含 libzstd：EL7 源码、Debian/Ubuntu 别名、RPM 系 zstd 主包）
 func IsDepPackageSatisfied(ctx *runner.StepContext, pkg, pkgManager string) bool {
 	pkg = strings.TrimSpace(pkg)
 	if pkg == "" {
@@ -54,6 +75,9 @@ func IsDepPackageSatisfied(ctx *runner.StepContext, pkg, pkgManager string) bool
 	}
 	if pkg == "libzstd" {
 		if ctx.OSInfo != nil && IsRHEL7(ctx.OSInfo) && libzstdSourceSatisfiedRHEL7(ctx) {
+			return true
+		}
+		if libzstdSatisfiedByAptAliases(ctx, pkgManager) {
 			return true
 		}
 		if libzstdSatisfiedByZstdRPM(ctx, pkgManager) {

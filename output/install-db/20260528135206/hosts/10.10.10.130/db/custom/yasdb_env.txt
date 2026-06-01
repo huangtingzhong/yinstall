@@ -1,0 +1,23 @@
+=== YASDB_HOME ===
+/home/yashan/.yasboot/yashandb4688_yasdb_home
+
+=== YASDB_DATA ===
+/data/yashan/yasdb_data_4688/db-1-1
+
+=== PATH contains yasdb ===
+/home/yashan/.yasboot/yashandb4688_yasdb_home/bin
+/home/yashan/.yasboot/yashandb_yasdb_home/bin
+/home/yashan/.yasboot/yashandb_yasdb_home/bin
+
+=== yasdb binary ===
+/home/yashan/.yasboot/yashandb4688_yasdb_home/bin/yasdb
+Usage:
+  yasdb [MODE] [OPTION]
+
+Modes:
+    start mode:
+                 "nomount", "mount", "open"
+Options:
+  -D  database home path
+  -t  start type: "standalone", "mn", "cn", "dn"
+  -V  output version information, then exit

@@ -33,6 +33,7 @@ func StepB030TriggerUdev() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			osLogPhase(ctx, "plan", "B-030: Trigger Udev Rules")
 			ctx.Execute("udevadm control --reload-rules", true)
 			_, err := ctx.ExecuteWithCheck("/sbin/udevadm trigger --type=devices --action=change", true)
 			return err

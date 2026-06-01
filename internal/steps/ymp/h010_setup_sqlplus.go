@@ -39,6 +39,7 @@ func StepH010SetupSQLPlus() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			ympLogPhase(ctx, "plan", "H-010: Setup SQLPlus and Env")
 			sqlplusPkg := ctx.GetParamString("ymp_instantclient_sqlplus", "")
 			installDir := ctx.GetParamString("ymp_install_dir", "/opt/ymp")
 			ympUser := ctx.GetParamString("ymp_user", "ymp")
@@ -58,11 +59,14 @@ func StepH010SetupSQLPlus() *runner.Step {
 
 			ctx.Execute(fmt.Sprintf("chown %s:%s %s", ympUser, ympUser, fullPath), true)
 
+			ympLogPhase(ctx, "extract-start", "instantclient-sqlplus")
 			ctx.Logger.Info("Extracting sqlplus: %s -> %s", fullPath, installDir)
 			cmd := fmt.Sprintf("unzip -o %s -d %s", fullPath, installDir)
 			if _, err := ctx.ExecuteWithCheck(cmd, true); err != nil {
+				ympLogPhase(ctx, "extract-fail", runner.TruncateForLog(err.Error(), 80))
 				return fmt.Errorf("failed to extract sqlplus: %w", err)
 			}
+			ympLogPhase(ctx, "extract-done", installDir)
 
 			// 获取 instantclient 实际目录名
 			result, _ := ctx.Execute(fmt.Sprintf("ls -d %s/instantclient_* 2>/dev/null | head -1", installDir), false)
@@ -75,12 +79,15 @@ func StepH010SetupSQLPlus() *runner.Step {
 			}
 
 			// 写入环境变量文件
+			ympLogPhase(ctx, "op-start", fmt.Sprintf("env_file=%s ic_dir=%s", envFile, runner.TruncateForLog(icDir, 60)))
 			ctx.Logger.Info("Writing Oracle env to: %s", envFile)
 			envContent := fmt.Sprintf("export PATH=%s:$PATH\nexport LD_LIBRARY_PATH=%s:$LD_LIBRARY_PATH", icDir, icDir)
 			cmd = fmt.Sprintf("cat > %s << 'HTZ'\n%s\nHTZ", envFile, envContent)
 			if _, err := ctx.ExecuteWithCheck(cmd, true); err != nil {
+				ympLogPhase(ctx, "op-fail", runner.TruncateForLog(err.Error(), 80))
 				return fmt.Errorf("failed to write env file: %w", err)
 			}
+			ympLogPhase(ctx, "op-done", envFile)
 
 			ctx.Execute(fmt.Sprintf("chown %s:%s %s", ympUser, ympUser, envFile), true)
 

@@ -29,6 +29,8 @@ func StepE005CheckStandbyConnectivity() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			standbyLogPhase(ctx, "plan", "E-005: Check Standby Connectivity")
+			standbyLogPhase(ctx, "check-start", "standby ssh password probe")
 			withOS := ctx.GetParamBool("with_os", true)
 			user := ctx.GetParamString("os_user", "yashan")
 			password := ctx.GetParamString("os_user_password", "")
@@ -36,6 +38,7 @@ func StepE005CheckStandbyConnectivity() *runner.Step {
 			// 如果配置了 OS（with_os=true），密码会在 B-004 步骤中设置，此处跳过验证
 			if withOS {
 				ctx.Logger.Info("OS configuration enabled, user password will be set in B-004 step")
+				standbyLogPhase(ctx, "check-done", "skip=with_os")
 				return nil
 			}
 
@@ -55,6 +58,7 @@ func StepE005CheckStandbyConnectivity() *runner.Step {
 			if result != nil && strings.Contains(result.GetStdout(), "NOT_FOUND") {
 				ctx.Logger.Warn("sshpass not found on target, cannot verify user password automatically")
 				ctx.Logger.Warn("Please ensure the password for user '%s' matches --os-user-password", user)
+				standbyLogPhase(ctx, "check-done", "skip=sshpass_missing")
 				return nil
 			}
 
@@ -78,6 +82,7 @@ func StepE005CheckStandbyConnectivity() *runner.Step {
 				return fmt.Errorf("user '%s' password verification failed on %s", user, host)
 			}
 
+			standbyLogPhase(ctx, "check-done", fmt.Sprintf("user=%s host=%s", user, host))
 			ctx.Logger.Info("SSH login test successful for user '%s'", user)
 			return nil
 		},

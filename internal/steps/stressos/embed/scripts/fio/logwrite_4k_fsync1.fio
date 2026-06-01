@@ -1,0 +1,12 @@
+[global]
+ioengine=%%IOENGINE%%
+bs=%%BS%%
+rw=write
+direct=%%DIRECT%%
+iodepth=%%IODEPTH%%
+numjobs=%%NUMJOBS%%
+fsync=%%FSYNC%%
+
+[logwrite]
+filename=%%FILENAME%%
+size=%%SIZE%%

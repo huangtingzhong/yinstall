@@ -28,6 +28,8 @@ func StepE009CheckNetworkConnectivity() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			standbyLogPhase(ctx, "plan", "E-009: Check Network Connectivity")
+			standbyLogPhase(ctx, "check-start", fmt.Sprintf("targets=%d", len(ctx.GetParamStringSlice("standby_targets"))))
 			targets := ctx.GetParamStringSlice("standby_targets")
 			sshPort := ctx.GetParamInt("ssh_port", 22)
 
@@ -54,6 +56,7 @@ func StepE009CheckNetworkConnectivity() *runner.Step {
 				}
 			}
 
+			standbyLogPhase(ctx, "check-done", fmt.Sprintf("targets=%d", len(targets)))
 			ctx.Logger.Info("Network connectivity check passed")
 			return nil
 		},

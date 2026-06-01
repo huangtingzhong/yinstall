@@ -1,0 +1,11 @@
+127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4
+::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
+127.0.0.1   htz01
+127.0.0.1   yashandb01
+# BEGIN yinstall managed hosts
+10.10.10.125  yashandb01
+10.10.10.126  yashandb02
+10.10.10.127  yashandb01-vip
+10.10.10.128  yashandb02-vip
+10.10.10.129  yashandb-scan
+# END yinstall managed hosts

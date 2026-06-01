@@ -43,14 +43,17 @@ func StepC009VIPCheck() *runner.Step {
 		Optional:    true,
 
 		PreCheck: func(ctx *runner.StepContext) error {
-			isYACMode := ctx.GetParamBool("yac_mode", false)
-			if !isYACMode {
+			if !ctx.GetParamBool("yac_mode", false) {
 				return nil
+			}
+			if !YACAccessModeRequiresVIP(ctx.GetParamString("yac_access_mode", "vip")) {
+				return fmt.Errorf("direct access mode: VIP check not required")
 			}
 			return nil
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-009: Validate or Auto-Generate VIP")
 			// 实际校验/自动生成在 db.go 中通过 RunVIPValidationOrAutoGenerate 执行，此处仅占位
 			return nil
 		},
@@ -62,8 +65,11 @@ func StepC009VIPCheck() *runner.Step {
 }
 
 // RunVIPValidationOrAutoGenerate 校验用户配置的 VIP，或在策略允许时自动生成。
-// VIP 与 SCAN 模式均需执行（SCAN 依赖 VIP 前置）。
+// vip/scan 模式由 db.go 调用；direct 模式不调用。
 func RunVIPValidationOrAutoGenerate(hosts []HostExec, params map[string]interface{}, logger *logging.Logger) error {
+	if !YACAccessModeRequiresVIP(getParamString(params, "yac_access_mode", "vip")) {
+		return nil
+	}
 	if len(hosts) == 0 {
 		return fmt.Errorf("no hosts for VIP check")
 	}

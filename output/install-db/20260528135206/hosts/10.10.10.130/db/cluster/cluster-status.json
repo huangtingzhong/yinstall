@@ -1,0 +1,14 @@
+{
+  "artifacts": [
+    "cluster-status-by-host.txt",
+    "cluster-status-by-group.txt",
+    "monit-summary.txt"
+  ],
+  "cluster_name": "yashandb4688",
+  "host": "10.10.10.130",
+  "yasboot_commands": [
+    "yasboot cluster status -c yashandb4688 -d",
+    "yasboot cluster status -b group -c yashandb4688 -d",
+    "yasboot monit summary -c yashandb4688"
+  ]
+}

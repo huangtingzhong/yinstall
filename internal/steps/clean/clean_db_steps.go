@@ -25,16 +25,14 @@ func StepCleanDB001QueryYACDisks() *runner.Step {
 
 			// 如果用户明确指定了不清理（空字符串），则跳过
 			if cleanDisks == "" {
-				// 尝试自动检测是否为 YAC 环境
-				ctx.Logger.Info("Checking if this is a YAC environment...")
-				if isYACEnvironment(ctx) {
+				ctx.Logger.Info("Checking if this is a YAC environment (optional env probe)...")
+				if yac, _ := probeYACEnvironment(ctx); yac {
 					ctx.Logger.Warn("Detected YAC environment, but --clean-yac-disks not specified")
 					ctx.Logger.Warn("YAC shared disks will NOT be cleaned")
 					ctx.Logger.Warn("To clean YAC shared disks, add: --clean-yac-disks auto")
 				} else {
 					ctx.Logger.Info("Not a YAC environment, skipping disk cleanup")
 				}
-
 				return fmt.Errorf("YAC disk cleanup not requested (use --clean-yac-disks auto to enable)")
 			}
 
@@ -44,58 +42,42 @@ func StepCleanDB001QueryYACDisks() *runner.Step {
 				return fmt.Errorf("manual disk paths specified, skipping query")
 			}
 
-			// auto 模式：检测 YAC 环境
-			ctx.Logger.Info("Auto mode: detecting YAC environment...")
-			if !isYACEnvironment(ctx) {
-				ctx.Logger.Warn("Not a YAC environment, skipping disk cleanup")
+			// auto 模式：source env；YAC 可由 YASCS_HOME、ycs 目录或 --yac 判定（支持单节点）
+			ctx.Logger.Info("Auto mode: prepare env and detect YAC...")
+			if err := prepareCleanDBEnv(ctx); err != nil {
+				return err
+			}
+			if !isCleanYACContext(ctx) {
+				ctx.Logger.Warn("Not a YAC environment after env prepare")
 				return fmt.Errorf("not a YAC environment")
 			}
-
-			ctx.Logger.Info("YAC environment confirmed, will query disk information")
+			ctx.Logger.Info("YAC environment confirmed (ycsctl query disk, fallback /dev/yfs on failure)")
 			return nil
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			yasdbHome := ctx.GetParamString("yasdb_home", "/data/yashan/yasdb_home")
-			osUser := ctx.GetParamString("os_user", "yashan")
+			ctx.Logger.Info("Querying YAC disk information using ycsctl (source env)...")
 
-			ctx.Logger.Info("Querying YAC disk information using ycsctl...")
-
-			// 检查 ycsctl 命令是否存在
-			ycsctlPath := path.Join(yasdbHome, "bin/ycsctl")
-			result, _ := ctx.Execute(fmt.Sprintf("test -f %s", ycsctlPath), false)
-			if result == nil || result.GetExitCode() != 0 {
-				ctx.Logger.Warn("ycsctl command not found at %s, cannot query disks", ycsctlPath)
-				return fmt.Errorf("ycsctl not found, cannot query disks in auto mode")
-			}
-
-			// 切换到数据库用户执行 ycsctl query disk
-			result, err := commonos.ExecuteAsUser(ctx, osUser, fmt.Sprintf("%s query disk", ycsctlPath), true)
-			if err != nil || result == nil || result.GetExitCode() != 0 {
-				ctx.Logger.Warn("Failed to execute ycsctl query disk: %v", err)
-				if result != nil {
-					ctx.Logger.Warn("Output: %s", result.GetStdout())
-					ctx.Logger.Warn("Error: %s", result.GetStderr())
+			var diskPaths []string
+			output, err := runYcsctlQueryDisk(ctx)
+			if err == nil {
+				diskPaths = parseYcsctlOutput(output)
+				if len(diskPaths) > 0 {
+					ctx.Logger.Info("ycsctl query disk: %d disk(s)", len(diskPaths))
+					ctx.Results["yac_disk_paths"] = diskPaths
+					return nil
 				}
-				return fmt.Errorf("failed to query disk information")
+				ctx.Logger.Warn("ycsctl returned no disks, trying /dev/yfs fallback")
+			} else {
+				ctx.Logger.Warn("ycsctl query disk failed: %v; trying /dev/yfs fallback (single-node YAC)", err)
 			}
 
-			// 解析输出获取磁盘路径
-			output := result.GetStdout()
-			ctx.Logger.Info("ycsctl query disk output:")
-			ctx.Logger.Info("%s", output)
-
-			diskPaths := parseYcsctlOutput(output)
-			if len(diskPaths) == 0 {
-				ctx.Logger.Warn("No disks found in ycsctl output")
-				return fmt.Errorf("no disks found in ycsctl output")
+			diskPaths, err = discoverYACDiskPathsFromYFS(ctx, cleanYFSDiscoverRoot)
+			if err != nil {
+				return fmt.Errorf("failed to discover YAC disks: %w", err)
 			}
-
-			ctx.Logger.Info("Found %d disks: %v", len(diskPaths), diskPaths)
-
-			// 将磁盘路径保存到 Results 中，供后续步骤使用
+			ctx.Logger.Info("Found %d disks from /dev/yfs: %v", len(diskPaths), diskPaths)
 			ctx.Results["yac_disk_paths"] = diskPaths
-
 			return nil
 		},
 
@@ -124,13 +106,12 @@ func StepCleanDB002StopProcesses() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			yasdbHome := ctx.GetParamString("yasdb_home", "/data/yashan/yasdb_home")
-			yasdbData := ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data")
-			yasdbLog := ctx.GetParamString("yasdb_log", "/data/yashan/log")
-			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
-			osUser := ctx.GetParamString("os_user", "yashan")
+			yasdbHome, yasdbData, yasdbLog, clusterName, osUser, err := effectiveCleanDBPaths(ctx)
+			if err != nil {
+				return err
+			}
 
-			ctx.Logger.Info("Finding YashanDB processes...")
+			ctx.Logger.Info("Finding YashanDB processes (paths from sourced env)...")
 
 			// 1. 先停止 monit 监控进程（防止自动重启）
 			ctx.Logger.Info("Step 1: Stopping monit monitoring process...")
@@ -224,11 +205,10 @@ func StepCleanDB002StopProcesses() *runner.Step {
 		},
 
 		PostCheck: func(ctx *runner.StepContext) error {
-			yasdbHome := ctx.GetParamString("yasdb_home", "/data/yashan/yasdb_home")
-			yasdbData := ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data")
-			yasdbLog := ctx.GetParamString("yasdb_log", "/data/yashan/log")
-			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
-			osUser := ctx.GetParamString("os_user", "yashan")
+			yasdbHome, yasdbData, yasdbLog, clusterName, osUser, err := effectiveCleanDBPaths(ctx)
+			if err != nil {
+				return err
+			}
 
 			findProcessCmd := buildFindYashanDBProcessPSCmd(ctx, yasdbHome, yasdbData, yasdbLog, osUser, clusterName, false)
 			result, _ := ctx.Execute(findProcessCmd, false)
@@ -256,42 +236,39 @@ func StepCleanDB003RemoveDirectories() *runner.Step {
 		Optional:    false,
 
 		PreCheck: func(ctx *runner.StepContext) error {
-			yasdbHome := ctx.GetParamString("yasdb_home", "/data/yashan/yasdb_home")
-			yasdbData := ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data")
-			yasdbLog := ctx.GetParamString("yasdb_log", "/data/yashan/log")
-
-			// 验证路径安全性
+			yasdbHome, yasdbData, yasdbLog, _, _, err := effectiveCleanDBPaths(ctx)
+			if err != nil {
+				return err
+			}
 			for _, p := range []struct{ name, path string }{
 				{"YASDB_HOME", yasdbHome},
 				{"YASDB_DATA", yasdbData},
 				{"YASDB_LOG", yasdbLog},
 			} {
-				if !commonos.IsSafeUnixRmRfPath(p.path) {
-					return fmt.Errorf("unsafe path for %s: '%s' - refusing to proceed (must be under allowed installation roots)", p.name, p.path)
+				if err := commonos.ValidateDeletePath(p.path); err != nil {
+					return fmt.Errorf("invalid delete path for %s: '%s': %w", p.name, p.path, err)
 				}
 			}
-
 			return nil
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			yasdbHome := ctx.GetParamString("yasdb_home", "/data/yashan/yasdb_home")
-			yasdbData := ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data")
-			yasdbLog := ctx.GetParamString("yasdb_log", "/data/yashan/log")
+			if _, _, _, _, _, err := effectiveCleanDBPaths(ctx); err != nil {
+				return err
+			}
 
-			ctx.Logger.Info("Removing YashanDB directories...")
-			removeDir(ctx, yasdbHome, "YASDB_HOME")
-			removeDir(ctx, yasdbData, "YASDB_DATA")
-			removeDir(ctx, yasdbLog, "YASDB_LOG")
+			ctx.Logger.Info("Removing YashanDB directories (sourced env paths)...")
+			removeCleanDBDirectoryTree(ctx)
 
 			ctx.Logger.Info("Directory removal completed")
 			return nil
 		},
 
 		PostCheck: func(ctx *runner.StepContext) error {
-			yasdbHome := ctx.GetParamString("yasdb_home", "/data/yashan/yasdb_home")
-			yasdbData := ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data")
-			yasdbLog := ctx.GetParamString("yasdb_log", "/data/yashan/log")
+			yasdbHome, yasdbData, yasdbLog, _, _, err := effectiveCleanDBPaths(ctx)
+			if err != nil {
+				return err
+			}
 
 			verifyDirRemoved(ctx, yasdbHome, "YASDB_HOME")
 			verifyDirRemoved(ctx, yasdbData, "YASDB_DATA")
@@ -316,8 +293,10 @@ func StepCleanDB004RemoveConfig() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
-			osUser := ctx.GetParamString("os_user", "yashan")
+			_, yasdbData, _, clusterName, osUser, err := effectiveCleanDBPaths(ctx)
+			if err != nil {
+				return err
+			}
 
 			ctx.Logger.Info("Removing .yasboot configuration files...")
 
@@ -330,8 +309,8 @@ func StepCleanDB004RemoveConfig() *runner.Step {
 
 			envFile := fmt.Sprintf("%s/%s.env", yasbootDir, clusterName)
 			ctx.Logger.Info("Removing yasboot env file: %s", envFile)
-			if !commonos.IsSafeUnixRmRfPath(envFile) {
-				ctx.Logger.Warn("Skipping rm of env file: path failed safety check: %s", envFile)
+			if err := commonos.ValidateDeletePath(envFile); err != nil {
+				ctx.Logger.Warn("Skipping rm of env file: %v", err)
 			} else {
 				result, err := ctx.Execute(fmt.Sprintf("rm -f %s", commonos.ShellSingleQuote(envFile)), true)
 				if err != nil || (result != nil && result.GetExitCode() != 0) {
@@ -344,8 +323,8 @@ func StepCleanDB004RemoveConfig() *runner.Step {
 			// 删除集群 home 文件
 			homeFile := fmt.Sprintf("%s/%s_yasdb_home", yasbootDir, clusterName)
 			ctx.Logger.Info("Removing yasboot home file: %s", homeFile)
-			if !commonos.IsSafeUnixRmRfPath(homeFile) {
-				ctx.Logger.Warn("Skipping rm of home file: path failed safety check: %s", homeFile)
+			if err := commonos.ValidateDeletePath(homeFile); err != nil {
+				ctx.Logger.Warn("Skipping rm of home file: %v", err)
 			} else {
 				result, err := ctx.Execute(fmt.Sprintf("rm -f %s", commonos.ShellSingleQuote(homeFile)), true)
 				if err != nil || (result != nil && result.GetExitCode() != 0) {
@@ -357,8 +336,6 @@ func StepCleanDB004RemoveConfig() *runner.Step {
 
 			ctx.Logger.Info("Configuration cleanup completed")
 
-			// 清理 ~/.bashrc 或 ~/.port<port> 中该集群的环境变量条目
-			yasdbData := ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data")
 			beginPort := ctx.GetParamInt("db_begin_port", 1688)
 			ctx.Logger.Info("Cleaning up env var entries for cluster '%s' (port %d)...", clusterName, beginPort)
 			if cleanErr := commonos.CleanEnvVars(ctx, osUser, clusterName, yasdbData, beginPort); cleanErr != nil {
@@ -371,8 +348,10 @@ func StepCleanDB004RemoveConfig() *runner.Step {
 		},
 
 		PostCheck: func(ctx *runner.StepContext) error {
-			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
-			osUser := ctx.GetParamString("os_user", "yashan")
+			_, _, _, clusterName, osUser, err := effectiveCleanDBPaths(ctx)
+			if err != nil {
+				return err
+			}
 
 			userHome, err := commonos.GetUserHomeDir(ctx, osUser)
 			if err != nil {
@@ -537,35 +516,16 @@ func parseYcsctlOutput(output string) []string {
 	return diskPaths
 }
 
-// isYACEnvironment 检测是否为 YAC 环境
-// 判断依据：
-// 1. ycsctl 命令存在
-// 2. 数据目录中存在 ycs 子目录
-// 满足任意一个条件即认为是 YAC 环境
-func isYACEnvironment(ctx *runner.StepContext) bool {
-	yasdbHome := ctx.GetParamString("yasdb_home", "/data/yashan/yasdb_home")
+// probeYACEnvironment 轻量探测 YAC（不强制 source env）；优先 ycs 数据目录。
+func probeYACEnvironment(ctx *runner.StepContext) (bool, error) {
 	yasdbData := ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data")
-
-	// 检查 ycsctl 命令
-	ycsctlPath := path.Join(yasdbHome, "bin/ycsctl")
-	result, _ := ctx.Execute(fmt.Sprintf("test -f %s", ycsctlPath), false)
-	hasYcsctl := result != nil && result.GetExitCode() == 0
-
-	// 检查 ycs 数据目录
 	ycsDataPath := path.Join(yasdbData, "ycs")
-	result, _ = ctx.Execute(fmt.Sprintf("test -d %s", ycsDataPath), false)
-	hasYcsData := result != nil && result.GetExitCode() == 0
-
-	// 记录检测结果
-	if hasYcsctl {
-		ctx.Logger.Info("YAC indicator: ycsctl command exists at %s", ycsctlPath)
-	}
-	if hasYcsData {
+	result, _ := ctx.Execute(fmt.Sprintf("test -d %s", commonos.ShellSingleQuote(ycsDataPath)), false)
+	if result != nil && result.GetExitCode() == 0 {
 		ctx.Logger.Info("YAC indicator: ycs data directory exists at %s", ycsDataPath)
+		return true, nil
 	}
-
-	// 任意一个条件满足即认为是 YAC 环境（支持单节点 YAC）
-	return hasYcsctl || hasYcsData
+	return false, nil
 }
 
 // StepCleanDB006FinalCheck Final cleanup check
@@ -582,11 +542,10 @@ func StepCleanDB006FinalCheck() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			yasdbHome := ctx.GetParamString("yasdb_home", "/data/yashan/yasdb_home")
-			yasdbData := ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data")
-			yasdbLog := ctx.GetParamString("yasdb_log", "/data/yashan/log")
-			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
-			osUser := ctx.GetParamString("os_user", "yashan")
+			yasdbHome, yasdbData, yasdbLog, clusterName, osUser, err := effectiveCleanDBPaths(ctx)
+			if err != nil {
+				return err
+			}
 
 			ctx.Logger.Info("Performing final process cleanup check...")
 

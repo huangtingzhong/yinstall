@@ -24,6 +24,7 @@ func StepC029ShowClusterStatus() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "C-029: Show Cluster Status")
 			// 只在第一个节点执行（对于单机版）或主节点（对于YAC）
 			firstHost := ctx.HostsToRun()[0]
 			hctx := ctx.ForHost(firstHost)
@@ -52,9 +53,10 @@ func StepC029ShowClusterStatus() *runner.Step {
 			hctx.Logger.Info("Displaying cluster status for cluster: %s", clusterName)
 
 			// 执行 yasboot cluster status 命令
-			result, _ := commonos.ExecuteAsUserWithEnv(hctx, user, envFile, fmt.Sprintf("yasboot cluster status -c %s -d", clusterName), false)
+			statusCmd := fmt.Sprintf("yasboot cluster status -c %s -d", clusterName)
+			result, err := commonos.ExecuteAsUserWithEnvCheck(hctx, user, envFile, statusCmd, false)
 
-			if result != nil && result.GetExitCode() == 0 {
+			if err == nil && result != nil && result.GetExitCode() == 0 {
 				output := result.GetStdout()
 				if output != "" {
 					// 输出到日志
@@ -79,17 +81,10 @@ func StepC029ShowClusterStatus() *runner.Step {
 				} else {
 					hctx.Logger.Warn("Cluster status command returned empty output")
 				}
+			} else if err != nil {
+				return fmt.Errorf("failed to get cluster status: %w", err)
 			} else {
-				errMsg := "Failed to get cluster status"
-				if result != nil {
-					if result.GetStderr() != "" {
-						errMsg = result.GetStderr()
-					} else if result.GetStdout() != "" {
-						errMsg = result.GetStdout()
-					}
-				}
-				hctx.Logger.Warn("Failed to get cluster status: %s", errMsg)
-				return fmt.Errorf("failed to get cluster status: %s", errMsg)
+				return fmt.Errorf("failed to get cluster status")
 			}
 
 			return nil

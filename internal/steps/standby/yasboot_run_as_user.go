@@ -17,6 +17,11 @@ func runYasbootOnPrimaryWithEnvFile(ctx *runner.StepContext, primaryUser, envFil
 	return commonos.ExecuteAsUserWithEnvCheck(ctx, primaryUser, envFile, cmd, true)
 }
 
+// runYasbootOnPrimaryWithEnvFileQuiet 用于可恢复重试前的探测，失败时不写 LogErrorExit。
+func runYasbootOnPrimaryWithEnvFileQuiet(ctx *runner.StepContext, primaryUser, envFile, cmd string) (runner.ExecResult, error) {
+	return commonos.ExecuteAsUserWithEnvCheckQuiet(ctx, primaryUser, envFile, cmd, true)
+}
+
 // runYasbootOnPrimaryWithEnvFileNoCheck 与 runYasbootOnPrimaryWithEnvFile 类似，但不校验退出码。
 // 仅用于 PostCheck / 展示类命令。
 func runYasbootOnPrimaryWithEnvFileNoCheck(ctx *runner.StepContext, primaryUser, envFile, cmd string) (runner.ExecResult, error) {
