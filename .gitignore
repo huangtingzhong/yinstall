@@ -29,9 +29,11 @@ output_*.txt
 sql_*.txt
 *.trc
 
-# OS / macOS
+# OS / macOS（任意目录下的 Finder 元数据）
 .DS_Store
+**/.DS_Store
 ._*
+**/_*
 
 # Local env / credentials
 .env
