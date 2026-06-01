@@ -1,8 +1,0 @@
-::1 dev lo proto kernel metric 256 pref medium
-240e:398:5f7:d1f0::/64 dev ens160 proto ra metric 100 pref medium
-240e:398:5f7:d1f0::/60 via fe80::11:32ff:fe29:2e5b dev ens160 proto ra metric 100 pref medium
-fd0f:6007:9753::/64 dev ens160 proto ra metric 100 pref medium
-fd0f:6007:9753::/48 via fe80::11:32ff:fe29:2e5b dev ens160 proto ra metric 100 pref medium
-fe80::/64 dev ens160 proto kernel metric 1024 pref medium
-fe80::/64 dev ens224 proto kernel metric 1024 pref medium
-default via fe80::11:32ff:fe29:2e5b dev ens160 proto ra metric 100 pref medium

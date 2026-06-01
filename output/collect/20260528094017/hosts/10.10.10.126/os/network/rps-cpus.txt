@@ -1,4 +1,0 @@
-/sys/class/net/ens160/queues/rx-0/rps_cpus: 0
-/sys/class/net/ens192/queues/rx-0/rps_cpus: 0
-/sys/class/net/ens224/queues/rx-0/rps_cpus: 0
-/sys/class/net/lo/queues/rx-0/rps_cpus: 0

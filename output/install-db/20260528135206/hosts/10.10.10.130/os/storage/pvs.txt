@@ -1,2 +1,0 @@
-  PV             VG Fmt  Attr PSize   PFree
-  /dev/nvme0n1p3 ol lvm2 a--  198.41g    0 

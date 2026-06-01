@@ -1,2 +1,0 @@
-2147 /data/yashan/yasdb_home/23.4.4.104/bin/yasagent -c yashandb -l 10.10.10.130:1676 -d
-182273 /data/yashan/yasdb_home_4688/23.4.10.100/bin/yasagent --init -c yashandb4688 -l 10.10.10.130:4676 --host-id host0001 -k                  -L /data/yashan/log_4688 -d

@@ -1,8 +1,0 @@
-{
-  "arch": "aarch64\n",
-  "collected_at": "2026-05-28T14:30:08Z",
-  "host": "10.10.10.125",
-  "os_family": "rhel8",
-  "role": "primary",
-  "status": "in_progress"
-}

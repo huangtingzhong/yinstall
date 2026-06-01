@@ -1,2 +1,0 @@
-  yashan_monit.service                                  loaded active running Yashan Monitor Service (yashandb)                                            
-● yashan_monit_1688.service                             loaded failed failed  Yashan Monitor Service (yashandb)                                            

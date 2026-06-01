@@ -1,2 +1,0 @@
-yashan_monit_1688.service
-yashan_monit.service

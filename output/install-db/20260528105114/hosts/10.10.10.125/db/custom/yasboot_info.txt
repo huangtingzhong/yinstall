@@ -1,7 +1,0 @@
-=== yasboot banner (version) ===
-
-=== yasboot monit status ===
-(yasboot monit status not available)
-
-=== yasboot monit summary ===
-(yasboot monit summary not available)

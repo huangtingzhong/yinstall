@@ -1,9 +1,0 @@
-Total: 148
-TCP:   38 (estab 1, closed 25, orphaned 0, timewait 25)
-
-Transport Total     IP        IPv6
-RAW	  2         0         2        
-UDP	  7         4         3        
-TCP	  13        11        2        
-INET	  22        15        7        
-FRAG	  0         0         0        

@@ -1,7 +1,0 @@
-               Local time: Thu 2026-05-28 09:40:19 CST
-           Universal time: Thu 2026-05-28 01:40:19 UTC
-                 RTC time: Thu 2026-05-28 09:40:19
-                Time zone: Asia/Shanghai (CST, +0800)
-System clock synchronized: yes
-              NTP service: active
-          RTC in local TZ: no

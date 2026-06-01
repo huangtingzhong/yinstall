@@ -1,4 +1,0 @@
-/etc/rc.d/rc.local:su - yashan -c '/opt/ycm/ycm-agent/monit/bin/monit -c /opt/ycm/ycm-agent/monit/data/monitrc'
-/etc/rc.d/rc.local:su - yashan -c '/opt/ycm/ycm/monit/bin/monit -c /opt/ycm/ycm/monit/data/monitrc'
-/etc/rc.local:su - yashan -c '/opt/ycm/ycm-agent/monit/bin/monit -c /opt/ycm/ycm-agent/monit/data/monitrc'
-/etc/rc.local:su - yashan -c '/opt/ycm/ycm/monit/bin/monit -c /opt/ycm/ycm/monit/data/monitrc'

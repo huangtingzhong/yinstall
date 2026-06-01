@@ -1,8 +1,0 @@
-
-STATUS                 COUNT(*) 
---------- --------------------- 
-ACTIVE                       27
-
-1 row fetched.
-
-

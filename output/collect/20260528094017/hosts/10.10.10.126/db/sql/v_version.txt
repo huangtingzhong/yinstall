@@ -1,8 +1,0 @@
-
-BANNER                                                           VERSION_NUMBER    
----------------------------------------------------------------- ----------------- 
-Enterprise Edition Release 23.4.4.104 aarch64                    23.4.4.104       
-
-1 row fetched.
-
-

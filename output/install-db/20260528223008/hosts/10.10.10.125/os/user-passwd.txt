@@ -1,1 +1,0 @@
-yashan:x:701:701::/home/yashan:/bin/bash

@@ -1,7 +1,0 @@
-{
-  "env_file": "/home/yashan/.bashrc",
-  "os_user": "yashan",
-  "yasdb_data": "/data/yashan/yasdb_data/ce-1-2",
-  "yasdb_home": "/home/yashan/.yasboot/yashandb_yasdb_home",
-  "yasdb_version": "YashanDB Server Enterprise Edition Release 23.4.7.106 aarch64 5785d126660"
-}

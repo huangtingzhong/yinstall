@@ -1,3 +1,0 @@
-default via 10.10.10.22 dev ens160 proto static metric 100 
-10.10.10.0/24 dev ens160 proto kernel scope link src 10.10.10.125 metric 100 
-10.10.234.0/24 dev ens224 proto kernel scope link src 10.10.234.128 metric 101 

@@ -1,4 +1,0 @@
-repo id                                   repo name
-local-appstream                           DVD for RHEL - AppStream
-local-baseos                              DVD for RHEL - BaseOS
-packages-microsoft-com-prod               Microsoft Production

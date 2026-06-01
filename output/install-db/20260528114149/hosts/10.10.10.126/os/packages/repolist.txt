@@ -1,6 +1,0 @@
-repo id           repo name
-local-appstream   DVD for RHEL - AppStream
-local-baseos      DVD for RHEL - BaseOS
-ol8_UEKR7         Latest Unbreakable Enterprise Kernel Release 7 for Oracle Linux 8 (aarch64)
-ol8_appstream     Oracle Linux 8 Application Stream (aarch64)
-ol8_baseos_latest Oracle Linux 8 BaseOS Latest (aarch64)

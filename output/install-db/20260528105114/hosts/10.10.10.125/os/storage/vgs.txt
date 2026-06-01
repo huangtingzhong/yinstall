@@ -1,2 +1,0 @@
-  VG #PV #LV #SN Attr   VSize  VFree
-  ol   1   2   0 wz--n- 98.41g    0 

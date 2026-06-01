@@ -1,7 +1,0 @@
-3006785 /data/yashan/yasdb_home/23.6.0.1/bin/yasagent --init -c yashandb -l 10.10.10.125:1676 --host-id host0001 -k                  -L /data/yashan/log -d
-3006804 /data/yashan/yasdb_home/23.6.0.1/bin/yasom --init -c yashandb -l 10.10.10.125:1675 -k                  -L /data/yashan/log -d
-3007382 /home/yashan/.yasboot/yashandb_yasdb_home/om/bin/monit -c /home/yashan/.yasboot/yashandb_yasdb_home/om/monit/monitrc
-3007594 su - yashan -c source /home/yashan/.bashrc && sudo env LD_LIBRARY_PATH=/home/yashan/.yasboot/yashandb_yasdb_home/lib /home/yashan/.yasboot/yashandb_yasdb_home/bin/ycsrootagent start -H /data/yashan/yasdb_data/ycs/ce-1-1
-3007596 sudo env LD_LIBRARY_PATH=/home/yashan/.yasboot/yashandb_yasdb_home/lib /home/yashan/.yasboot/yashandb_yasdb_home/bin/ycsrootagent start -H /data/yashan/yasdb_data/ycs/ce-1-1
-3007631 /home/yashan/.yasboot/yashandb_yasdb_home/bin/ycsrootagent start -H /data/yashan/yasdb_data/ycs/ce-1-1
-3016745 bash -c pgrep -a -f yashandb 2>/dev/null | grep -E 'yasdb|yasagent' || true

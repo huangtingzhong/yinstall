@@ -1,1 +1,0 @@
-uid=701(yashan) gid=701(yashan) groups=701(yashan),702(YASDBA)

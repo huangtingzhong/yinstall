@@ -1,1 +1,0 @@
-pid=2241 taskset=0-3

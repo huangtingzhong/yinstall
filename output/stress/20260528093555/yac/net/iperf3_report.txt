@@ -1,8 +1,0 @@
-=== iperf3 YAC ===
-server_host: 10.10.10.125
-server_ip: 10.10.10.125
-port: 5201
-duration: 60s
-clients: [10.10.10.126]
-
---- client 10.10.10.126 (exit=0) ---

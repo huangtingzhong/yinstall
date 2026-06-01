@@ -1,8 +1,0 @@
-State  Recv-Q Send-Q Local Address:Port Peer Address:PortProcess                                                   
-LISTEN 0      128          0.0.0.0:22        0.0.0.0:*    users:(("sshd",pid=1058,fd=3))                           
-LISTEN 0      16384        0.0.0.0:1688      0.0.0.0:*    users:(("yasdb",pid=3007704,fd=17))                      
-LISTEN 0      32768   10.10.10.125:1675      0.0.0.0:*    users:(("yasom",pid=3006804,fd=10))                      
-LISTEN 0      32768   10.10.10.125:1676      0.0.0.0:*    users:(("yasagent",pid=3006785,fd=9))                    
-LISTEN 0      128          0.0.0.0:111       0.0.0.0:*    users:(("rpcbind",pid=1001,fd=4),("systemd",pid=1,fd=59))
-LISTEN 0      128             [::]:22           [::]:*    users:(("sshd",pid=1058,fd=4))                           
-LISTEN 0      128             [::]:111          [::]:*    users:(("rpcbind",pid=1001,fd=6),("systemd",pid=1,fd=61))

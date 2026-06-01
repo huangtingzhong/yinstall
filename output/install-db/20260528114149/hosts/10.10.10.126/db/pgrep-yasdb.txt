@@ -1,1 +1,0 @@
-329699 /data/yashan/yasdb_home/23.4.7.106/bin/yasdb OPEN -D /data/yashan/yasdb_data/ce-1-2

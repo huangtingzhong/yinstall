@@ -1,1 +1,0 @@
-327893 /data/yashan/yasdb_home/23.4.7.106/bin/yasagent --init -c yashandb -l 10.10.10.126:1676 --host-id host0002 -k                  -L /data/yashan/log -d

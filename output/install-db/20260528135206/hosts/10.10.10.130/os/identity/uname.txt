@@ -1,1 +1,0 @@
-Linux yashandb 5.15.0-101.103.2.1.el8uek.aarch64 #2 SMP Mon May 1 19:47:28 PDT 2023 aarch64 aarch64 aarch64 GNU/Linux

@@ -1,4 +1,0 @@
-
-[2:6]YAS-02012 table or view does not exist
-
-

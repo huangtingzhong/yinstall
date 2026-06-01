@@ -1,3 +1,0 @@
-  LV   VG Attr       LSize   Pool Origin Data%  Meta%  Move Log Cpy%Sync Convert
-  root ol -wi-ao---- <96.38g                                                    
-  swap ol -wi-ao----  <2.04g                                                    

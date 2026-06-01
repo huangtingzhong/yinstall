@@ -1,4 +1,0 @@
-322463 /data/yashan/yasdb_home/23.4.7.106/bin/yasagent --init -c yashandb -l 10.10.10.125:1676 --host-id host0001 -k                  -L /data/yashan/log -d
-322593 /data/yashan/yasdb_home/23.4.7.106/bin/yasom --init -c yashandb -l 10.10.10.125:1675 -k                  -L /data/yashan/log -d
-323254 /home/yashan/.yasboot/yashandb_yasdb_home/om/bin/monit -c /home/yashan/.yasboot/yashandb_yasdb_home/om/monit/monitrc
-335902 bash -c pgrep -a -f yashandb 2>/dev/null | grep -E 'yasdb|yasagent' || true

@@ -1,6 +1,0 @@
-total 8
-drwxrwxr-x. 2 yashan yashan  84 May 28 22:29 .
-drwx------. 6 yashan yashan 157 May 28 22:29 ..
--rw-rw-r--. 1 yashan yashan 317 May 28 22:29 yasboot.completion.bash
--rw-------. 1 yashan yashan 173 May 28 22:29 yashandb.env
-lrwxrwxrwx. 1 yashan yashan  32 May 28 22:29 yashandb_yasdb_home -> /data/yashan/yasdb_home/23.6.0.1

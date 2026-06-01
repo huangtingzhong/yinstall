@@ -1,6 +1,0 @@
-{
-  "cluster_name": "yashandb",
-  "env_file": "/home/yashan/.yasboot/yashandb_yasdb_home/conf/yashandb.bashrc",
-  "host": "10.10.10.126",
-  "status": "found"
-}
