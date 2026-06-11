@@ -52,7 +52,11 @@ func RunConnectivityPhase(
 			if err != nil {
 				return nil, fmt.Errorf("failed to connect to %s: %w", target, err)
 			}
-			res.HostInfos = append(res.HostInfos, &HostInfo{Host: target, Executor: executor})
+			platform := inferTargetPlatformFromFlags(flags)
+			if platform == "" {
+				platform = "linux"
+			}
+			res.HostInfos = append(res.HostInfos, &HostInfo{Host: target, Executor: executor, TargetPlatform: platform})
 		}
 		return res, nil
 	}
@@ -88,6 +92,7 @@ func RunConnectivityPhase(
 			StepIndex:         stepIndex,
 			TotalSteps:        totalSteps,
 			Progress:          progress,
+			TargetPlatform:    inferTargetPlatformFromFlags(flags),
 		}
 		if progress != nil && ti > 0 && progressFrozenSet {
 			ctx.Progress = nil
@@ -174,6 +179,12 @@ func RunPerHostStepsEx(
 	// 构建 TargetHosts（供 Global 步骤使用）
 	targetHosts := make([]runner.TargetHost, 0, len(hostInfos))
 	for _, info := range hostInfos {
+		if info.TargetPlatform == "" {
+			info.TargetPlatform = inferTargetPlatformFromFlags(flags)
+		}
+		if info.TargetPlatform == "" {
+			info.TargetPlatform = "linux"
+		}
 		targetHosts = append(targetHosts, runner.TargetHost{
 			Host:     info.Host,
 			Executor: makeExec(info.Executor),
@@ -269,6 +280,7 @@ func RunPerHostStepsEx(
 				StepIndex:         stepIndex + i,
 				TotalSteps:        totalSteps,
 				Progress:          progress,
+				TargetPlatform:    targetPlatformForHost(info, sharedResults, hostResults),
 			}
 			if progress != nil && hi > 0 && perStepFrozen[i] {
 				ctx.Progress = nil
@@ -282,6 +294,7 @@ func RunPerHostStepsEx(
 				perStepProgress[i].total = ctx.TotalSteps
 				perStepFrozen[i] = true
 			}
+			mergeSharedPlatformResults(sharedResults, hostResults)
 			if !result.Success && !result.Skipped {
 				logger.Error("Step %s failed: %v", step.ID, result.Error)
 				if flags.Precheck {
@@ -304,12 +317,13 @@ func RunPerHostStepsEx(
 // hostInfoFromConnectivityStep 从连通性步骤上下文组装 HostInfo（含 S-01/B-001 探测快照）。
 func hostInfoFromConnectivityStep(target string, executor ssh.Executor, ctx *runner.StepContext) *HostInfo {
 	return &HostInfo{
-		Host:        target,
-		Executor:    executor,
-		OSInfo:      ctx.OSInfo,
-		Hostname:    resultString(ctx.Results, "hostname"),
-		CPUCores:    resultString(ctx.Results, "cpu_cores"),
-		MemoryTotal: resultString(ctx.Results, "total_memory"),
+		Host:           target,
+		Executor:       executor,
+		OSInfo:         ctx.OSInfo,
+		TargetPlatform: ctx.GetTargetPlatform(),
+		Hostname:       resultString(ctx.Results, "hostname"),
+		CPUCores:       resultString(ctx.Results, "cpu_cores"),
+		MemoryTotal:    resultString(ctx.Results, "total_memory"),
 	}
 }
 
@@ -344,4 +358,42 @@ func resultString(results map[string]interface{}, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(s)
+}
+
+func targetPlatformForHost(info *HostInfo, shared, host map[string]interface{}) string {
+	if info != nil && info.TargetPlatform != "" {
+		return info.TargetPlatform
+	}
+	if host != nil {
+		if v, ok := host["target_platform"].(string); ok && v != "" {
+			return v
+		}
+		if info != nil {
+			if v, ok := host[info.Host+"_target_platform"].(string); ok && v != "" {
+				return v
+			}
+		}
+	}
+	if shared != nil {
+		if info != nil {
+			if v, ok := shared[info.Host+"_target_platform"].(string); ok && v != "" {
+				return v
+			}
+		}
+		if v, ok := shared["target_platform"].(string); ok && v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func mergeSharedPlatformResults(shared, host map[string]interface{}) {
+	if shared == nil || host == nil {
+		return
+	}
+	for k, v := range host {
+		if k == "target_platform" || strings.HasSuffix(k, "_target_platform") {
+			shared[k] = v
+		}
+	}
 }

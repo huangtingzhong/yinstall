@@ -17,6 +17,9 @@ func StepB004SetUserPassword() *runner.Step {
 		Optional:    true,
 
 		PreCheck: func(ctx *runner.StepContext) error {
+			if ctx.GetParamBool("os_user_nologin", false) {
+				return fmt.Errorf("nologin system user: skip password step")
+			}
 			password := ctx.GetParamString("os_user_password", "")
 			if password == "" {
 				return fmt.Errorf("password not provided")

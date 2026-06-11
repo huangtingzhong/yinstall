@@ -85,8 +85,14 @@ func StepB003CreateUser() *runner.Step {
 			}
 
 			// 创建用户
-			cmd := fmt.Sprintf("/usr/sbin/useradd -u %d -g %s -G %s -m %s -s %s",
-				uid, group, dbaGroup, user, shell)
+			var cmd string
+			if ctx.GetParamBool("os_user_system", false) {
+				cmd = fmt.Sprintf("/usr/sbin/useradd -r -M -u %d -g %s -s %s %s",
+					uid, group, shell, user)
+			} else {
+				cmd = fmt.Sprintf("/usr/sbin/useradd -u %d -g %s -G %s -m %s -s %s",
+					uid, group, dbaGroup, user, shell)
+			}
 			if _, err := ctx.ExecuteWithCheck(cmd, true); err != nil {
 				return fmt.Errorf("failed to create user %s: %w", user, err)
 			}

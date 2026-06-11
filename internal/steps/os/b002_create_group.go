@@ -33,14 +33,14 @@ func StepB002CreateGroup() *runner.Step {
 			dbaGid := ctx.GetParamInt("os_dba_group_gid", 702)
 			forceDelete := ctx.IsForceDeleteUser()
 
-			// 处理主组
 			if err := createOrForceGroup(ctx, group, gid, forceDelete); err != nil {
 				return err
 			}
 
-			// 处理 DBA 组
-			if err := createOrForceGroup(ctx, dbaGroup, dbaGid, forceDelete); err != nil {
-				return err
+			if strings.TrimSpace(dbaGroup) != "" {
+				if err := createOrForceGroup(ctx, dbaGroup, dbaGid, forceDelete); err != nil {
+					return err
+				}
 			}
 
 			return nil
@@ -54,9 +54,11 @@ func StepB002CreateGroup() *runner.Step {
 			if result == nil || result.GetExitCode() != 0 {
 				return fmt.Errorf("group %s not found after creation", group)
 			}
-			result, _ = ctx.Execute(fmt.Sprintf("getent group %s", dbaGroup), false)
-			if result == nil || result.GetExitCode() != 0 {
-				return fmt.Errorf("group %s not found after creation", dbaGroup)
+			if strings.TrimSpace(dbaGroup) != "" {
+				result, _ = ctx.Execute(fmt.Sprintf("getent group %s", dbaGroup), false)
+				if result == nil || result.GetExitCode() != 0 {
+					return fmt.Errorf("group %s not found after creation", dbaGroup)
+				}
 			}
 			return nil
 		},

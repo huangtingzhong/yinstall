@@ -28,15 +28,8 @@ var (
 	primaryOSUser  string // 主库运行 yashan 的用户，默认 yashan
 	primaryEnvFile string // 主库环境变量文件路径，默认 .bashrc（相对用户家目录）或自动检测
 
-	// 操作系统配置控制
-	skipOS                     bool // 是否跳过备库操作系统配置，默认 true
-	standbyIgnoreInstallErrors bool // 忽略软件包安装错误
-
-	// 备库 OS 用户参数（用于 yasboot 命令）
-	standbyOSUser         string
-	standbyOSUserPassword string
-	standbyOSGroup        string
-	standbyOSDepsPkgs     string // 覆盖 OS 依赖包列表（B-015），仅在 --skip-os=false 时生效
+	// 操作系统配置控制（OS 用户/基线参数与 db 共用 os.go 包级变量，见 registerAllOSFlags）
+	skipOS bool // 是否跳过备库操作系统配置，默认 true
 
 	// 数据库参数（复用部分 db.go 中的参数）
 	standbyClusterName   string
@@ -51,9 +44,8 @@ var (
 	// 扩容控制
 	standbyCleanupOnFailure bool
 
-	// YAC 模式和多实例支持
-	standbyYACMode   bool // 是否为 YAC 模式（影响环境变量和自启动配置）
-	standbyBeginPort int  // 数据库起始端口（用于多实例场景的环境变量文件命名）
+	// 多实例支持（YAC 模式使用 yacMode，与 db/clean 共用 registerYACModeFlag）
+	standbyBeginPort int // 数据库起始端口（用于多实例场景的环境变量文件命名）
 
 	standbyYasbootGenExtraArgs string // 追加到 yasboot config node gen 的额外参数
 )
@@ -178,19 +170,33 @@ func setStandbyStepProgress(ctx *runner.StepContext, orderedFiltered []*runner.S
 // standbyCmd 添加备库命令
 var standbyCmd = &cobra.Command{
 	Use:   "standby",
-	Short: "Add standby database to existing cluster",
-	Long: `Add standby database node(s) to an existing primary database:
-  - Check primary database status
-  - Configure standby node OS (optional, controlled by --skip-os, default: skip)
-  - Generate expansion configuration
-  - Install software on standby nodes
-  - Create standby instances
-  - Configure environment variables
-  - Verify standby synchronization
+	Short: "Add a single standby node to an existing primary cluster",
+	Long: `Add one standby database node to an existing primary (standalone primary + single standby).
 
-Global --include-steps / -s applies to every phase (e.g. -s E-013 runs only E-013 if prerequisites are already satisfied).
-Note: a trailing hyphen is range syntax (e.g. E-013- means E-013 through the last step), not a single step; use -s E-013 for one step.
-Global -l/--list-steps prints the OS + standby step catalog; the OS section follows the current --skip-os value (default: B-001 only).`,
+Typical flow:
+  - Phase 1 (primary): connectivity and status checks (E-001–E-004)
+  - Phase 2 (standby): optional OS baseline on --targets when --skip-os=false (same --os-* flags as yinstall db)
+  - Phase 3–4 (primary): generate expansion config, install software, add standby instance (E-011–E-013)
+  - Phase 5–6 (standby/primary): env, autostart, sync verification
+
+Scope: validated for one standby host (-t <ip>). --standby-node-count defaults to len(--targets); multi-standby
+expansion is not the primary supported path.
+
+OS flags: when --skip-os=false, all --os-* options match yinstall db (see db -h or standby -h). Default --skip-os=true
+runs B-001 connectivity only on standby targets; use --skip-os=false for full OS baseline (B-002–B-029).
+
+Global --include-steps / -s applies to every phase (e.g. -s E-013 runs only E-013 if prerequisites are satisfied).
+Note: a trailing hyphen is range syntax (E-013- = E-013 through last step); use -s E-013 for one step.
+Global -l/--list-steps prints the OS + standby step catalog; OS steps follow --skip-os (default: B-001 only).`,
+	Example: `  # Single standby (OS already prepared on standby host)
+  yinstall standby --primary-ip 10.0.0.1 -t 10.0.0.2 --skip-os
+
+  # Standby with OS baseline (same --os-* as db)
+  yinstall standby --primary-ip 10.0.0.1 -t 10.0.0.2 --skip-os=false \
+    --os-local-disk /dev/sdb --db-memory-percent 50
+
+  # Pin primary port / cluster when auto-detect is not desired
+  yinstall standby --primary-ip 10.0.0.1 -t 10.0.0.2 --db-port 3988 --db-cluster-name yashandb_3988`,
 	RunE:         runStandby,
 	SilenceUsage: true, // 报错时不显示帮助信息
 }
@@ -206,31 +212,25 @@ func init() {
 	standbyCmd.Flags().StringVar(&primaryOSUser, "primary-os-user", "yashan", "Primary database user (default: yashan)")
 	standbyCmd.Flags().StringVar(&primaryEnvFile, "primary-env-file", "", "Primary environment file path (default: auto-detect from .yasboot or .bashrc)")
 
-	// 操作系统配置控制
-	standbyCmd.Flags().BoolVar(&skipOS, "skip-os", true, "Skip standby OS baseline configuration (default: true)")
-	standbyCmd.Flags().BoolVar(&standbyIgnoreInstallErrors, "os-ignore-install-errors", false, "Ignore package installation errors and continue (only show warnings)")
-	standbyCmd.Flags().StringVar(&standbyOSDepsPkgs, "os-deps-db-packages", "", "[OS] Override DB dependency packages for B-015 (space-separated; only effective when --skip-os=false; default: use OS preset list)")
-
-	// 备库 OS 用户参数
-	standbyCmd.Flags().StringVar(&standbyOSUser, "os-user", "yashan", "Standby product user name")
-	standbyCmd.Flags().StringVar(&standbyOSUserPassword, "os-user-password", "aaBB11@@33$$", "Standby user SSH password (for yasboot, yashan default)")
-	standbyCmd.Flags().StringVar(&standbyOSGroup, "os-group", "yashan", "Standby primary group name")
+	// 操作系统配置（与 db 共用 OS 变量；--skip-os=false 时 B-002–B-029 生效）
+	standbyCmd.Flags().BoolVar(&skipOS, "skip-os", true, "Skip standby OS baseline on --targets (default: true; false runs full OS steps)")
+	registerAllOSFlags(standbyCmd, registerOSFlagsConfig{forDB: true})
+	registerYACModeFlag(standbyCmd)
 
 	// 数据库参数
 	standbyCmd.Flags().StringVar(&standbyClusterName, "db-cluster-name", "yashandb", "Database cluster name (must match primary)")
+	standbyCmd.Flags().IntVar(&dbMemoryPercent, "db-memory-percent", 50, "Planned DB memory percent (1-100) for OS shared memory when --skip-os=false")
 	standbyCmd.Flags().StringVar(&standbyAdminPassword, "db-admin-password", "", "Database SYS admin password (optional, not used in standby creation)")
 	standbyCmd.Flags().StringVar(&standbyInstallPath, "db-home-path", "", "Standby install path for yasboot (default: same as yinstall db: /data/<primary-os-user>/yasdb_home for port 1688, else yasdb_home_<port>)")
 	standbyCmd.Flags().StringVar(&standbyDataPath, "db-data-path", "", "Standby data path for yasboot (default: same as yinstall db: /data/<primary-os-user>/yasdb_data or .../yasdb_data_<port>)")
 	standbyCmd.Flags().StringVar(&standbyLogPath, "db-log-path", "", "Standby log path for yasboot (default: same as yinstall db: /data/<primary-os-user>/log or .../log_<port>)")
 	standbyCmd.Flags().StringVar(&standbyStageDir, "db-stage-dir", "", "Primary stage directory on primary host (must exist; default same as yinstall db: /home/<user>/install for 1688, else install_<port>; port from --db-port or LISTEN_ADDR)")
 	standbyCmd.Flags().StringVar(&standbyDepsPackage, "db-deps-package", "", "SSL deps package path (optional)")
-	standbyCmd.Flags().IntVar(&standbyNodeCount, "standby-node-count", 0, "Number of standby nodes (auto-detected from --targets)")
+	standbyCmd.Flags().IntVar(&standbyNodeCount, "standby-node-count", 0, "Standby node count for yasboot gen (default: len(--targets); single standby recommended)")
 
 	// 扩容控制
 	standbyCmd.Flags().BoolVar(&standbyCleanupOnFailure, "standby-cleanup-on-failure", false, "Auto cleanup on failure (dangerous, requires --force)")
 
-	// YAC 模式和多实例支持
-	standbyCmd.Flags().BoolVar(&standbyYACMode, "yac", false, "Enable YAC mode (affects env vars and autostart config)")
 	standbyCmd.Flags().IntVar(&standbyBeginPort, "db-port", 1688, "Database begin port for yasboot expansion (default 1688; omit flag to use primary v$parameter.LISTEN_ADDR port)")
 	standbyCmd.Flags().StringVar(&standbyYasbootGenExtraArgs, "yasboot-gen-extra-args", "", "Extra arguments appended to yasboot config node gen only (space-separated)")
 }
@@ -263,11 +263,21 @@ func runStandby(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	ResolveOSUserPassword(cmd, flags, standbyOSUser, &standbyOSUserPassword)
+	if err := validateMemoryPercent("--db-memory-percent", dbMemoryPercent); err != nil {
+		return err
+	}
+
+	ResolveOSUserPassword(cmd, flags, osUser, &osUserPassword)
 
 	// 本地模式下，除非用户显式指定，否则不注入默认的备库 os-user-password。
 	if flags.Local && !cmd.Flags().Changed("os-user-password") {
-		standbyOSUserPassword = ""
+		osUserPassword = ""
+	}
+
+	// 远程模式下 E-011 yasboot config node gen 需以产品用户 SSH 到备库 targets；
+	// 本地模式（主库与备库均为 localhost）不要求 os-user-password。
+	if !flags.Local && osUserPassword == "" && !flags.DryRun && !flags.Precheck {
+		return fmt.Errorf("--os-user-password is required for yasboot config node gen (SSH password of product user on standby targets)")
 	}
 
 	// 设置主库 SSH 参数默认值（继承全局参数）
@@ -308,7 +318,7 @@ func runStandby(cmd *cobra.Command, args []string) error {
 		logger.Info("Standby OS baseline: ENABLED")
 	}
 
-	if standbyYACMode {
+	if yacMode {
 		logger.Info("YAC mode: ENABLED (ycsrootagent autostart will be configured)")
 	} else {
 		logger.Info("YAC mode: DISABLED")
@@ -318,7 +328,7 @@ func runStandby(cmd *cobra.Command, args []string) error {
 	params := buildStandbyParams(flags)
 
 	// 创建主库执行器
-	primaryExecutor, err := createPrimaryExecutor(flags, logger, "")
+	primaryExecutor, err := createStandbyPrimaryExecutor(flags, logger, "")
 	if err != nil {
 		return fmt.Errorf("failed to connect to primary: %w", err)
 	}
@@ -447,25 +457,10 @@ func validateStandbyParams(flags GlobalFlags) error {
 
 // buildStandbyParams 构建备库参数
 func buildStandbyParams(flags GlobalFlags) map[string]interface{} {
-	// 复用 OS 参数构建
-	params := buildOSParams(false, len(flags.Targets))
-
-	// 覆盖备库特定的 OS 用户参数
-	if standbyOSUser != "" {
-		params["os_user"] = standbyOSUser
-	}
-	if standbyOSUserPassword != "" {
-		params["os_user_password"] = standbyOSUserPassword
-	}
-	if standbyOSGroup != "" {
-		params["os_group"] = standbyOSGroup
-	}
-
-	// 若用户指定，则覆盖 OS ignore install errors 参数
-	params["os_ignore_install_errors"] = standbyIgnoreInstallErrors
-	if strings.TrimSpace(standbyOSDepsPkgs) != "" {
-		params["os_deps_db_packages"] = strings.TrimSpace(standbyOSDepsPkgs)
-	}
+	params := buildOSParams(yacMode, len(flags.Targets))
+	params["db_memory_percent"] = dbMemoryPercent
+	params["os_sysctl_shm_use_max_ram_only"] = false
+	params["with_os"] = !skipOS
 
 	params["ssh_port"] = flags.SSHPort
 	params["yasboot_ssh_port"] = flags.YasbootSSHPort
@@ -495,8 +490,7 @@ func buildStandbyParams(flags GlobalFlags) map[string]interface{} {
 	}
 	params["db_deps_package"] = standbyDepsPackage
 
-	// YAC 模式和端口参数（影响环境变量和自启动配置）
-	params["yac_mode"] = standbyYACMode
+	params["yac_mode"] = yacMode
 	params["db_begin_port"] = standbyBeginPort
 
 	// 备库特定参数
@@ -511,34 +505,28 @@ func buildStandbyParams(flags GlobalFlags) map[string]interface{} {
 }
 
 // createPrimaryExecutor 创建主库执行器
-func createPrimaryExecutor(flags GlobalFlags, logger *logging.Logger, stepID string) (ssh.Executor, error) {
-	cfg := ssh.Config{
-		Host:       primaryIP,
-		Port:       flags.SSHPort,
-		User:       primarySSHUser,
-		AuthMethod: flags.SSHAuth,
-		Password:   primarySSHPassword,
-		KeyPath:    primarySSHKey,
-		Logger:     logger,
-		StepID:     stepID,
+func createStandbyPrimaryExecutor(flags GlobalFlags, logger *logging.Logger, stepID string) (ssh.Executor, error) {
+	user := primarySSHUser
+	if user == "" {
+		user = flags.SSHUser
 	}
-
-	if flags.Local {
-		cfg.AuthMethod = "local"
-		return ssh.NewExecutor(cfg)
+	pass := primarySSHPassword
+	if pass == "" {
+		pass = flags.SSHPassword
 	}
-
-	// 如果用户没有提供密码，使用fallback逻辑
-	if primarySSHPassword == "" && flags.SSHAuth == "password" {
-		return ssh.NewExecutorWithFallback(cfg, "")
+	key := primarySSHKey
+	if key == "" {
+		key = flags.SSHKeyPath
 	}
-
-	return ssh.NewExecutor(cfg)
-}
-
-func isLocalHost(host string) bool {
-	h := strings.TrimSpace(strings.ToLower(host))
-	return h == "localhost" || h == "127.0.0.1" || h == "::1"
+	return createPrimaryExecutor(PrimarySSHConfig{
+		Host:     primaryIP,
+		Port:     flags.SSHPort,
+		User:     user,
+		Password: pass,
+		KeyPath:  key,
+		Auth:     flags.SSHAuth,
+		Local:    flags.Local,
+	}, logger, stepID)
 }
 
 // categorizeStandbySteps 分类步骤：OS 步骤和扩容步骤

@@ -27,7 +27,15 @@ func GetStepByID(id string) *runner.Step {
 	if id == "CLEAN-DB" {
 		return StepCleanDB()
 	}
+	if id == "CLEAN-MYSQL" {
+		return StepCleanMySQL()
+	}
 	for _, step := range GetAllSteps() {
+		if step.ID == id {
+			return step
+		}
+	}
+	for _, step := range GetMysqlCleanSteps() {
 		if step.ID == id {
 			return step
 		}

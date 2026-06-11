@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -25,6 +27,7 @@ var (
 
 	osTimezone  string
 	osNTPServer string
+	osHostname  string
 
 	osSysctlFile       string
 	osLimitsFile       string
@@ -105,13 +108,32 @@ func init() {
 
 // HostInfo 保存主机信息。
 type HostInfo struct {
-	Host     string
-	Executor ssh.Executor
-	OSInfo   *runner.OSInfo
+	Host           string
+	Executor       ssh.Executor
+	OSInfo         *runner.OSInfo
+	TargetPlatform string
 	// 连通性步骤（B-001/S-01/R-001）PreCheck 写入 Results 的快照，供后续归档步骤使用。
 	Hostname    string
 	CPUCores    string
 	MemoryTotal string
+}
+
+// inferTargetPlatformFromFlags guesses target platform when M-001 has not run.
+func inferTargetPlatformFromFlags(flags GlobalFlags) string {
+	if flags.Local {
+		switch runtime.GOOS {
+		case "darwin":
+			return "darwin"
+		case "windows":
+			return "windows"
+		default:
+			return "linux"
+		}
+	}
+	if strings.EqualFold(flags.SSHUser, "Administrator") {
+		return "windows"
+	}
+	return ""
 }
 
 func runOS(cmd *cobra.Command, args []string) error {
@@ -261,6 +283,7 @@ func buildOSParams(isYACMode bool, targetCount int) map[string]interface{} {
 		"os_sudoers_enable":        osSudoersEnable,
 		"os_timezone":              osTimezone,
 		"os_ntp_server":            osNTPServer,
+		"os_hostname":              osHostname,
 		"os_sysctl_file":           osSysctlFile,
 		"os_limits_file":           osLimitsFile,
 		"os_kernel_args_enable":    osKernelArgsEnable,
@@ -308,6 +331,10 @@ const (
 )
 
 func createExecutor(target string, flags GlobalFlags, logger *logging.Logger, stepID string) (ssh.Executor, error) {
+	return createExecutorWithTargetOS(target, flags, logger, stepID, "")
+}
+
+func createExecutorWithTargetOS(target string, flags GlobalFlags, logger *logging.Logger, stepID string, targetOS string) (ssh.Executor, error) {
 	cfg := ssh.Config{
 		Host:       target,
 		Port:       flags.SSHPort,
@@ -317,20 +344,30 @@ func createExecutor(target string, flags GlobalFlags, logger *logging.Logger, st
 		KeyPath:    flags.SSHKeyPath,
 		Logger:     logger,
 		StepID:     stepID,
+		TargetOS:   targetOS,
 	}
-
+	if targetOS == "" && strings.EqualFold(flags.SSHUser, "Administrator") {
+		cfg.TargetOS = ssh.TargetOSWindows
+	}
 	if flags.Local {
 		cfg.AuthMethod = "local"
+	}
+	return connectSSHWithRetry(cfg, flags.SSHPassword != "", logger)
+}
+
+// connectSSHWithRetry 建立 SSH/本地 Executor；未显式提供密码时走 key→默认密码 fallback。
+func connectSSHWithRetry(cfg ssh.Config, passwordProvided bool, logger *logging.Logger) (ssh.Executor, error) {
+	if cfg.AuthMethod == "local" {
 		return ssh.NewExecutor(cfg)
 	}
 
-	// 带重试的 SSH 连接：网络波动或目标端 sshd 未就绪时自动重试
+	target := cfg.Host
 	var (
 		executor ssh.Executor
 		lastErr  error
 	)
 	for attempt := 1; attempt <= sshConnectMaxRetries; attempt++ {
-		if flags.SSHPassword == "" {
+		if !passwordProvided {
 			executor, lastErr = ssh.NewExecutorWithFallback(cfg, defaultSSHPassword())
 		} else {
 			executor, lastErr = ssh.NewExecutor(cfg)

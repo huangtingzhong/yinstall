@@ -29,6 +29,21 @@ func StepB001CheckConnectivity() *runner.Step {
 				return fmt.Errorf("unexpected response from %s", host)
 			}
 
+			if commonos.IsWindowsTarget(ctx) {
+				ctx.SetResult("target_platform", "windows")
+				result, _ = ctx.Execute(`powershell -NoProfile -Command "$env:COMPUTERNAME"`, false)
+				hostname := ""
+				if result != nil {
+					hostname = strings.TrimSpace(result.GetStdout())
+				}
+				ctx.SetResult("hostname", hostname)
+				ctx.OSInfo = commonos.DetectWindowsOSInfo(ctx)
+				ctx.SetResult("is_root", true)
+				ctx.SetResult("total_memory", commonos.WindowsMemoryGB(ctx))
+				ctx.SetResult("cpu_cores", commonos.WindowsLogicalCPUs(ctx))
+				return nil
+			}
+
 			// 2) 主机名
 			result, _ = ctx.Execute("hostname", false)
 			hostname := ""

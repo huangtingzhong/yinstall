@@ -82,6 +82,8 @@ type StepContext struct {
 	Progress          *StepProgress          // 非 nil 时由 RunStep 分配序号/总数（排除 Optional 跳过与未执行的连通步）
 	// TargetHosts 所有目标节点（YAC 时为多节点）；步骤内部可遍历在需要的节点上执行
 	TargetHosts []TargetHost
+	// TargetPlatform linux|darwin|windows（M-001 填充）
+	TargetPlatform string
 }
 
 // ForHost 返回一个仅针对指定节点的子上下文，用于在“所有节点执行”的步骤中逐节点执行
@@ -457,6 +459,29 @@ func (ctx *StepContext) ExecuteWithCheck(cmd string, sudo bool) (ExecResult, err
 	}
 	return result, nil
 }
+
+// GetTargetPlatform returns linux|darwin|windows for the current host context.
+func (ctx *StepContext) GetTargetPlatform() string {
+	if ctx.TargetPlatform != "" {
+		return ctx.TargetPlatform
+	}
+	host := ""
+	if ctx.Executor != nil {
+		host = ctx.Executor.Host()
+	}
+	if host != "" {
+		if v, ok := ctx.Results[host+"_target_platform"].(string); ok && v != "" {
+			return v
+		}
+	}
+	if v, ok := ctx.Results["target_platform"].(string); ok && v != "" {
+		return v
+	}
+	return PlatformLinuxDefault
+}
+
+// PlatformLinuxDefault is the default target platform when unset.
+const PlatformLinuxDefault = "linux"
 
 // GetParam 获取参数
 func (ctx *StepContext) GetParam(key string) interface{} {

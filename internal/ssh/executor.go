@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -91,6 +92,7 @@ type Config struct {
 	Timeout       time.Duration
 	Logger        *logging.Logger // 可选的日志记录器，用于记录所有命令执行
 	StepID        string          // 可选的步骤 ID，用于日志记录
+	TargetOS      string          // linux|windows|darwin; empty = unix bash wrapper
 }
 
 // IsAuthenticationFailure 判断错误是否为 SSH 握手/密码认证失败（用于探测场景，非网络类致命错误）。
@@ -231,13 +233,7 @@ func (e *LocalExecutor) Execute(command string, sudo bool) (*ExecResult, error) 
 		StartTime: time.Now(),
 	}
 
-	var cmd *exec.Cmd
-	if sudo && os.Getuid() != 0 {
-		// Use non-interactive sudo to avoid hanging on password prompts.
-		cmd = exec.Command("sudo", "-n", "bash", "-c", command)
-	} else {
-		cmd = exec.Command("bash", "-c", command)
-	}
+	var cmd *exec.Cmd = localExecCommand(command, sudo)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -268,12 +264,7 @@ func (e *LocalExecutor) ExecuteContext(ctx context.Context, command string, sudo
 		StartTime: time.Now(),
 	}
 
-	var cmd *exec.Cmd
-	if sudo && os.Getuid() != 0 {
-		cmd = exec.CommandContext(ctx, "sudo", "-n", "bash", "-c", command)
-	} else {
-		cmd = exec.CommandContext(ctx, "bash", "-c", command)
-	}
+	var cmd *exec.Cmd = localExecCommandContext(ctx, command, sudo)
 
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf
@@ -311,6 +302,123 @@ func (e *LocalExecutor) Download(remotePath, localPath string) error {
 
 func (e *LocalExecutor) Close() error {
 	return nil
+}
+
+func localExecCommand(command string, sudo bool) *exec.Cmd {
+	if runtime.GOOS == "windows" {
+		return windowsLocalCommand(command)
+	}
+	if sudo && os.Getuid() != 0 {
+		return exec.Command("sudo", "-n", "bash", "-c", command)
+	}
+	return exec.Command("bash", "-c", command)
+}
+
+func localExecCommandContext(ctx context.Context, command string, sudo bool) *exec.Cmd {
+	if runtime.GOOS == "windows" {
+		return windowsLocalCommandContext(ctx, command)
+	}
+	if sudo && os.Getuid() != 0 {
+		return exec.CommandContext(ctx, "sudo", "-n", "bash", "-c", command)
+	}
+	return exec.CommandContext(ctx, "bash", "-c", command)
+}
+
+// windowsLocalCommand runs commands on Windows local mode.
+// Avoid cmd /c powershell -Command "..." — nested quoting breaks; invoke powershell.exe directly.
+// Quoted exe paths ("C:/path/mysqld.exe" ...) must not go through cmd /c — quotes become part of the program name.
+func windowsLocalCommand(command string) *exec.Cmd {
+	if args, ok := powerShellLocalArgs(command); ok {
+		return exec.Command("powershell.exe", args...)
+	}
+	if exe, args, ok := parseQuotedWindowsExeCommand(command); ok {
+		return exec.Command(exe, args...)
+	}
+	return exec.Command("cmd.exe", "/c", command)
+}
+
+func windowsLocalCommandContext(ctx context.Context, command string) *exec.Cmd {
+	if args, ok := powerShellLocalArgs(command); ok {
+		return exec.CommandContext(ctx, "powershell.exe", args...)
+	}
+	if exe, args, ok := parseQuotedWindowsExeCommand(command); ok {
+		return exec.CommandContext(ctx, exe, args...)
+	}
+	return exec.CommandContext(ctx, "cmd.exe", "/c", command)
+}
+
+// parseQuotedWindowsExeCommand splits `"C:/bin/foo.exe" --arg=val` for direct exec.Command invocation.
+func parseQuotedWindowsExeCommand(command string) (exe string, args []string, ok bool) {
+	trimmed := strings.TrimSpace(command)
+	if !strings.HasPrefix(trimmed, `"`) {
+		return "", nil, false
+	}
+	end := strings.Index(trimmed[1:], `"`)
+	if end < 0 {
+		return "", nil, false
+	}
+	exe = trimmed[1 : end+1]
+	rest := strings.TrimSpace(trimmed[end+2:])
+	if rest == "" {
+		return exe, nil, true
+	}
+	return exe, splitWindowsCommandArgs(rest), true
+}
+
+func splitWindowsCommandArgs(s string) []string {
+	var args []string
+	for {
+		s = strings.TrimLeft(s, " \t")
+		if s == "" {
+			break
+		}
+		if s[0] == '"' {
+			end := strings.Index(s[1:], `"`)
+			if end < 0 {
+				args = append(args, s[1:])
+				break
+			}
+			args = append(args, s[1:end+1])
+			s = s[end+2:]
+			continue
+		}
+		idx := strings.IndexAny(s, " \t")
+		if idx < 0 {
+			token := s
+			if i := strings.Index(token, `"`); i > 0 && strings.HasSuffix(token, `"`) {
+				token = token[:i] + token[i+1:len(token)-1]
+			}
+			args = append(args, token)
+			break
+		}
+		token := s[:idx]
+		if i := strings.Index(token, `"`); i > 0 && strings.HasSuffix(token, `"`) {
+			token = token[:i] + token[i+1:len(token)-1]
+		}
+		args = append(args, token)
+		s = s[idx:]
+	}
+	return args
+}
+
+func powerShellLocalArgs(command string) ([]string, bool) {
+	trimmed := strings.TrimSpace(command)
+	lower := strings.ToLower(trimmed)
+	if !strings.HasPrefix(lower, "powershell") {
+		return nil, false
+	}
+	const marker = "-command "
+	idx := strings.Index(lower, marker)
+	if idx < 0 {
+		return nil, false
+	}
+	prefix := strings.Fields(trimmed[:idx])
+	script := strings.TrimSpace(trimmed[idx+len(marker):])
+	if len(script) >= 2 && script[0] == '"' && script[len(script)-1] == '"' {
+		script = script[1 : len(script)-1]
+	}
+	args := append(prefix[1:], "-Command", script) // drop "powershell"
+	return args, true
 }
 
 // SSHExecutor SSH 执行器
@@ -410,15 +518,7 @@ func (e *SSHExecutor) Execute(command string, sudo bool) (*ExecResult, error) {
 	}
 
 	// 构建实际执行的命令
-	// 始终使用 bash -c 来执行命令，确保支持 bash 内置命令（如 source）
-	escapedCmd := strings.ReplaceAll(command, "'", "'\"'\"'")
-	var actualCmd string
-	if sudo && e.config.User != "root" {
-		// Use non-interactive sudo to avoid hanging on password prompts.
-		actualCmd = fmt.Sprintf("sudo -n bash -c '%s'", escapedCmd)
-	} else {
-		actualCmd = fmt.Sprintf("bash -c '%s'", escapedCmd)
-	}
+	actualCmd := wrapSSHCommand(e.config, command, sudo)
 
 	session, err := e.client.NewSession()
 	if err != nil {
@@ -460,13 +560,7 @@ func (e *SSHExecutor) ExecuteContext(ctx context.Context, command string, sudo b
 		StartTime: time.Now(),
 	}
 
-	escapedCmd := strings.ReplaceAll(command, "'", "'\"'\"'")
-	var actualCmd string
-	if sudo && e.config.User != "root" {
-		actualCmd = fmt.Sprintf("sudo -n bash -c '%s'", escapedCmd)
-	} else {
-		actualCmd = fmt.Sprintf("bash -c '%s'", escapedCmd)
-	}
+	actualCmd := wrapSSHCommand(e.config, command, sudo)
 
 	session, err := e.client.NewSession()
 	if err != nil {

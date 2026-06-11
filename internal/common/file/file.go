@@ -62,18 +62,13 @@ func FindAndDistribute(
 	baseName := path.Base(normalized)
 	hasDir := (normalized != baseName)
 
-	remoteHomeDir := "/root"
-	r, _ := ctx.Execute("echo $HOME", false)
-	if r != nil && strings.TrimSpace(r.GetStdout()) != "" {
-		remoteHomeDir = strings.TrimSpace(r.GetStdout())
-	}
+	remoteHomeDir := RemoteHomeDir(ctx)
 
 	var localPath string
 
 	if hasDir {
-		if strings.HasPrefix(filename, "/") {
-			r, _ := ctx.Execute(fmt.Sprintf("test -f '%s' && echo 'exists'", filename), false)
-			if r != nil && strings.Contains(r.GetStdout(), "exists") {
+		if strings.HasPrefix(filename, "/") || (ctx.GetTargetPlatform() == "windows" && filepath.IsAbs(filename)) {
+			if FileExists(ctx, filename) {
 				return filename, nil
 			}
 		}
@@ -188,16 +183,8 @@ func remoteFileNeedsReplace(ctx *runner.StepContext, remotePath, localPath strin
 	if err != nil {
 		return false
 	}
-	r, _ := ctx.Execute(fmt.Sprintf("stat -c %%s '%s' 2>/dev/null", remotePath), false)
-	if r == nil || r.GetExitCode() != 0 {
-		return true
-	}
-	remoteSize := strings.TrimSpace(r.GetStdout())
-	if remoteSize == "" {
-		return true
-	}
-	var rs int64
-	if _, err := fmt.Sscanf(remoteSize, "%d", &rs); err != nil {
+	rs := RemoteFileSize(ctx, remotePath)
+	if rs < 0 {
 		return true
 	}
 	return rs != li.Size()
@@ -210,8 +197,7 @@ func uploadLocalToRemote(ctx *runner.StepContext, localPath, uploadPath string) 
 	if err := ctx.Executor.Upload(localPath, uploadPath, ctx.UploadContext()); err != nil {
 		return fmt.Errorf("failed to upload '%s' to '%s': %w", localPath, uploadPath, err)
 	}
-	r, _ := ctx.Execute(fmt.Sprintf("test -f '%s' && echo 'exists'", uploadPath), false)
-	if r == nil || !strings.Contains(r.GetStdout(), "exists") {
+	if !FileExists(ctx, uploadPath) {
 		return fmt.Errorf("file upload verification failed for '%s'", uploadPath)
 	}
 	return nil
@@ -219,26 +205,17 @@ func uploadLocalToRemote(ctx *runner.StepContext, localPath, uploadPath string) 
 
 // FileExists 检查远程文件是否存在
 func FileExists(ctx *runner.StepContext, path string) bool {
-	result, _ := ctx.Execute(fmt.Sprintf("test -f '%s' && echo 'exists'", path), false)
-	return result != nil && strings.Contains(result.GetStdout(), "exists")
+	return RemoteFileExists(ctx, path)
 }
 
 // DirExists 检查远程目录是否存在
 func DirExists(ctx *runner.StepContext, path string) bool {
-	result, _ := ctx.Execute(fmt.Sprintf("test -d '%s' && echo 'exists'", path), false)
-	return result != nil && strings.Contains(result.GetStdout(), "exists")
+	return RemoteDirExists(ctx, path)
 }
 
 // EnsureDir 确保远程目录存在
 func EnsureDir(ctx *runner.StepContext, path string, sudo bool) error {
-	result, err := ctx.Execute(fmt.Sprintf("mkdir -p '%s'", path), sudo)
-	if err != nil {
-		return err
-	}
-	if result != nil && result.GetExitCode() != 0 {
-		return fmt.Errorf("failed to create directory '%s': %s", path, result.GetStderr())
-	}
-	return nil
+	return RemoteEnsureDir(ctx, path, sudo)
 }
 
 // IsDevicePath 判断是否为设备路径
@@ -256,10 +233,7 @@ func IsISOFile(path string) bool {
 // 顺序为：[remoteDir（若为空则默认 /data/yashan/soft）, SSH 用户 $HOME]。
 // 即使用户通过 --remote-software-dir 指定了远端目录，仍会额外扫描 $HOME 下的包（与历史行为一致）。
 func remoteSearchDirs(ctx *runner.StepContext, remoteDir string) []string {
-	homeDir := "/root"
-	if r, _ := ctx.Execute("echo $HOME", false); r != nil && strings.TrimSpace(r.GetStdout()) != "" {
-		homeDir = strings.TrimSpace(r.GetStdout())
-	}
+	homeDir := RemoteHomeDir(ctx)
 
 	if remoteDir == "" {
 		remoteDir = "/data/yashan/soft"

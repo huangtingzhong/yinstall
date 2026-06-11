@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	commonmysql "github.com/yinstall/internal/common/mysql"
 	"github.com/yinstall/internal/logging"
 	"github.com/yinstall/internal/runner"
-	"github.com/yinstall/internal/ssh"
 	"github.com/yinstall/internal/steps/clean"
 )
 
@@ -28,6 +28,11 @@ func NewCleanCommand() *cobra.Command {
 		cleanYACDisks       string
 		cleanEnvFile        string
 		dbCleanPort         int
+		mysqlCleanPort      int
+		mysqlCleanBase      string
+		mysqlCleanPackage   string
+		mysqlCleanVersion   string
+		mysqlCleanStage     string
 		ycmCleanPort        int
 		ycmCleanServiceName string
 		ympCleanPort        int
@@ -41,7 +46,8 @@ func NewCleanCommand() *cobra.Command {
 Supported cleanup types:
   - db:  Clean YashanDB installation (default). Paths align with yinstall db: non-default --db-port infers *_<port> dirs when paths not overridden.
   - ycm: Clean YCM installation. Non-default --ycm-port infers /opt/ycm_<port> when --ycm-home not set (same idea as db port suffix).
-  - ymp: Clean YMP installation. Non-default --ymp-port infers /opt/ymp_<port> when --ymp-home not set.`,
+  - ymp: Clean YMP installation. Non-default --ymp-port infers /opt/ymp_<port> when --ymp-home not set.
+  - mysql: Clean MySQL installation (systemd unit, data directories). VC++ runtime is not removed.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -54,9 +60,9 @@ Supported cleanup types:
 
 			// 校验并规范化清理类型
 			cleanType = strings.ToLower(cleanType)
-			if cleanType != "db" && cleanType != "ycm" && cleanType != "ymp" {
-				fmt.Fprintf(os.Stderr, "Error: invalid cleanup type: %s (must be db, ycm, or ymp)\n", cleanType)
-				return fmt.Errorf("invalid cleanup type: %s (must be db, ycm, or ymp)", cleanType)
+			if cleanType != "db" && cleanType != "ycm" && cleanType != "ymp" && cleanType != "mysql" {
+				fmt.Fprintf(os.Stderr, "Error: invalid cleanup type: %s (must be db, ycm, ymp, or mysql)\n", cleanType)
+				return fmt.Errorf("invalid cleanup type: %s (must be db, ycm, ymp, or mysql)", cleanType)
 			}
 
 			if len(globalFlags.Targets) == 0 {
@@ -97,6 +103,21 @@ Supported cleanup types:
 				if err := validatePort("--ymp-port", ympCleanPort); err != nil {
 					return err
 				}
+			case "mysql":
+				if err := validatePort("--mysql-port", mysqlCleanPort); err != nil {
+					return err
+				}
+				if err := validateMysqlCleanStage(cleanType, mysqlCleanStage, cmd.Flags().Changed("stage")); err != nil {
+					return err
+				}
+				cleanStage, err := commonmysql.ParseStage(mysqlCleanStage)
+				if err != nil {
+					return err
+				}
+				if cleanStage == commonmysql.StageSoftware && strings.TrimSpace(mysqlCleanVersion) == "" && strings.TrimSpace(mysqlCleanPackage) == "" {
+					return fmt.Errorf("--mysql-version or --mysql-package is required when --stage is software")
+				}
+				applyMysqlPlatformDefaults(cmd, &globalFlags, &mysqlCleanBase)
 			}
 
 			applyCleanPathInference(cmd, cleanType,
@@ -105,40 +126,27 @@ Supported cleanup types:
 				ympCleanPort, &ympHome,
 			)
 
-			// 创建目标主机连接（与 db/os 一致，由 RunPerHostStepsEx 执行步骤）
+			// 初始化 cleanup 日志（建连前，与 db/os 一致以便记录 SSH 重试）
+			rid := fmt.Sprintf("clean-%s-%s", cleanType, time.Now().Format("20060102-150405"))
+			logger, err := logging.NewLogger(rid, GetGlobalFlags().LogDir, AppVersion, AppAuthor, AppContact)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: failed to initialize logger: %v\n", err)
+				return fmt.Errorf("failed to initialize logger: %w", err)
+			}
+			defer logger.Close()
+
+			// 创建目标主机连接（复用 createExecutor：key fallback + 重试）
 			var hostInfos []*HostInfo
 			for _, target := range parsedTargets {
-				cfg := ssh.Config{
-					Host:       target,
-					Port:       globalFlags.SSHPort,
-					User:       globalFlags.SSHUser,
-					AuthMethod: globalFlags.SSHAuth,
-					Password:   globalFlags.SSHPassword,
-					KeyPath:    globalFlags.SSHKeyPath,
-					Timeout:    30 * time.Second,
-				}
-
-				// 如果用户没有提供密码，使用fallback逻辑
-				var exec ssh.Executor
-				var err error
-
-				// localhost targets：本地清理（不走 SSH）
-				if isLocalHost(target) {
-					cfg.AuthMethod = "local"
-					exec, err = ssh.NewExecutor(cfg)
-				} else if globalFlags.SSHPassword == "" {
-					exec, err = ssh.NewExecutorWithFallback(cfg, globalFlags.SSHKeyPath)
-				} else {
-					exec, err = ssh.NewExecutor(cfg)
-				}
-
+				exec, err := createExecutor(target, globalFlags, logger, "")
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "Error: failed to create SSH executor for %s: %v\n", target, err)
 					return fmt.Errorf("failed to create SSH executor for %s: %w", target, err)
 				}
 				hostInfos = append(hostInfos, &HostInfo{
-					Host:     target,
-					Executor: exec,
+					Host:           target,
+					Executor:       exec,
+					TargetPlatform: inferTargetPlatformFromFlags(globalFlags),
 				})
 			}
 
@@ -151,6 +159,8 @@ Supported cleanup types:
 				steps = []*runner.Step{clean.GetStepByID("CLEAN-YCM")}
 			case "ymp":
 				steps = []*runner.Step{clean.GetStepByID("CLEAN-YMP")}
+			case "mysql":
+				steps = clean.GetMysqlCleanSteps()
 			}
 
 			steps = filterSteps(steps, globalFlags)
@@ -162,6 +172,7 @@ Supported cleanup types:
 			// 构造参数 map
 			params := make(map[string]interface{})
 			params["sudo"] = globalFlags.UseSudo
+			params["local_mode"] = globalFlags.Local
 			params["yasdb_home"] = yasdbHome
 			params["yasdb_data"] = yasdbData
 			params["yasdb_log"] = yasdbLog
@@ -182,15 +193,22 @@ Supported cleanup types:
 					params["clean_env_file"] = cleanEnvFile
 				}
 			}
-
-			// 初始化 cleanup 日志
-			rid := fmt.Sprintf("clean-%s-%s", cleanType, time.Now().Format("20060102-150405"))
-			logger, err := logging.NewLogger(rid, GetGlobalFlags().LogDir, AppVersion, AppAuthor, AppContact)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: failed to initialize logger: %v\n", err)
-				return fmt.Errorf("failed to initialize logger: %w", err)
+			if cleanType == "mysql" {
+				params["mysql_port"] = mysqlCleanPort
+				params["mysql_base"] = mysqlCleanBase
+				params["mysql_package"] = mysqlCleanPackage
+				params["mysql_version"] = mysqlCleanVersion
+				cleanStage, err := commonmysql.ParseStage(mysqlCleanStage)
+				if err != nil {
+					return err
+				}
+				params["mysql_stage"] = cleanStage
+				mysqlUser := osUser
+				if !cmd.Flags().Changed("os-user") {
+					mysqlUser = "mysql"
+				}
+				params["os_user"] = mysqlUser
 			}
-			defer logger.Close()
 
 			defer func() {
 				for _, info := range hostInfos {
@@ -215,7 +233,7 @@ Supported cleanup types:
 	}
 
 	// 注册 flags
-	cmd.Flags().StringVar(&cleanType, "type", "db", "Cleanup type: db, ycm, or ymp (default: db)")
+	cmd.Flags().StringVar(&cleanType, "type", "db", "Cleanup type: db, ycm, ymp, or mysql (default: db)")
 
 	// DB 专用 flags
 	cmd.Flags().StringVar(&yasdbHome, "yasdb-home", "/data/yashan/yasdb_home", "YashanDB installation directory (for DB cleanup)")
@@ -238,6 +256,12 @@ Supported cleanup types:
 	cmd.Flags().StringVar(&ympHome, "ymp-home", "/opt/ymp", "YMP installation directory (for YMP cleanup, default: /opt/ymp)")
 	cmd.Flags().IntVar(&ympCleanPort, "ymp-port", 8090, "YMP web port: when not default (8090) and --ymp-home unchanged, infer /opt/ymp_<port>")
 	cmd.Flags().StringVar(&ympUser, "ymp-user", "ymp", "YMP user name (for YMP cleanup, default: ymp)")
+
+	cmd.Flags().IntVar(&mysqlCleanPort, "mysql-port", 3306, "MySQL port (for MySQL cleanup)")
+	cmd.Flags().StringVar(&mysqlCleanBase, "mysql-base", "/mysql/app/mysql", "MySQL base directory (for MySQL cleanup)")
+	cmd.Flags().StringVar(&mysqlCleanPackage, "mysql-package", "", "MySQL package path used to infer version for cleanup layout")
+	cmd.Flags().StringVar(&mysqlCleanVersion, "mysql-version", "", "MySQL version for cleanup layout (optional if --mysql-package set)")
+	cmd.Flags().StringVar(&mysqlCleanStage, "stage", commonmysql.DefaultCleanStage(), "MySQL cleanup stage (only with --type mysql): instance/i (port data), software/s (binary tree), all/a (entire mysql-base)")
 
 	cmd.Example = `  # Clean YashanDB on multiple nodes (default type)
   yinstall clean --targets 10.10.10.125,10.10.10.126
@@ -291,5 +315,6 @@ func applyCleanPathInference(cmd *cobra.Command, cleanType string,
 		if ympPort != 8090 && !cmd.Flags().Changed("ymp-home") {
 			*ympHome = fmt.Sprintf("/opt/ymp_%d", ympPort)
 		}
+		// mysql: base/home 与端口无关；data/other 由 ResolveLayout 写入 oradata/{port}/（见 common/mysql/mysql.go）
 	}
 }

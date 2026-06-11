@@ -223,13 +223,14 @@ func StepB020SetupLocalDisk() *runner.Step {
 			ctx.Execute(fmt.Sprintf("mkdir -p %s", mountPoint), true)
 
 			// 挂载
-			ctx.Logger.Info("Mounting %s to %s", lvPath, mountPoint)
-			if _, err := ctx.ExecuteWithCheck(fmt.Sprintf("mount %s %s", lvPath, mountPoint), true); err != nil {
+			mountOpts := ctx.GetParamString("os_local_mount_opts", "defaults")
+			ctx.Logger.Info("Mounting %s to %s (opts=%s)", lvPath, mountPoint, mountOpts)
+			if _, err := ctx.ExecuteWithCheck(fmt.Sprintf("mount -o %s %s %s", mountOpts, lvPath, mountPoint), true); err != nil {
 				return fmt.Errorf("failed to mount %s: %w", lvPath, err)
 			}
 
 			// 写入 fstab 以实现开机自动挂载
-			fstabEntry := fmt.Sprintf("%s %s xfs defaults 0 0", lvPath, mountPoint)
+			fstabEntry := fmt.Sprintf("%s %s xfs %s 0 0", lvPath, mountPoint, mountOpts)
 			// 使用精确匹配避免误匹配（如 /dev/vg1/lv1 不会匹配到 /dev/vg1/lv10）
 			// 在 fstab 中，路径后面通常跟着空格或制表符
 			result, _ = ctx.Execute(fmt.Sprintf("grep -E '^%s[[:space:]]' /etc/fstab", lvPath), false)

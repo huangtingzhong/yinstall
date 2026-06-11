@@ -50,43 +50,61 @@ func ResolveOSUserPassword(cmd *cobra.Command, flags GlobalFlags, productUser st
 	}
 }
 
-// registerOSFlagsConfig 控制 OS 相关 flag 注册到 os 或 db 子命令时的帮助文案。
+// registerOSFlagsConfig 控制 OS 相关 flag 注册到 os / db / mysql 子命令时的帮助文案。
 type registerOSFlagsConfig struct {
-	forDB bool // true：db 子命令，部分项标注 [OS] 与 --skip-os 说明
+	forDB    bool // true：db 子命令，部分项标注 [OS] 与 --skip-os 说明
+	forMySQL bool // true：mysql install/standby，仅注册 MySQL OS 基线用到的参数
 }
 
 func (c registerOSFlagsConfig) whenSkipOSFalse(s string) string {
-	if !c.forDB {
-		return s
+	if c.forDB || c.forMySQL {
+		return s + " (only effective when --skip-os=false)"
 	}
-	return s + " (only effective when --skip-os=false)"
+	return s
 }
 
 // registerOSUserGroupFlags 产品用户与组（B-002/B-003 等步骤使用）。
 func registerOSUserGroupFlags(cmd *cobra.Command, cfg registerOSFlagsConfig) {
+	userDefault := "yashan"
+	groupDefault := "yashan"
+	shellDefault := "/bin/bash"
+	sudoDefault := true
 	userPwdHelp := "User password (yashan default; when -u matches --os-user and --ssh-auth uses password, defaults to --ssh-password if unset)"
-	if cfg.forDB {
+	if cfg.forMySQL {
+		userDefault = "mysql"
+		groupDefault = "mysql"
+		shellDefault = "/sbin/nologin"
+		sudoDefault = false
+		userPwdHelp = "MySQL OS user password" + cfg.whenSkipOSFalse("")
+	} else if cfg.forDB {
 		userPwdHelp = "Product user SSH password for yasboot (default yashan password; when -u matches --os-user and login uses --ssh-password, auto-aligned if unset)"
 	}
-	cmd.Flags().StringVar(&osUser, "os-user", "yashan", "Product user name")
+	cmd.Flags().StringVar(&osUser, "os-user", userDefault, "Product user name")
 	cmd.Flags().IntVar(&osUserUID, "os-user-uid", 701, "User UID")
-	cmd.Flags().StringVar(&osGroup, "os-group", "yashan", "Primary group name")
+	cmd.Flags().StringVar(&osGroup, "os-group", groupDefault, "Primary group name")
 	cmd.Flags().IntVar(&osGroupGID, "os-group-gid", 701, "Primary group GID")
-	cmd.Flags().StringVar(&osDBAGroup, "os-dba-group", "YASDBA", "DBA group name")
-	cmd.Flags().IntVar(&osDBAGroupGID, "os-dba-group-gid", 702, "DBA group GID")
-	cmd.Flags().StringVar(&osUserShell, "os-user-shell", "/bin/bash", "User shell")
+	if !cfg.forMySQL {
+		cmd.Flags().StringVar(&osDBAGroup, "os-dba-group", "YASDBA", "DBA group name")
+		cmd.Flags().IntVar(&osDBAGroupGID, "os-dba-group-gid", 702, "DBA group GID")
+	}
+	cmd.Flags().StringVar(&osUserShell, "os-user-shell", shellDefault, "User shell")
 	cmd.Flags().StringVar(&osUserPassword, "os-user-password", defaultOSUserPassword, userPwdHelp)
-	cmd.Flags().BoolVar(&osSudoersEnable, "os-sudoers-enable", true, cfg.whenSkipOSFalse("Enable sudoers configuration"))
+	cmd.Flags().BoolVar(&osSudoersEnable, "os-sudoers-enable", sudoDefault, cfg.whenSkipOSFalse("Enable sudoers configuration"))
 }
 
 // registerOSBaselineFlags 时区、内核、YUM、防火墙、大页等 OS 基线参数。
 func registerOSBaselineFlags(cmd *cobra.Command, cfg registerOSFlagsConfig) {
+	if cfg.forMySQL {
+		registerMysqlOSBaselineFlags(cmd, cfg)
+		return
+	}
 	prefix := ""
 	if cfg.forDB {
 		prefix = "[OS] "
 	}
 	cmd.Flags().StringVar(&osTimezone, "os-timezone", "Asia/Shanghai", prefix+cfg.whenSkipOSFalse("System timezone"))
 	cmd.Flags().StringVar(&osNTPServer, "os-ntp-server", "", prefix+cfg.whenSkipOSFalse("NTP server address (empty to skip NTP configuration)"))
+	cmd.Flags().StringVar(&osHostname, "os-hostname", "", prefix+cfg.whenSkipOSFalse("Hostname prefix or comma-separated list for B-023 (empty=product default: yashandb for db/os, mysql for yinstall mysql)"))
 	cmd.Flags().StringVar(&osSysctlFile, "os-sysctl-file", "/etc/sysctl.d/yashandb.conf", prefix+cfg.whenSkipOSFalse("Sysctl config file path"))
 	cmd.Flags().StringVar(&osLimitsFile, "os-limits-file", "/etc/security/limits.conf", prefix+cfg.whenSkipOSFalse("Limits config file path"))
 	cmd.Flags().BoolVar(&osKernelArgsEnable, "os-kernel-args-enable", true, prefix+cfg.whenSkipOSFalse("Enable kernel args configuration"))
@@ -104,6 +122,17 @@ func registerOSBaselineFlags(cmd *cobra.Command, cfg registerOSFlagsConfig) {
 	cmd.Flags().StringVar(&osZstdSourceTarball, "os-zstd-source-tarball", "", prefix+cfg.whenSkipOSFalse("Explicit zstd source tarball (zstd-x.y.z.tar.gz); empty=auto-discover (EL7 libzstd fallback)"))
 	cmd.Flags().StringVar(&osFirewallMode, "os-firewall-mode", "disable", prefix+cfg.whenSkipOSFalse("Firewall mode: keep/disable/open-ports"))
 	cmd.Flags().StringVar(&osFirewallPorts, "os-firewall-ports", "", prefix+cfg.whenSkipOSFalse("Ports to open, comma-separated"))
+}
+
+func registerMysqlOSBaselineFlags(cmd *cobra.Command, cfg registerOSFlagsConfig) {
+	cmd.Flags().StringVar(&osTimezone, "os-timezone", "Asia/Shanghai", "System timezone"+cfg.whenSkipOSFalse(""))
+	cmd.Flags().StringVar(&osHostname, "os-hostname", "", "Hostname for B-023 (empty=mysql)"+cfg.whenSkipOSFalse(""))
+	cmd.Flags().StringVar(&osSysctlFile, "os-sysctl-file", "/etc/sysctl.d/mysql.conf", "Sysctl config file path"+cfg.whenSkipOSFalse(""))
+	cmd.Flags().StringVar(&osLimitsFile, "os-limits-file", "/etc/security/limits.conf", "Limits config file path"+cfg.whenSkipOSFalse(""))
+	cmd.Flags().BoolVar(&osKernelArgsEnable, "os-kernel-args-enable", true, "Enable kernel args configuration"+cfg.whenSkipOSFalse(""))
+	cmd.Flags().StringVar(&osKernelArgs, "os-kernel-args", "elevator=deadline transparent_hugepage=never numa=off", "Kernel boot arguments"+cfg.whenSkipOSFalse(""))
+	cmd.Flags().StringVar(&osFirewallMode, "os-firewall-mode", "open-ports", "Firewall mode: keep/disable/open-ports"+cfg.whenSkipOSFalse(""))
+	cmd.Flags().StringVar(&osFirewallPorts, "os-firewall-ports", "", "Ports to open (defaults to --mysql-port and mysqlx)"+cfg.whenSkipOSFalse(""))
 }
 
 // registerOSYumISOFlags YUM/ISO 源相关（与 os、db、stressos 共用 osYumMode 等包级变量）。
@@ -140,10 +169,14 @@ func registerOSLocalDiskFlags(cmd *cobra.Command, cfg registerOSFlagsConfig) {
 	if cfg.forDB {
 		prefix = "[OS] "
 	}
+	mountDefault := "/data"
+	if cfg.forMySQL {
+		mountDefault = "/mysql"
+	}
 	cmd.Flags().StringSliceVar(&osLocalDisks, "os-local-disk", nil, prefix+cfg.whenSkipOSFalse("Local disks for data directory (e.g., /dev/sdb,/dev/sdc)"))
 	cmd.Flags().StringVar(&osLocalVG, "os-local-vg", "yasvg", prefix+cfg.whenSkipOSFalse("Volume group name"))
 	cmd.Flags().StringVar(&osLocalLV, "os-local-lv", "yaslv", prefix+cfg.whenSkipOSFalse("Logical volume name"))
-	cmd.Flags().StringVar(&osLocalMount, "os-local-mount", "/data", prefix+cfg.whenSkipOSFalse("Mount point for data directory"))
+	cmd.Flags().StringVar(&osLocalMount, "os-local-mount", mountDefault, prefix+cfg.whenSkipOSFalse("Mount point for data directory"))
 }
 
 // registerOSYACDiskGroupFlags 与 db 共用的 YAC 磁盘组 / 发现参数（db 子命令单独注册网络类 YAC flag）。
@@ -182,6 +215,12 @@ func registerOSOnlyFlags(cmd *cobra.Command) {
 
 // registerAllOSFlags 向子命令注册完整 OS 参数集（供 os / db 共用变量）。
 func registerAllOSFlags(cmd *cobra.Command, cfg registerOSFlagsConfig) {
+	if cfg.forMySQL {
+		registerOSUserGroupFlags(cmd, cfg)
+		registerOSBaselineFlags(cmd, cfg)
+		registerOSLocalDiskFlags(cmd, cfg)
+		return
+	}
 	registerOSUserGroupFlags(cmd, cfg)
 	registerOSBaselineFlags(cmd, cfg)
 	registerOSMultipathFlags(cmd, cfg)

@@ -12,6 +12,12 @@ func ShellSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// PowerShellSingleQuote wraps s in a PowerShell single-quoted literal.
+// Inside single quotes, escape ' as ”.
+func PowerShellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
 // YasqlQuotePassword 将密码安全地格式化为 yasql 连接串中的密码部分。
 // 格式：'"password"'
 //   - 外层单引号防止 shell 展开（$、!、空格等）

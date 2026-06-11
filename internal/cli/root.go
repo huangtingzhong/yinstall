@@ -123,6 +123,7 @@ func init() {
 	// 添加子命令
 	rootCmd.AddCommand(osCmd)
 	rootCmd.AddCommand(dbCmd)
+	rootCmd.AddCommand(mysqlCmd)
 	rootCmd.AddCommand(standbyCmd)
 	rootCmd.AddCommand(ycmCmd)
 	rootCmd.AddCommand(ympCmd)
