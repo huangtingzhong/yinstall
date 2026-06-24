@@ -25,7 +25,10 @@ func StepM018CustomSQL() *runner.Step {
 			layout, _ := layoutFromCtx(ctx)
 			script := ctx.GetParamString("mysql_custom_sql_script", "")
 			password := ctx.GetParamString("mysql_root_password", "")
-			return commonsql.ExecuteMysqlScript(ctx, layout, password, script)
+			if err := commonsql.ExecuteMysqlScript(ctx, layout, password, script); err != nil {
+				return err
+			}
+			return printMysqlInstallSummary(ctx, "M-018")
 		},
 	}
 }

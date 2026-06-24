@@ -144,6 +144,28 @@ func FindMysqlBinaryPackageAtLeastVersion(ctx *runner.StepContext, localDirs []s
 	return findLatestVersion(filtered, re), nil
 }
 
+// FindMysqlBinaryPackageExactVersion finds a binary package whose version exactly matches wantVersion.
+func FindMysqlBinaryPackageExactVersion(ctx *runner.StepContext, localDirs []string, remoteDir, platform, arch, wantVersion string) (string, error) {
+	wantVersion = strings.TrimSpace(wantVersion)
+	if wantVersion == "" {
+		return "", fmt.Errorf("empty mysql version")
+	}
+	all, _, err := collectMysqlBinaryPackages(ctx, localDirs, remoteDir, platform, arch)
+	if err != nil {
+		return "", err
+	}
+	for _, f := range all {
+		ver, verr := ParseMysqlVersionFromPackage(f)
+		if verr != nil {
+			continue
+		}
+		if ver == wantVersion {
+			return f, nil
+		}
+	}
+	return "", fmt.Errorf("no mysql binary package for version %s found for platform=%s arch=%s", wantVersion, platform, arch)
+}
+
 func collectMysqlBinaryPackages(ctx *runner.StepContext, localDirs []string, remoteDir, platform, arch string) ([]string, *regexp.Regexp, error) {
 	if platform == "" {
 		platform = "linux"

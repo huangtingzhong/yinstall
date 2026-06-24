@@ -59,6 +59,37 @@ func filterSteps(allSteps []*runner.Step, flags GlobalFlags) []*runner.Step {
 	return stepsToRun
 }
 
+// ensureConnectivityStep prepends B-001 when filtered steps need remote access but omit connectivity.
+func ensureConnectivityStep(allSteps, steps []*runner.Step) []*runner.Step {
+	if len(steps) == 0 {
+		return steps
+	}
+	hasB001 := false
+	needsConnectivity := false
+	for _, s := range steps {
+		if s == nil {
+			continue
+		}
+		if s.ID == "B-001" {
+			hasB001 = true
+		}
+		id := s.ID
+		if strings.HasPrefix(id, "MS-") || strings.HasPrefix(id, "MSH-") ||
+			strings.HasPrefix(id, "W-") || strings.HasPrefix(id, "M-") {
+			needsConnectivity = true
+		}
+	}
+	if !needsConnectivity || hasB001 {
+		return steps
+	}
+	for _, s := range allSteps {
+		if s != nil && s.ID == "B-001" {
+			return append([]*runner.Step{s}, steps...)
+		}
+	}
+	return steps
+}
+
 // parseStepRanges 解析一组范围描述（例如 "c001"、"c001-c003"、"c005-"），并从 allSteps 中返回匹配的 steps。
 // 假设 allSteps 已按执行顺序排序。
 func parseStepRanges(allSteps []*runner.Step, specs []string) ([]*runner.Step, error) {

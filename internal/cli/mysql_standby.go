@@ -121,7 +121,7 @@ func runMysqlStandby(cmd *cobra.Command, args []string) error {
 	if rid == "" {
 		rid = fmt.Sprintf("mysql-standby-%s", time.Now().Format("20060102-150405"))
 	}
-	logger, err := logging.NewLogger(rid, flags.LogDir, AppVersion, AppAuthor, AppContact)
+	logger, err := newSessionLogger(rid, flags.LogDir)
 	if err != nil {
 		return fmt.Errorf("failed to initialize logger: %w", err)
 	}
@@ -169,13 +169,18 @@ func runMysqlStandby(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	syncMethod := strings.ToLower(strings.TrimSpace(mysqlStandbySyncMethod))
+	execPlan := buildMysqlStandbyExecPlan(filtered, stage, syncMethod, mysqlStandbyEnableSemiSync)
+	plannedProgress := countMysqlStandbyProgressSteps(execPlan)
+	progress := runner.NewStepProgress(plannedProgress)
+	logMysqlStandbyExecutionPlan(logger, filtered, execPlan, stage, syncMethod, mysqlStandbyEnableSemiSync, plannedProgress)
+
 	logger.Info("Starting MySQL standby (RunID: %s)", rid)
-	logger.Info("Standby stage: %s", stage)
 	logger.Info("Primary: %s:%d", mysqlStandbyPrimaryHost, mysqlStandbyPrimaryPort)
 	logger.Info("Replica targets: %v port=%d", flags.Targets, mysqlStandbyReplicaPort)
 
 	// Phase A: primary MR-001, MR-002
-	if err := runMysqlStandbyPrimarySteps(filtered, map[string]bool{"MR-001": true, "MR-002": true}, primaryExec, logger, params, flags, shared); err != nil {
+	if err := runMysqlStandbyPrimarySteps(filtered, map[string]bool{"MR-001": true, "MR-002": true}, primaryExec, logger, params, flags, shared, progress); err != nil {
 		return err
 	}
 	mergeShared(params, shared)
@@ -202,7 +207,7 @@ func runMysqlStandby(cmd *cobra.Command, args []string) error {
 	if commonmysql.StandbyIncludesSoftwareInstall(stage) {
 		phaseB["MR-018"] = true
 	}
-	if err := runMysqlStandbyReplicaSteps(filtered, phaseB, replicaHosts, nil, logger, params, flags, shared); err != nil {
+	if err := runMysqlStandbyReplicaSteps(filtered, phaseB, replicaHosts, nil, logger, params, flags, shared, progress); err != nil {
 		return err
 	}
 	mergeShared(params, shared)
@@ -210,27 +215,40 @@ func runMysqlStandby(cmd *cobra.Command, args []string) error {
 
 	if commonmysql.StandbyIncludesReplicationSetup(stage) {
 		// Phase C: MR-003, MR-004, MR-005
-		if err := runMysqlStandbyPrimarySteps(filtered, map[string]bool{"MR-003": true, "MR-004": true, "MR-005": true}, primaryExec, logger, params, flags, shared); err != nil {
+		if err := runMysqlStandbyPrimarySteps(filtered, map[string]bool{"MR-003": true, "MR-004": true, "MR-005": true}, primaryExec, logger, params, flags, shared, progress); err != nil {
 			return err
 		}
 		mergeShared(params, shared)
 
 		// Phase D: MR-009 then MR-008 on replica (cnf before instance init)
-		if err := runMysqlStandbyReplicaSteps(filtered, map[string]bool{"MR-009": true}, replicaHosts, nil, logger, params, flags, shared); err != nil {
+		if err := runMysqlStandbyReplicaSteps(filtered, map[string]bool{"MR-009": true}, replicaHosts, nil, logger, params, flags, shared, progress); err != nil {
 			return err
 		}
-		if err := runMysqlStandbyReplicaSteps(filtered, map[string]bool{"MR-008": true}, replicaHosts, nil, logger, params, flags, shared); err != nil {
+		if err := runMysqlStandbyReplicaSteps(filtered, map[string]bool{"MR-008": true}, replicaHosts, nil, logger, params, flags, shared, progress); err != nil {
+			return err
+		}
+		if strings.ToLower(strings.TrimSpace(mysqlStandbySyncMethod)) == "clone" {
+			if err := runMysqlStandbyReplicaSteps(filtered, map[string]bool{"MR-010": true}, replicaHosts, primaryExec, logger, params, flags, shared, progress); err != nil {
+				return err
+			}
+		}
+
+		// Inter-server firewall + port check before clone/dump/replication (MR-019).
+		if err := runMysqlStandbyPrimarySteps(filtered, map[string]bool{"MR-019": true}, primaryExec, logger, params, flags, shared, progress); err != nil {
+			return err
+		}
+		if err := runMysqlStandbyReplicaSteps(filtered, map[string]bool{"MR-019": true}, replicaHosts, primaryExec, logger, params, flags, shared, progress); err != nil {
 			return err
 		}
 
 		// Phase E/F/G on replica
 		replicaPhase := map[string]bool{}
-		for _, id := range []string{"MR-010", "MR-011", "MR-013", "MR-014", "MR-015"} {
+		for _, id := range []string{"MR-011", "MR-013", "MR-014", "MR-015"} {
 			replicaPhase[id] = true
 		}
-		if err := runMysqlStandbyReplicaSteps(filtered, replicaPhase, replicaHosts, primaryExec, logger, params, flags, shared); err != nil {
+		if err := runMysqlStandbyReplicaSteps(filtered, replicaPhase, replicaHosts, primaryExec, logger, params, flags, shared, progress); err != nil {
 			if mysqlStandbyCleanupOnFail {
-				_ = runMysqlStandbyReplicaSteps(filtered, map[string]bool{"MR-017": true}, replicaHosts, primaryExec, logger, params, flags, shared)
+				_ = runMysqlStandbyReplicaSteps(filtered, map[string]bool{"MR-017": true}, replicaHosts, primaryExec, logger, params, flags, shared, progress)
 			}
 			return err
 		}
@@ -240,12 +258,12 @@ func runMysqlStandby(cmd *cobra.Command, args []string) error {
 	if mysqlStandbyEnableSemiSync {
 		p := copyParams(params)
 		p["semi_sync_role"] = "source"
-		if err := runMysqlStandbyPrimarySteps(filtered, map[string]bool{"MR-016": true}, primaryExec, logger, p, flags, shared); err != nil {
+		if err := runMysqlStandbyPrimarySteps(filtered, map[string]bool{"MR-016": true}, primaryExec, logger, p, flags, shared, progress); err != nil {
 			return err
 		}
 		p2 := copyParams(params)
 		p2["semi_sync_role"] = "replica"
-		_ = runMysqlStandbyReplicaSteps(filtered, map[string]bool{"MR-016": true}, replicaHosts, primaryExec, logger, p2, flags, shared)
+		_ = runMysqlStandbyReplicaSteps(filtered, map[string]bool{"MR-016": true}, replicaHosts, primaryExec, logger, p2, flags, shared, progress)
 	}
 
 	logger.Info("MySQL standby completed successfully")
@@ -337,15 +355,155 @@ func buildMysqlStandbyParams(flags GlobalFlags, stage string) map[string]interfa
 	}
 	p["replica_platform"] = inferReplicaTargetPlatform(flags, p)
 	p["dump_ready_timeout"] = mysqlStandbyDumpReadyTO
+	if mysqlStandbyReplicaPort > 0 {
+		p["os_firewall_ports"] = fmt.Sprintf("%d,%d", mysqlStandbyPrimaryPort, mysqlStandbyReplicaPort)
+	}
 	return p
 }
 
-func runMysqlStandbyPrimarySteps(filtered []*runner.Step, want map[string]bool, ex ssh.Executor, logger *logging.Logger, params map[string]interface{}, flags GlobalFlags, shared map[string]interface{}) error {
+// mysqlStandbyExec 描述一次计划内的 MR 步骤执行（primary/replica）。
+type mysqlStandbyExec struct {
+	stepID   string
+	role     string // "primary" | "replica"
+	optional bool
+}
+
+func buildMysqlStandbyExecPlan(filtered []*runner.Step, stage, syncMethod string, enableSemiSync bool) []mysqlStandbyExec {
+	inFilter := make(map[string]*runner.Step, len(filtered))
+	for _, s := range filtered {
+		if s != nil {
+			inFilter[s.ID] = s
+		}
+	}
+	add := func(plan *[]mysqlStandbyExec, id, role string) {
+		s, ok := inFilter[id]
+		if !ok {
+			return
+		}
+		*plan = append(*plan, mysqlStandbyExec{stepID: id, role: role, optional: s.Optional})
+	}
+
+	var plan []mysqlStandbyExec
+	add(&plan, "MR-001", "primary")
+	add(&plan, "MR-002", "primary")
+	add(&plan, "MR-006", "replica")
+	add(&plan, "MR-007", "replica")
+	if commonmysql.StandbyIncludesSoftwareInstall(stage) {
+		add(&plan, "MR-018", "replica")
+	}
+	if commonmysql.StandbyIncludesReplicationSetup(stage) {
+		add(&plan, "MR-003", "primary")
+		add(&plan, "MR-004", "primary")
+		if syncMethod == "clone" {
+			add(&plan, "MR-005", "primary")
+		}
+		add(&plan, "MR-009", "replica")
+		add(&plan, "MR-008", "replica")
+		if syncMethod == "clone" {
+			add(&plan, "MR-010", "replica")
+		}
+		add(&plan, "MR-019", "primary")
+		add(&plan, "MR-019", "replica")
+		add(&plan, "MR-011", "replica")
+		add(&plan, "MR-013", "replica")
+		add(&plan, "MR-014", "replica")
+		add(&plan, "MR-015", "replica")
+	}
+	if enableSemiSync {
+		add(&plan, "MR-016", "primary")
+		add(&plan, "MR-016", "replica")
+	}
+	return plan
+}
+
+func countMysqlStandbyProgressSteps(plan []mysqlStandbyExec) int {
+	n := 0
+	for _, e := range plan {
+		if !e.optional {
+			n++
+		}
+	}
+	return n
+}
+
+func mysqlStandbyExcludeReason(id, stage, syncMethod string, enableSemiSync bool) string {
+	switch id {
+	case "MR-017":
+		return "failure cleanup only (not in normal flow)"
+	case "MR-018":
+		if !commonmysql.StandbyIncludesSoftwareInstall(stage) {
+			return fmt.Sprintf("stage=%q does not install software", stage)
+		}
+	case "MR-003", "MR-004", "MR-008", "MR-009", "MR-013", "MR-014", "MR-015":
+		if !commonmysql.StandbyIncludesReplicationSetup(stage) {
+			return fmt.Sprintf("stage=%q does not configure replication", stage)
+		}
+	case "MR-005", "MR-010":
+		if !commonmysql.StandbyIncludesReplicationSetup(stage) {
+			return fmt.Sprintf("stage=%q does not configure replication", stage)
+		}
+		if syncMethod != "clone" {
+			return fmt.Sprintf("sync_method=%q (clone plugin not needed)", syncMethod)
+		}
+	case "MR-019":
+		if !commonmysql.StandbyIncludesReplicationSetup(stage) {
+			return fmt.Sprintf("stage=%q does not configure replication", stage)
+		}
+	case "MR-011":
+		if !commonmysql.StandbyIncludesReplicationSetup(stage) {
+			return fmt.Sprintf("stage=%q does not configure replication", stage)
+		}
+	case "MR-016":
+		if !enableSemiSync {
+			return "--enable-semi-sync not set"
+		}
+	}
+	return ""
+}
+
+func logMysqlStandbyExecutionPlan(logger *logging.Logger, filtered []*runner.Step, plan []mysqlStandbyExec, stage, syncMethod string, enableSemiSync bool, plannedRequired int) {
+	optionalSlots := 0
+	plannedCounts := make(map[string]int, len(plan))
+	for _, e := range plan {
+		plannedCounts[e.stepID]++
+		if e.optional {
+			optionalSlots++
+		}
+	}
+	logger.Info("Steps in filter: %d", len(filtered))
+	logger.Info("Planned progress: %d required + up to %d optional (optional counted when executed)", plannedRequired, optionalSlots)
+	logger.Info("Standby stage: %s, sync_method: %s, semi_sync: %v", stage, syncMethod, enableSemiSync)
+	for _, s := range filtered {
+		if s == nil {
+			continue
+		}
+		if n := plannedCounts[s.ID]; n > 0 {
+			tag := "required"
+			if s.Optional {
+				tag = "optional"
+			}
+			if n > 1 {
+				logger.Info("  [%s] %s (%s, scheduled×%d)", s.ID, s.Name, tag, n)
+			} else {
+				logger.Info("  [%s] %s (%s)", s.ID, s.Name, tag)
+			}
+			continue
+		}
+		if reason := mysqlStandbyExcludeReason(s.ID, stage, syncMethod, enableSemiSync); reason != "" {
+			logger.Info("  [%s] %s — excluded: %s", s.ID, s.Name, reason)
+		} else {
+			logger.Info("  [%s] %s — excluded: not in execution plan", s.ID, s.Name)
+		}
+	}
+}
+
+func runMysqlStandbyPrimarySteps(filtered []*runner.Step, want map[string]bool, ex ssh.Executor, logger *logging.Logger, params map[string]interface{}, flags GlobalFlags, shared map[string]interface{}, progress *runner.StepProgress) error {
 	stepParams := copyParams(params)
 	stepParams["data_sync_role"] = "primary"
 	ctx := newMysqlStandbyStepContext(&runnerExecAdapter{e: ex}, logger, stepParams, flags)
 	ctx.TargetPlatform = inferPrimaryTargetPlatform(flags, params)
 	ctx.Results = shared
+	ctx.Progress = progress
 	for _, step := range filtered {
 		if !want[step.ID] {
 			continue
@@ -362,7 +520,10 @@ func runMysqlStandbyPrimarySteps(filtered []*runner.Step, want map[string]bool, 
 	return nil
 }
 
-func runMysqlStandbyReplicaSteps(filtered []*runner.Step, want map[string]bool, hosts []*HostInfo, primaryExec ssh.Executor, logger *logging.Logger, params map[string]interface{}, flags GlobalFlags, shared map[string]interface{}) error {
+func runMysqlStandbyReplicaSteps(filtered []*runner.Step, want map[string]bool, hosts []*HostInfo, primaryExec ssh.Executor, logger *logging.Logger, params map[string]interface{}, flags GlobalFlags, shared map[string]interface{}, progress *runner.StepProgress) error {
+	perStepFrozen := make(map[string]bool)
+	perStepProgress := make(map[string]struct{ idx, total int })
+
 	for _, h := range hosts {
 		hostParams := copyParams(params)
 		hostParams["data_sync_role"] = "replica"
@@ -373,12 +534,24 @@ func runMysqlStandbyReplicaSteps(filtered []*runner.Step, want map[string]bool, 
 			ctx.TargetPlatform = inferReplicaTargetPlatform(flags, hostParams)
 		}
 		ctx.Results = shared
+		ctx.Progress = progress
 		for _, step := range filtered {
 			if !want[step.ID] {
 				continue
 			}
+			if progress != nil && perStepFrozen[step.ID] {
+				ctx.Progress = nil
+				ctx.StepIndex = perStepProgress[step.ID].idx
+				ctx.TotalSteps = perStepProgress[step.ID].total
+			} else {
+				ctx.Progress = progress
+			}
 			ctx.CurrentStepID = step.ID
 			result := runner.RunStep(step, ctx)
+			if progress != nil && !perStepFrozen[step.ID] {
+				perStepProgress[step.ID] = struct{ idx, total int }{ctx.StepIndex, ctx.TotalSteps}
+				perStepFrozen[step.ID] = true
+			}
 			if !result.Success && !result.Skipped {
 				if flags.Precheck {
 					continue

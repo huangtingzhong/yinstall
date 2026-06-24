@@ -44,5 +44,6 @@ func GetAllSteps() []*runner.Step {
 		StepB029WriteUdevRules(),
 		StepB030TriggerUdev(),
 		StepB031VerifyDiskPermissions(),
+		StepB032ConfigureSELinux(),
 	}
 }

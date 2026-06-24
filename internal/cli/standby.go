@@ -302,7 +302,7 @@ func runStandby(cmd *cobra.Command, args []string) error {
 		rid = fmt.Sprintf("standby-%s", time.Now().Format("20060102-150405"))
 	}
 
-	logger, err := logging.NewLogger(rid, flags.LogDir, AppVersion, AppAuthor, AppContact)
+	logger, err := newSessionLogger(rid, flags.LogDir)
 	if err != nil {
 		return fmt.Errorf("failed to initialize logger: %w", err)
 	}

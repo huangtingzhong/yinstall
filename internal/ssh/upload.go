@@ -288,3 +288,23 @@ func formatBytes(n int64) string {
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
+
+// LogUploadStart records upload start (shared by SFTP/WinRM).
+func LogUploadStart(uctx *UploadContext, host, localPath, remotePath string, size int64) {
+	logUploadStart(uctx, host, localPath, remotePath, size)
+}
+
+// LogUploadEnd records upload completion.
+func LogUploadEnd(uctx *UploadContext, host, localPath, remotePath string, size int64, elapsed time.Duration) {
+	logUploadEnd(uctx, host, localPath, remotePath, size, elapsed)
+}
+
+// LogUploadDebug writes upload method/details to debug log.
+func LogUploadDebug(uctx *UploadContext, host, msg string) {
+	logUploadDebug(uctx, host, msg)
+}
+
+// LogUploadProgress writes periodic upload progress to debug log.
+func LogUploadProgress(uctx *UploadContext, uploaded, fileSize int64) {
+	logUploadProgress(uctx, uploaded, fileSize)
+}

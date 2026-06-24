@@ -17,6 +17,7 @@ func GetAllSteps() []*runner.Step {
 		StepMR008InstallReplicaInstance(),
 		StepMR009CopyPatchReplicaCnf(),
 		StepMR010InstallClonePluginReplica(),
+		StepMR019ReplicationFirewallPrepare(),
 		StepMR011SyncFromPrimary(),
 		StepMR013ConfigureReplicationSource(),
 		StepMR014StartReplica(),

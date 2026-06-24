@@ -11,7 +11,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/yinstall/internal/common/archive"
-	"github.com/yinstall/internal/logging"
 	"github.com/yinstall/internal/runner"
 	"github.com/yinstall/internal/ssh"
 )
@@ -143,7 +142,7 @@ func runCollect(cmd *cobra.Command, args []string) error {
 		rid = fmt.Sprintf("collect-%s", time.Now().Format(archive.TimestampFormat))
 	}
 
-	logger, err := logging.NewLogger(rid, flags.LogDir, AppVersion, AppAuthor, AppContact)
+	logger, err := newSessionLogger(rid, flags.LogDir)
 	if err != nil {
 		return fmt.Errorf("failed to initialize logger: %w", err)
 	}

@@ -3,7 +3,6 @@ package mysql_standby
 import (
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	commonfile "github.com/yinstall/internal/common/file"
@@ -38,14 +37,20 @@ func resolveReplicaSoftware(ctx *runner.StepContext, primaryVer string) (replica
 		if primaryNorm == "" || ver == "" {
 			return nil
 		}
-		ok, err := commonmysql.ReplicaVersionOK(ver, primaryNorm)
+		ok, err := commonmysql.ReplicaVersionMatchesPrimary(ver, primaryNorm)
 		if err != nil {
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("replica software %s < primary %s; replication requires replica version >= primary", ver, primaryNorm)
+			return fmt.Errorf("replica software %s must match primary %s exactly for standby install", ver, primaryNorm)
 		}
 		return nil
+	}
+
+	if primaryNorm != "" {
+		if plan, ok, err := replicaInstalledPlan(ctx, base, primaryNorm); ok || err != nil {
+			return plan, err
+		}
 	}
 
 	if explicitVer != "" {
@@ -83,21 +88,13 @@ func resolveReplicaSoftware(ctx *runner.StepContext, primaryVer string) (replica
 		return replicaSoftwarePlan{Version: pkgVer, Package: explicitPkg, Source: "package"}, nil
 	}
 
-	installed, err := listInstalledMysqlSoftware(ctx, base)
-	if err != nil {
-		return replicaSoftwarePlan{}, err
-	}
-	if sel := pickLowestSoftwareAtLeast(installed, primaryNorm); sel.Version != "" {
-		return replicaSoftwarePlan{Version: sel.Version, Home: sel.Home, Source: "installed"}, nil
-	}
-
 	if primaryNorm == "" {
 		return replicaSoftwarePlan{}, nil
 	}
 
 	remoteDir := replicaSoftDir(ctx)
 	arch := ctx.GetParamString("mysql_target_arch", "")
-	pkg, err := commonfile.FindMysqlBinaryPackageAtLeastVersion(ctx, ctx.LocalSoftwareDirs, remoteDir, replicaPlatform(ctx), arch, primaryNorm)
+	pkg, err := commonfile.FindMysqlBinaryPackageExactVersion(ctx, ctx.LocalSoftwareDirs, remoteDir, replicaPlatform(ctx), arch, primaryNorm)
 	if err != nil {
 		return replicaSoftwarePlan{}, err
 	}
@@ -109,6 +106,17 @@ func resolveReplicaSoftware(ctx *runner.StepContext, primaryVer string) (replica
 		return replicaSoftwarePlan{}, err
 	}
 	return replicaSoftwarePlan{Version: pkgVer, Package: pkg, Source: "package"}, nil
+}
+
+func replicaInstalledPlan(ctx *runner.StepContext, base, wantVersion string) (replicaSoftwarePlan, bool, error) {
+	installed, err := listInstalledMysqlSoftware(ctx, base)
+	if err != nil {
+		return replicaSoftwarePlan{}, false, err
+	}
+	if sel := pickInstalledSoftwareExactMatch(ctx, installed, wantVersion); sel.Version != "" {
+		return replicaSoftwarePlan{Version: sel.Version, Home: sel.Home, Source: "installed"}, true, nil
+	}
+	return replicaSoftwarePlan{}, false, nil
 }
 
 func listInstalledMysqlSoftware(ctx *runner.StepContext, base string) ([]detectedMysqlSoftware, error) {
@@ -182,42 +190,26 @@ func versionFromProductPath(p string) string {
 	return ""
 }
 
-func pickLowestSoftwareAtLeast(items []detectedMysqlSoftware, minVersion string) detectedMysqlSoftware {
-	if len(items) == 0 {
+func pickInstalledSoftwareExactMatch(ctx *runner.StepContext, items []detectedMysqlSoftware, wantVersion string) detectedMysqlSoftware {
+	wantVersion = strings.TrimSpace(wantVersion)
+	if wantVersion == "" {
 		return detectedMysqlSoftware{}
 	}
-	type ranked struct {
-		sw  detectedMysqlSoftware
-		ver commonmysql.Version
-	}
-	var ok []ranked
+	platform := replicaPlatform(ctx)
 	for _, sw := range items {
-		v, err := commonmysql.ParseMySQLVersion(sw.Version)
-		if err != nil {
+		if sw.Version != wantVersion {
 			continue
 		}
-		if minVersion != "" {
-			good, err := commonmysql.ReplicaVersionOK(sw.Version, minVersion)
-			if err != nil || !good {
-				continue
-			}
+		if sw.Home != "" && commonmysql.MysqldExistsAtHome(ctx, sw.Home, platform) {
+			return sw
 		}
-		ok = append(ok, ranked{sw: sw, ver: v})
 	}
-	if len(ok) == 0 {
-		return detectedMysqlSoftware{}
+	base := ctx.GetParamString("mysql_base", commonmysql.DefaultBase(platform))
+	if softwareExistsForVersion(ctx, base, wantVersion) {
+		layout := commonmysql.LayoutFromParams(platform, base, replicaPort(ctx), wantVersion)
+		return detectedMysqlSoftware{Version: wantVersion, Home: layout.Home, Source: "product"}
 	}
-	sort.Slice(ok, func(i, j int) bool {
-		a, b := ok[i].ver, ok[j].ver
-		if a.Major != b.Major {
-			return a.Major < b.Major
-		}
-		if a.Minor != b.Minor {
-			return a.Minor < b.Minor
-		}
-		return a.Patch < b.Patch
-	})
-	return ok[0].sw
+	return detectedMysqlSoftware{}
 }
 
 func softwareExistsForVersion(ctx *runner.StepContext, base, version string) bool {
@@ -262,6 +254,12 @@ func applyReplicaSoftwarePlan(ctx *runner.StepContext, plan replicaSoftwarePlan)
 	}
 	if plan.Source != "" {
 		ctx.SetResult("replica_software_source", plan.Source)
+	}
+	if plan.Source == "installed" {
+		ctx.SetResult("replica_install_skipped", true)
+		ctx.Logger.Info("Replica software already installed at matching version %s; skipping software install", plan.Version)
+	} else {
+		ctx.SetResult("replica_install_skipped", false)
 	}
 }
 

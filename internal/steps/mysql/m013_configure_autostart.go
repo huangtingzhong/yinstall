@@ -45,25 +45,36 @@ func StepM013ConfigureAutostart() *runner.Step {
 			if ctx.GetParamBool("mysql_skip_systemd", false) {
 				return nil
 			}
+			osUser := ctx.GetParamString("os_user", "mysql")
+			osGroup := ctx.GetParamString("os_group", "mysql")
+			mkdirCmd := fmt.Sprintf("mkdir -p /var/lib/mysql && chown %s:%s /var/lib/mysql",
+				commonos.ShellSingleQuote(osUser), commonos.ShellSingleQuote(osGroup))
+			if _, err := ctx.ExecuteWithCheck(mkdirCmd, true); err != nil {
+				return err
+			}
 			unit := fmt.Sprintf("mysqld%d.service", port)
 			unitPath := "/etc/systemd/system/" + unit
+			pidFile := layout.Other + "/mysqld.pid"
 			content := fmt.Sprintf(`[Unit]
 Description=MySQL Server %d
 After=network.target
 
 [Service]
-Type=simple
+Type=forking
 User=%s
 Group=%s
+WorkingDirectory=%s
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=/var/lib/mysql
 LimitNOFILE=8192
-ExecStart=%s/bin/mysqld_safe --defaults-file=%s
+PIDFile=%s
+ExecStart=/bin/sh %s/bin/mysqld_safe --defaults-file=%s
 KillMode=mixed
 TimeoutStopSec=120
 
 [Install]
 WantedBy=multi-user.target
-`, port, ctx.GetParamString("os_user", "mysql"), ctx.GetParamString("os_group", "mysql"),
-				layout.Home, cfgPath)
+`, port, osUser, osGroup, layout.Home, pidFile, layout.Home, cfgPath)
 			ctx.LogScriptPreview("file", "systemd-unit", content)
 			cmd := fmt.Sprintf("cat > %s << 'EOF'\n%sEOF", commonos.ShellSingleQuote(unitPath), content)
 			if _, err = ctx.ExecuteWithCheck(cmd, true); err != nil {

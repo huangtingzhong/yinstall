@@ -104,7 +104,7 @@ func registerOSBaselineFlags(cmd *cobra.Command, cfg registerOSFlagsConfig) {
 	}
 	cmd.Flags().StringVar(&osTimezone, "os-timezone", "Asia/Shanghai", prefix+cfg.whenSkipOSFalse("System timezone"))
 	cmd.Flags().StringVar(&osNTPServer, "os-ntp-server", "", prefix+cfg.whenSkipOSFalse("NTP server address (empty to skip NTP configuration)"))
-	cmd.Flags().StringVar(&osHostname, "os-hostname", "", prefix+cfg.whenSkipOSFalse("Hostname prefix or comma-separated list for B-023 (empty=product default: yashandb for db/os, mysql for yinstall mysql)"))
+	cmd.Flags().StringVar(&osHostname, "os-hostname", "", prefix+cfg.whenSkipOSFalse("Hostname prefix or comma-separated list for B-023 (empty=auto: replace only localhost/system default names, keep existing custom names)"))
 	cmd.Flags().StringVar(&osSysctlFile, "os-sysctl-file", "/etc/sysctl.d/yashandb.conf", prefix+cfg.whenSkipOSFalse("Sysctl config file path"))
 	cmd.Flags().StringVar(&osLimitsFile, "os-limits-file", "/etc/security/limits.conf", prefix+cfg.whenSkipOSFalse("Limits config file path"))
 	cmd.Flags().BoolVar(&osKernelArgsEnable, "os-kernel-args-enable", true, prefix+cfg.whenSkipOSFalse("Enable kernel args configuration"))
@@ -122,17 +122,19 @@ func registerOSBaselineFlags(cmd *cobra.Command, cfg registerOSFlagsConfig) {
 	cmd.Flags().StringVar(&osZstdSourceTarball, "os-zstd-source-tarball", "", prefix+cfg.whenSkipOSFalse("Explicit zstd source tarball (zstd-x.y.z.tar.gz); empty=auto-discover (EL7 libzstd fallback)"))
 	cmd.Flags().StringVar(&osFirewallMode, "os-firewall-mode", "disable", prefix+cfg.whenSkipOSFalse("Firewall mode: keep/disable/open-ports"))
 	cmd.Flags().StringVar(&osFirewallPorts, "os-firewall-ports", "", prefix+cfg.whenSkipOSFalse("Ports to open, comma-separated"))
+	cmd.Flags().StringVar(&osSELinuxMode, "os-selinux-mode", "keep", prefix+cfg.whenSkipOSFalse("SELinux mode: keep/permissive/disabled"))
 }
 
 func registerMysqlOSBaselineFlags(cmd *cobra.Command, cfg registerOSFlagsConfig) {
 	cmd.Flags().StringVar(&osTimezone, "os-timezone", "Asia/Shanghai", "System timezone"+cfg.whenSkipOSFalse(""))
-	cmd.Flags().StringVar(&osHostname, "os-hostname", "", "Hostname for B-023 (empty=mysql)"+cfg.whenSkipOSFalse(""))
+	cmd.Flags().StringVar(&osHostname, "os-hostname", "", "Hostname for B-023 (empty=auto: replace only localhost/system default names, keep existing custom names)"+cfg.whenSkipOSFalse(""))
 	cmd.Flags().StringVar(&osSysctlFile, "os-sysctl-file", "/etc/sysctl.d/mysql.conf", "Sysctl config file path"+cfg.whenSkipOSFalse(""))
 	cmd.Flags().StringVar(&osLimitsFile, "os-limits-file", "/etc/security/limits.conf", "Limits config file path"+cfg.whenSkipOSFalse(""))
 	cmd.Flags().BoolVar(&osKernelArgsEnable, "os-kernel-args-enable", true, "Enable kernel args configuration"+cfg.whenSkipOSFalse(""))
 	cmd.Flags().StringVar(&osKernelArgs, "os-kernel-args", "elevator=deadline transparent_hugepage=never numa=off", "Kernel boot arguments"+cfg.whenSkipOSFalse(""))
 	cmd.Flags().StringVar(&osFirewallMode, "os-firewall-mode", "open-ports", "Firewall mode: keep/disable/open-ports"+cfg.whenSkipOSFalse(""))
 	cmd.Flags().StringVar(&osFirewallPorts, "os-firewall-ports", "", "Ports to open (defaults to --mysql-port and mysqlx)"+cfg.whenSkipOSFalse(""))
+	cmd.Flags().StringVar(&osSELinuxMode, "os-selinux-mode", "keep", "SELinux mode: keep/permissive/disabled"+cfg.whenSkipOSFalse(""))
 }
 
 // registerOSYumISOFlags YUM/ISO 源相关（与 os、db、stressos 共用 osYumMode 等包级变量）。

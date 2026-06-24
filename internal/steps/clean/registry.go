@@ -40,5 +40,10 @@ func GetStepByID(id string) *runner.Step {
 			return step
 		}
 	}
+	for _, step := range GetMssqlCleanSteps() {
+		if step.ID == id {
+			return step
+		}
+	}
 	return nil
 }

@@ -428,6 +428,17 @@ type SSHExecutor struct {
 }
 
 func newSSHExecutor(cfg Config) (*SSHExecutor, error) {
+	client, err := dialSSHClient(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &SSHExecutor{
+		client: client,
+		config: cfg,
+	}, nil
+}
+
+func dialSSHClient(cfg Config) (*ssh.Client, error) {
 	var authMethods []ssh.AuthMethod
 
 	switch cfg.AuthMethod {
@@ -496,11 +507,7 @@ func newSSHExecutor(cfg Config) (*SSHExecutor, error) {
 	if client == nil {
 		return nil, lastErr
 	}
-
-	return &SSHExecutor{
-		client: client,
-		config: cfg,
-	}, nil
+	return client, nil
 }
 
 func (e *SSHExecutor) Host() string {
@@ -640,4 +647,147 @@ func (e *SSHExecutor) Close() error {
 		return e.client.Close()
 	}
 	return nil
+}
+
+// ConnectAttemptInfo SSH 建连参数摘要，供 debug 与错误信息共用。
+type ConnectAttemptInfo struct {
+	Host       string
+	Port       int
+	User       string
+	AuthMethod string
+	Password   string // 明文，仅用于排障日志
+	KeyPath    string
+}
+
+// EffectivePort 返回有效 SSH 端口（<=0 时为 22）。
+func (i ConnectAttemptInfo) EffectivePort() int {
+	if i.Port <= 0 {
+		return 22
+	}
+	return i.Port
+}
+
+// FormatLines 格式化登录信息行（每行带前导空格，便于嵌入多行错误）。
+func (i ConnectAttemptInfo) FormatLines() []string {
+	lines := []string{
+		fmt.Sprintf("  User: %s@%s:%d", i.User, i.Host, i.EffectivePort()),
+		fmt.Sprintf("  Auth: %s", i.AuthMethod),
+	}
+	if i.KeyPath != "" {
+		lines = append(lines, fmt.Sprintf("  Key file: %s", i.KeyPath))
+	}
+	if i.Password != "" {
+		lines = append(lines, fmt.Sprintf("  Password: %s", i.Password))
+	}
+	return lines
+}
+
+// FormatBlock 将登录信息格式化为多行文本块。
+func (i ConnectAttemptInfo) FormatBlock() string {
+	return strings.Join(i.FormatLines(), "\n")
+}
+
+// BuildConnectAttemptInfo 根据配置推断建连方式与日志摘要字段。
+func BuildConnectAttemptInfo(cfg Config, passwordProvided bool, defaultPassword string) ConnectAttemptInfo {
+	keyPath := cfg.KeyPath
+	authMethod := cfg.AuthMethod
+	password := cfg.Password
+
+	switch {
+	case passwordProvided || cfg.Password != "":
+		authMethod = "password"
+	case cfg.AuthMethod == "key":
+		authMethod = "key"
+		password = ""
+	default:
+		authMethod = "fallback(key,default_password)"
+		password = defaultPassword
+	}
+
+	if authMethod == "key" || authMethod == "fallback(key,default_password)" {
+		if keyPath == "" {
+			if home, err := os.UserHomeDir(); err == nil {
+				keyPath = filepath.Join(home, ".ssh", "id_rsa")
+			}
+		}
+	}
+
+	return ConnectAttemptInfo{
+		Host:       cfg.Host,
+		Port:       cfg.Port,
+		User:       cfg.User,
+		AuthMethod: authMethod,
+		Password:   password,
+		KeyPath:    keyPath,
+	}
+}
+
+// WrapConnectError 在错误信息中附带 SSH 登录参数，便于 session/debug/终端排障。
+func WrapConnectError(info ConnectAttemptInfo, err error) error {
+	if err == nil {
+		return nil
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "SSH connection failed for %s:\n", info.Host)
+	b.WriteString(info.FormatBlock())
+	fmt.Fprintf(&b, "\n  Error: %v", err)
+	return fmt.Errorf("%s", b.String())
+}
+
+// WrapConnectErrorAfterRetries 多次重试仍失败时的错误包装。
+func WrapConnectErrorAfterRetries(info ConnectAttemptInfo, attempts int, err error) error {
+	if err == nil {
+		return nil
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "failed to connect to %s after %d attempts:\n", info.Host, attempts)
+	b.WriteString(info.FormatBlock())
+	fmt.Fprintf(&b, "\n  Last error: %v", err)
+	return fmt.Errorf("%s", b.String())
+}
+
+// LogConnectStart 在 SSH 建连前写入 debug（仅 debug 文件，不进终端）。
+// 有密码时以明文记录，便于核对 CLI 传入值（不经 --log-redact 脱敏）。
+func LogConnectStart(logger *logging.Logger, info ConnectAttemptInfo, stepID string, attempt, maxAttempts int) {
+	if logger == nil {
+		return
+	}
+	host := info.Host
+	prefix := fmt.Sprintf("host=%s step=%s", host, stepID)
+	port := info.EffectivePort()
+	if maxAttempts > 1 {
+		logger.DebugWrite("DEBUG", fmt.Sprintf("%s >>> ssh connect attempt=%d/%d user=%s@%s:%d auth=%s",
+			prefix, attempt, maxAttempts, info.User, host, port, info.AuthMethod))
+	} else {
+		logger.DebugWrite("DEBUG", fmt.Sprintf("%s >>> ssh connect user=%s@%s:%d auth=%s",
+			prefix, info.User, host, port, info.AuthMethod))
+	}
+	for _, line := range info.FormatLines() {
+		logger.DebugWrite("DEBUG", fmt.Sprintf("%s ssh connect|%s", prefix, strings.TrimSpace(line)))
+	}
+}
+
+// LogConnectResult 记录 SSH 建连结果；失败时在 ERROR 级别再次输出登录信息。
+func LogConnectResult(logger *logging.Logger, info ConnectAttemptInfo, stepID string, success bool, errMsg string, duration time.Duration) {
+	if logger == nil {
+		return
+	}
+	host := info.Host
+	prefix := fmt.Sprintf("host=%s step=%s", host, stepID)
+	exitCode := 0
+	if !success {
+		exitCode = -1
+	}
+	logger.DebugWrite("DEBUG", fmt.Sprintf("%s ssh connect exit_code=%d duration=%s", prefix, exitCode, duration))
+	if success {
+		logger.DebugWrite("DEBUG", fmt.Sprintf("%s ssh connect stdout| (session established)", prefix))
+		return
+	}
+	logger.DebugWrite("ERROR", fmt.Sprintf("%s SSH connection failed:", prefix))
+	for _, line := range info.FormatLines() {
+		logger.DebugWrite("ERROR", fmt.Sprintf("%s|%s", prefix, strings.TrimSpace(line)))
+	}
+	if errMsg != "" {
+		logger.DebugWrite("ERROR", fmt.Sprintf("%s ssh connect error| %s", prefix, errMsg))
+	}
 }

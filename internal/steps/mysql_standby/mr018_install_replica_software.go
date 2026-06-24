@@ -21,6 +21,9 @@ func StepMR018InstallReplicaSoftware() *runner.Step {
 			if !commonmysql.StandbyIncludesSoftwareInstall(stage) {
 				return runner.NewStepSkippedError(fmt.Sprintf("standby stage %q does not install software", stage))
 			}
+			if skipped, _ := ctx.Results["replica_install_skipped"].(bool); skipped {
+				return runner.NewStepSkippedError("replica software already installed at primary version")
+			}
 			return nil
 		},
 		Action: func(ctx *runner.StepContext) error {
@@ -30,15 +33,7 @@ func StepMR018InstallReplicaSoftware() *runner.Step {
 			standbyLogPhase(ctx, "plan", "MR-018 install replica software")
 			ctx.Params["mysql_stage"] = commonmysql.StageSoftware
 			steps := mysqlsteps.GetSoftwareSteps()
-			for _, step := range steps {
-				ctx.CurrentStepID = step.ID
-				ctx.Logger.Info("MR-018 running embedded %s", step.ID)
-				result := runner.RunStep(step, ctx)
-				if !result.Success && !result.Skipped {
-					return fmt.Errorf("embedded step %s failed: %w", step.ID, result.Error)
-				}
-			}
-			return nil
+			return runner.RunEmbeddedSteps(ctx, "MR-018", steps)
 		},
 	}
 }

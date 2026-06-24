@@ -280,6 +280,7 @@ func RunPerHostStepsEx(
 				StepIndex:         stepIndex + i,
 				TotalSteps:        totalSteps,
 				Progress:          progress,
+				TargetHosts:       targetHosts,
 				TargetPlatform:    targetPlatformForHost(info, sharedResults, hostResults),
 			}
 			if progress != nil && hi > 0 && perStepFrozen[i] {
@@ -312,6 +313,461 @@ func RunPerHostStepsEx(
 	}
 
 	return res
+}
+
+// RunRoundRobinPerHostStepsEx runs each per-host step on every host before advancing to the next step.
+// Global steps run once on the first host (same as RunPerHostStepsEx). Used by MSSQL HA mirror cert exchange.
+func RunRoundRobinPerHostStepsEx(
+	steps []*runner.Step,
+	hostInfos []*HostInfo,
+	params map[string]interface{},
+	flags GlobalFlags,
+	logger *logging.Logger,
+	stepIndex int,
+	totalSteps int,
+	sharedResults map[string]interface{},
+	execFactory ExecutorAdapterFactory,
+	progress *runner.StepProgress,
+) *PerHostRunResult {
+	res := &PerHostRunResult{}
+	if len(hostInfos) == 0 {
+		return res
+	}
+
+	makeExec := execFactory
+	if makeExec == nil {
+		makeExec = func(e ssh.Executor) runner.Executor { return &runnerExecAdapter{e: e} }
+	}
+
+	targetHosts := make([]runner.TargetHost, 0, len(hostInfos))
+	for _, info := range hostInfos {
+		if info.TargetPlatform == "" {
+			info.TargetPlatform = inferTargetPlatformFromFlags(flags)
+		}
+		if info.TargetPlatform == "" {
+			info.TargetPlatform = "linux"
+		}
+		targetHosts = append(targetHosts, runner.TargetHost{
+			Host:     info.Host,
+			Executor: makeExec(info.Executor),
+		})
+	}
+
+	var globalSteps []*runner.Step
+	var perHostSteps []*runner.Step
+	for _, step := range steps {
+		if step.Global {
+			globalSteps = append(globalSteps, step)
+		} else {
+			perHostSteps = append(perHostSteps, step)
+		}
+	}
+
+	if len(steps) > 0 {
+		logger.Info("======== Phase 2: Executing steps (round-robin) ========")
+	}
+
+	if len(globalSteps) > 0 {
+		logger.Info("-------- Global steps (all nodes) --------")
+		globalResults := sharedResults
+		if globalResults == nil {
+			globalResults = make(map[string]interface{})
+		}
+		for i, step := range globalSteps {
+			ctx := &runner.StepContext{
+				Executor:          makeExec(hostInfos[0].Executor),
+				Logger:            logger,
+				Params:            params,
+				DryRun:            flags.DryRun,
+				Precheck:          flags.Precheck,
+				Results:           globalResults,
+				OSInfo:            hostInfos[0].OSInfo,
+				LocalSoftwareDirs: flags.LocalSoftwareDirs,
+				RemoteSoftwareDir: flags.RemoteSoftwareDir,
+				ForceAll:          flags.ForceAll,
+				ForceSteps:        flags.ForceSteps,
+				ForceDeleteUser:   flags.ForceDeleteUser,
+				StepIndex:         stepIndex + i,
+				TotalSteps:        totalSteps,
+				TargetHosts:       targetHosts,
+				Progress:          progress,
+			}
+			result := runner.RunStep(step, ctx)
+			if !result.Success && !result.Skipped {
+				logger.Error("Step %s failed: %v", step.ID, result.Error)
+				if flags.Precheck {
+					res.PrecheckFailed = true
+					continue
+				}
+				res.LastError = result.Error
+				return res
+			}
+		}
+		stepIndex += len(globalSteps)
+	}
+
+	hostResults := make([]map[string]interface{}, len(hostInfos))
+	for hi := range hostInfos {
+		hostResults[hi] = make(map[string]interface{})
+		for k, v := range sharedResults {
+			hostResults[hi][k] = v
+		}
+		if id := connectivityIdentityForHost(hostInfos[hi]); len(id) > 0 {
+			hostResults[hi]["stress_connectivity_identity"] = id
+		}
+	}
+
+	perStepFrozen := make([]bool, len(perHostSteps))
+	perStepProgress := make([]struct{ idx, total int }, len(perHostSteps))
+
+	for i, step := range perHostSteps {
+		logger.Info("-------- Step [%s] %s --------", step.ID, step.Name)
+		if step.ID == "M-013" {
+			if err := runM013MirrorPartnerPhases(step, hostInfos, params, flags, logger, makeExec, targetHosts, hostResults, sharedResults, stepIndex+i, totalSteps, progress, &perStepFrozen[i], &perStepProgress[i], res); err != nil {
+				if flags.Precheck {
+					res.PrecheckFailed = true
+				} else {
+					res.LastError = err
+				}
+			}
+			if res.LastError != nil || (flags.Precheck && res.PrecheckFailed) {
+				break
+			}
+			continue
+		}
+		if step.ID == "A-014" {
+			if err := runA014AGSeedPhases(step, hostInfos, params, flags, logger, makeExec, targetHosts, hostResults, sharedResults, stepIndex+i, totalSteps, progress, &perStepFrozen[i], &perStepProgress[i], res); err != nil {
+				if flags.Precheck {
+					res.PrecheckFailed = true
+				} else {
+					res.LastError = err
+				}
+			}
+			if res.LastError != nil || (flags.Precheck && res.PrecheckFailed) {
+				break
+			}
+			continue
+		}
+		stepHosts := hostInfos
+		for hi, info := range stepHosts {
+			logger.Info("  Host: %s", info.Host)
+			hostIdx := hi
+			ctx := &runner.StepContext{
+				Executor:          makeExec(info.Executor),
+				Logger:            logger,
+				Params:            params,
+				DryRun:            flags.DryRun,
+				Precheck:          flags.Precheck,
+				Results:           hostResults[hostIdx],
+				OSInfo:            info.OSInfo,
+				LocalSoftwareDirs: flags.LocalSoftwareDirs,
+				RemoteSoftwareDir: flags.RemoteSoftwareDir,
+				ForceAll:          flags.ForceAll,
+				ForceSteps:        flags.ForceSteps,
+				ForceDeleteUser:   flags.ForceDeleteUser,
+				StepIndex:         stepIndex + i,
+				TotalSteps:        totalSteps,
+				Progress:          progress,
+				TargetHosts:       targetHosts,
+				TargetPlatform:    targetPlatformForHost(info, sharedResults, hostResults[hostIdx]),
+			}
+			if progress != nil && hi > 0 && perStepFrozen[i] {
+				ctx.Progress = nil
+				ctx.StepIndex = perStepProgress[i].idx
+				ctx.TotalSteps = perStepProgress[i].total
+			}
+
+			result := runner.RunStep(step, ctx)
+			if progress != nil && hi == 0 {
+				perStepProgress[i].idx = ctx.StepIndex
+				perStepProgress[i].total = ctx.TotalSteps
+				perStepFrozen[i] = true
+			}
+			mergeSharedPlatformResults(sharedResults, hostResults[hostIdx])
+			mergeSharedMirrorResults(sharedResults, hostResults[hostIdx])
+			syncSharedMirrorResultsToHosts(sharedResults, hostResults)
+			if !result.Success && !result.Skipped {
+				logger.Error("Step %s failed on %s: %v", step.ID, info.Host, result.Error)
+				if flags.Precheck {
+					res.PrecheckFailed = true
+					break
+				}
+				res.LastError = result.Error
+				return res
+			}
+		}
+		if res.LastError != nil || (flags.Precheck && res.PrecheckFailed) {
+			break
+		}
+	}
+
+	return res
+}
+
+func isMirrorSharedResultKey(k string) bool {
+	return k == "mirror_work_dir" || k == "ha_work_dir" || k == "mirror_db_list" || k == "mirror_backup_path" ||
+		k == "wsfc_cluster" ||
+		strings.HasPrefix(k, "mirror_work_dir_") ||
+		strings.HasPrefix(k, "ha_work_dir_") ||
+		strings.HasPrefix(k, "mirror_backup_path_") ||
+		strings.HasPrefix(k, "mirror_log_backup_path_") ||
+		strings.HasPrefix(k, "mirror_instance_") ||
+		strings.HasPrefix(k, "ha_instance_") ||
+		strings.HasPrefix(k, "ha_replica_server_") ||
+		strings.HasPrefix(k, "mirror_db_status_") ||
+		strings.HasPrefix(k, "mirror_cert_file_") ||
+		strings.HasPrefix(k, "ha_cert_file_")
+}
+
+func mergeSharedMirrorResults(shared, host map[string]interface{}) {
+	if shared == nil || host == nil {
+		return
+	}
+	for k, v := range host {
+		if isMirrorSharedResultKey(k) {
+			shared[k] = v
+		}
+	}
+}
+
+func syncSharedMirrorResultsToHosts(shared map[string]interface{}, hosts []map[string]interface{}) {
+	if shared == nil {
+		return
+	}
+	for _, host := range hosts {
+		if host == nil {
+			continue
+		}
+		for k, v := range shared {
+			if isMirrorSharedResultKey(k) {
+				host[k] = v
+			}
+		}
+	}
+}
+
+func mssqlPrimaryHostFromParams(params map[string]interface{}) string {
+	if params == nil {
+		return ""
+	}
+	if s, ok := params["mssql_primary_host"].(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return strings.TrimSpace(fmt.Sprint(params["mssql_primary_host"]))
+}
+
+func hostIndexForHost(hostInfos []*HostInfo, host string) int {
+	for i, h := range hostInfos {
+		if h != nil && strings.EqualFold(h.Host, host) {
+			return i
+		}
+	}
+	return 0
+}
+
+func mirror107PhaseHosts(hostInfos []*HostInfo, primaryHost string, primaryOnly bool) []*HostInfo {
+	var out []*HostInfo
+	for _, h := range hostInfos {
+		if h == nil {
+			continue
+		}
+		isPrimary := primaryHost != "" && strings.EqualFold(h.Host, primaryHost)
+		if primaryOnly == isPrimary {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// runM013MirrorPartnerPhases is the M-013 (mssql_mirror) variant of
+// runMSH107MirrorPartnerPhases. It uses mirror_013_phase as the params key.
+func runM013MirrorPartnerPhases(
+	step *runner.Step,
+	hostInfos []*HostInfo,
+	params map[string]interface{},
+	flags GlobalFlags,
+	logger *logging.Logger,
+	makeExec ExecutorAdapterFactory,
+	targetHosts []runner.TargetHost,
+	hostResults []map[string]interface{},
+	sharedResults map[string]interface{},
+	stepIndex, totalSteps int,
+	progress *runner.StepProgress,
+	perStepFrozen *bool,
+	perStepProgress *struct{ idx, total int },
+	res *PerHostRunResult,
+) error {
+	const phaseKey = "mirror_013_phase"
+	primaryHost := mssqlPrimaryHostFromParams(params)
+	if primaryHost == "" && len(hostInfos) > 0 && hostInfos[0] != nil {
+		primaryHost = hostInfos[0].Host
+	}
+	phases := []struct {
+		phase       string
+		primaryOnly bool
+	}{
+		{"log-backup", true},
+		{"log-restore-partner-secondary", false},
+		{"partner-primary", true},
+	}
+	prevPhase, hadPhase := params[phaseKey]
+	for pi, ph := range phases {
+		params[phaseKey] = ph.phase
+		stepHosts := mirror107PhaseHosts(hostInfos, primaryHost, ph.primaryOnly)
+		for hi, info := range stepHosts {
+			if info == nil {
+				continue
+			}
+			logger.Info("  Host: %s (phase=%s)", info.Host, ph.phase)
+			hostIdx := hostIndexForHost(hostInfos, info.Host)
+			ctx := &runner.StepContext{
+				Executor:          makeExec(info.Executor),
+				Logger:            logger,
+				Params:            params,
+				DryRun:            flags.DryRun,
+				Precheck:          flags.Precheck,
+				Results:           hostResults[hostIdx],
+				OSInfo:            info.OSInfo,
+				LocalSoftwareDirs: flags.LocalSoftwareDirs,
+				RemoteSoftwareDir: flags.RemoteSoftwareDir,
+				ForceAll:          flags.ForceAll,
+				ForceSteps:        flags.ForceSteps,
+				ForceDeleteUser:   flags.ForceDeleteUser,
+				StepIndex:         stepIndex,
+				TotalSteps:        totalSteps,
+				Progress:          progress,
+				TargetHosts:       targetHosts,
+				TargetPlatform:    targetPlatformForHost(info, sharedResults, hostResults[hostIdx]),
+			}
+			if progress != nil && (pi > 0 || hi > 0) && perStepFrozen != nil && *perStepFrozen && perStepProgress != nil {
+				ctx.Progress = nil
+				ctx.StepIndex = perStepProgress.idx
+				ctx.TotalSteps = perStepProgress.total
+			}
+			result := runner.RunStep(step, ctx)
+			if progress != nil && pi == 0 && hi == 0 && perStepProgress != nil && perStepFrozen != nil {
+				perStepProgress.idx = ctx.StepIndex
+				perStepProgress.total = ctx.TotalSteps
+				*perStepFrozen = true
+			}
+			mergeSharedPlatformResults(sharedResults, hostResults[hostIdx])
+			mergeSharedMirrorResults(sharedResults, hostResults[hostIdx])
+			syncSharedMirrorResultsToHosts(sharedResults, hostResults)
+			if !result.Success && !result.Skipped {
+				logger.Error("Step %s failed on %s (phase=%s): %v", step.ID, info.Host, ph.phase, result.Error)
+				return result.Error
+			}
+		}
+	}
+	if hadPhase {
+		params[phaseKey] = prevPhase
+	} else {
+		delete(params, phaseKey)
+	}
+	return nil
+}
+
+// runA014AGSeedPhases is the A-014 (mssql_ag) variant of runMSH009AGSeedPhases.
+// It uses ag_014_phase as the params key.
+func runA014AGSeedPhases(
+	step *runner.Step,
+	hostInfos []*HostInfo,
+	params map[string]interface{},
+	flags GlobalFlags,
+	logger *logging.Logger,
+	makeExec ExecutorAdapterFactory,
+	targetHosts []runner.TargetHost,
+	hostResults []map[string]interface{},
+	sharedResults map[string]interface{},
+	stepIndex, totalSteps int,
+	progress *runner.StepProgress,
+	perStepFrozen *bool,
+	perStepProgress *struct{ idx, total int },
+	res *PerHostRunResult,
+) error {
+	const phaseKey = "ag_014_phase"
+	primaryHost := mssqlPrimaryHostFromParams(params)
+	seeding := "manual"
+	if s, ok := params["mssql_ag_seeding_mode"].(string); ok {
+		seeding = strings.ToLower(strings.TrimSpace(s))
+	}
+	var phases []struct {
+		phase       string
+		primaryOnly bool
+	}
+	if seeding == "automatic" || seeding == "auto" {
+		phases = []struct {
+			phase       string
+			primaryOnly bool
+		}{{"add-automatic", true}}
+	} else {
+		phases = []struct {
+			phase       string
+			primaryOnly bool
+		}{
+			{"backup-primary", true},
+			{"restore-secondary", false},
+			{"log-backup", true},
+			{"log-restore", false},
+			{"add-manual", true},
+			{"join-secondary", false},
+		}
+	}
+	prevPhase, hadPhase := params[phaseKey]
+	for pi, ph := range phases {
+		params[phaseKey] = ph.phase
+		stepHosts := mirror107PhaseHosts(hostInfos, primaryHost, ph.primaryOnly)
+		for hi, info := range stepHosts {
+			if info == nil {
+				continue
+			}
+			logger.Info("  Host: %s (phase=%s)", info.Host, ph.phase)
+			hostIdx := hostIndexForHost(hostInfos, info.Host)
+			ctx := &runner.StepContext{
+				Executor:          makeExec(info.Executor),
+				Logger:            logger,
+				Params:            params,
+				DryRun:            flags.DryRun,
+				Precheck:          flags.Precheck,
+				Results:           hostResults[hostIdx],
+				OSInfo:            info.OSInfo,
+				LocalSoftwareDirs: flags.LocalSoftwareDirs,
+				RemoteSoftwareDir: flags.RemoteSoftwareDir,
+				ForceAll:          flags.ForceAll,
+				ForceSteps:        flags.ForceSteps,
+				ForceDeleteUser:   flags.ForceDeleteUser,
+				StepIndex:         stepIndex,
+				TotalSteps:        totalSteps,
+				Progress:          progress,
+				TargetHosts:       targetHosts,
+				TargetPlatform:    targetPlatformForHost(info, sharedResults, hostResults[hostIdx]),
+			}
+			if progress != nil && (pi > 0 || hi > 0) && perStepFrozen != nil && *perStepFrozen && perStepProgress != nil {
+				ctx.Progress = nil
+				ctx.StepIndex = perStepProgress.idx
+				ctx.TotalSteps = perStepProgress.total
+			}
+			result := runner.RunStep(step, ctx)
+			if progress != nil && pi == 0 && hi == 0 && perStepProgress != nil && perStepFrozen != nil {
+				perStepProgress.idx = ctx.StepIndex
+				perStepProgress.total = ctx.TotalSteps
+				*perStepFrozen = true
+			}
+			mergeSharedPlatformResults(sharedResults, hostResults[hostIdx])
+			mergeSharedMirrorResults(sharedResults, hostResults[hostIdx])
+			syncSharedMirrorResultsToHosts(sharedResults, hostResults)
+			if !result.Success && !result.Skipped {
+				logger.Error("Step %s failed on %s (phase=%s): %v", step.ID, info.Host, ph.phase, result.Error)
+				return result.Error
+			}
+		}
+	}
+	if hadPhase {
+		params[phaseKey] = prevPhase
+	} else {
+		delete(params, phaseKey)
+	}
+	return nil
 }
 
 // hostInfoFromConnectivityStep 从连通性步骤上下文组装 HostInfo（含 S-01/B-001 探测快照）。

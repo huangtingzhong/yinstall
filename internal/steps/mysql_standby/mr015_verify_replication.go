@@ -44,11 +44,11 @@ func StepMR015VerifyReplication() *runner.Step {
 			io := replicaStatusField(fields, "Replica_IO_Running", "Slave_IO_Running")
 			sqlRun := replicaStatusField(fields, "Replica_SQL_Running", "Slave_SQL_Running")
 			if !replicaThreadRunning(io) || !replicaThreadRunning(sqlRun) {
-				printReplicaStatusSummary(ctx, layout.Port, fields)
+				printMysqlStandbySummary(ctx, layout.Port, fields)
 				return fmt.Errorf("replication not running (IO=%q SQL=%q)", io, sqlRun)
 			}
 
-			printReplicaStatusSummary(ctx, layout.Port, fields)
+			printMysqlStandbySummary(ctx, layout.Port, fields)
 			return nil
 		},
 	}
@@ -89,29 +89,6 @@ func replicaThreadRunning(state string) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func printReplicaStatusSummary(ctx *runner.StepContext, replicaPort int, fields map[string]string) {
-	host := replicaStatusField(fields, "Source_Host", "Master_Host")
-	port := replicaStatusField(fields, "Source_Port", "Master_Port")
-	io := replicaStatusField(fields, "Replica_IO_Running", "Slave_IO_Running")
-	sqlRun := replicaStatusField(fields, "Replica_SQL_Running", "Slave_SQL_Running")
-	lag := replicaStatusField(fields, "Seconds_Behind_Source", "Seconds_Behind_Master")
-	channel := replicaStatusField(fields, "Channel_Name")
-	ioState := replicaStatusField(fields, "Replica_IO_State", "Slave_IO_State")
-	lastErr := replicaStatusField(fields, "Last_Error", "Last_SQL_Error")
-
-	ctx.Logger.ConsoleNotice("MR-015",
-		fmt.Sprintf("Replica port %d: source %s:%s, channel=%s", replicaPort, host, port, emptyAs(channel, "(default)")))
-	ctx.Logger.ConsoleNotice("MR-015",
-		fmt.Sprintf("Replica_IO_Running=%s, Replica_SQL_Running=%s, Seconds_Behind_Source=%s",
-			emptyAs(io, "Unknown"), emptyAs(sqlRun, "Unknown"), emptyAs(lag, "NULL")))
-	if ioState != "" {
-		ctx.Logger.ConsoleNotice("MR-015", fmt.Sprintf("Replica_IO_State: %s", ioState))
-	}
-	if lastErr != "" {
-		ctx.Logger.ConsoleNotice("MR-015", fmt.Sprintf("Last_Error: %s", lastErr))
 	}
 }
 

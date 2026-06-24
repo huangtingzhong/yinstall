@@ -81,6 +81,16 @@ func Execute() error {
 	return rootCmd.Execute()
 }
 
+// newSessionLogger 创建 session/debug 日志，并将完整启动命令行写入 debug 日志。
+func newSessionLogger(runID, logDir string) (*logging.Logger, error) {
+	logger, err := logging.NewLogger(runID, logDir, AppVersion, AppAuthor, AppContact)
+	if err != nil {
+		return nil, err
+	}
+	logger.LogInvocationCommandLine(os.Args)
+	return logger, nil
+}
+
 // SetAppVersion 在运行时更新应用版本号。
 func SetAppVersion(version string) {
 	AppVersion = version
@@ -124,6 +134,7 @@ func init() {
 	rootCmd.AddCommand(osCmd)
 	rootCmd.AddCommand(dbCmd)
 	rootCmd.AddCommand(mysqlCmd)
+	rootCmd.AddCommand(mssqlCmd)
 	rootCmd.AddCommand(standbyCmd)
 	rootCmd.AddCommand(ycmCmd)
 	rootCmd.AddCommand(ympCmd)

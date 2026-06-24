@@ -8,6 +8,8 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
+const paramHostnameDefaultPrefix = "os_hostname_default_prefix"
+
 // StepB023SetHostname 配置各节点主机名（及 /etc/hosts 托管块）
 func StepB023SetHostname() *runner.Step {
 	return &runner.Step{
@@ -20,7 +22,7 @@ func StepB023SetHostname() *runner.Step {
 
 		PreCheck: func(ctx *runner.StepContext) error {
 			hostnameParam := ctx.GetParamString("os_hostname", "")
-			hostnames := parseHostnames(hostnameParam)
+			hostnames := commonos.ParseHostnames(hostnameParam)
 			targetCount := len(ctx.HostsToRun())
 
 			if targetCount > 1 {
@@ -34,9 +36,12 @@ func StepB023SetHostname() *runner.Step {
 
 		Action: func(ctx *runner.StepContext) error {
 			hostnameParam := ctx.GetParamString("os_hostname", "")
-			hostnames := parseHostnames(hostnameParam)
+			explicitHostnames := commonos.ParseHostnames(hostnameParam)
+			userSpecified := len(explicitHostnames) > 0
+			prefix := hostnameDefaultPrefix(ctx)
 			hosts := ctx.HostsToRun()
-			osLogPhase(ctx, "plan", fmt.Sprintf("hosts=%d op=hostname+hosts-block", len(hosts)))
+			osLogPhase(ctx, "plan", fmt.Sprintf("hosts=%d prefix=%s user_specified=%v op=hostname+hosts-block",
+				len(hosts), prefix, userSpecified))
 
 			type nodeInfo struct {
 				ip       string
@@ -47,44 +52,38 @@ func StepB023SetHostname() *runner.Step {
 			for i, th := range hosts {
 				osLogPhase(ctx, "host-start", fmt.Sprintf("host=%s idx=%d", th.Host, i+1))
 				hctx := ctx.ForHost(th)
-				var newHostname string
-				if len(hosts) > 1 {
-					if len(hostnames) == 0 {
-						newHostname = fmt.Sprintf("yashandb%02d", i+1)
-					} else if len(hostnames) == 1 {
-						newHostname = fmt.Sprintf("%s%02d", hostnames[0], i+1)
+				targetHostname := commonos.TargetHostnameFromRules(prefix, len(hosts), i, explicitHostnames)
+
+				currentHostname, err := readCurrentHostname(hctx)
+				if err != nil {
+					return fmt.Errorf("[%s] failed to read current hostname: %w", th.Host, err)
+				}
+
+				effectiveHostname := targetHostname
+				if userSpecified || commonos.ShouldReplaceHostnameWhenUnset(currentHostname) {
+					if currentHostname != targetHostname {
+						ctx.Logger.Info("[%s] Setting hostname: %s -> %s", th.Host, currentHostname, targetHostname)
+						if err := setSystemHostname(hctx, th.Host, targetHostname); err != nil {
+							return err
+						}
 					} else {
-						newHostname = hostnames[i]
+						ctx.Logger.Info("[%s] Hostname already %s", th.Host, targetHostname)
 					}
 				} else {
-					if len(hostnames) == 0 {
-						newHostname = "yashandb"
-					} else {
-						newHostname = hostnames[0]
-					}
+					effectiveHostname = currentHostname
+					ctx.Logger.Info("[%s] Keeping hostname %s (--os-hostname empty and not a system default name)",
+						th.Host, currentHostname)
 				}
 
-				ctx.Logger.Info("[%s] Setting hostname to: %s", th.Host, newHostname)
-
-				cmd := fmt.Sprintf("hostnamectl set-hostname %s", newHostname)
-				result, err := hctx.Execute(cmd, true)
-				if err != nil {
-					return fmt.Errorf("[%s] failed to set hostname: %w", th.Host, err)
-				}
-				if result != nil && result.GetExitCode() != 0 {
-					return fmt.Errorf("[%s] hostnamectl failed: %s", th.Host, result.GetStderr())
-				}
-
-				// 本地模式下 th.Host = "localhost"，需取真实 IP 写入 /etc/hosts
 				ip := th.Host
 				if ip == "localhost" || ip == "127.0.0.1" {
 					if r, _ := hctx.Execute("hostname -I | awk '{print $1}'", false); r != nil && strings.TrimSpace(r.GetStdout()) != "" {
 						ip = strings.TrimSpace(r.GetStdout())
 					}
 				}
-				nodes = append(nodes, nodeInfo{ip: ip, hostname: newHostname})
-				ctx.Logger.Info("[%s] Hostname set to: %s (hosts entry IP: %s)", th.Host, newHostname, ip)
-				osLogPhase(hctx, "host-done", fmt.Sprintf("host=%s hostname=%s", th.Host, newHostname))
+				nodes = append(nodes, nodeInfo{ip: ip, hostname: effectiveHostname})
+				ctx.Logger.Info("[%s] Hosts entry: %s -> %s", th.Host, ip, effectiveHostname)
+				osLogPhase(hctx, "host-done", fmt.Sprintf("host=%s hostname=%s", th.Host, effectiveHostname))
 			}
 
 			if len(nodes) > 0 {
@@ -123,19 +122,36 @@ func StepB023SetHostname() *runner.Step {
 	}
 }
 
-// parseHostnames 解析逗号分隔的主机名列表
-func parseHostnames(hostnameParam string) []string {
-	if hostnameParam == "" {
-		return []string{}
+func hostnameDefaultPrefix(ctx *runner.StepContext) string {
+	prefix := strings.TrimSpace(ctx.GetParamString(paramHostnameDefaultPrefix, ""))
+	if prefix == "" {
+		return commonos.DefaultHostnamePrefixYashan
 	}
+	return prefix
+}
 
-	parts := strings.Split(hostnameParam, ",")
-	var hostnames []string
-	for _, part := range parts {
-		trimmed := strings.TrimSpace(part)
-		if trimmed != "" {
-			hostnames = append(hostnames, trimmed)
-		}
+func readCurrentHostname(hctx *runner.StepContext) (string, error) {
+	result, err := hctx.Execute("hostname", false)
+	if err != nil {
+		return "", err
 	}
-	return hostnames
+	if result == nil {
+		return "", fmt.Errorf("empty hostname command result")
+	}
+	if result.GetExitCode() != 0 {
+		return "", fmt.Errorf("hostname exit=%d: %s", result.GetExitCode(), strings.TrimSpace(result.GetStderr()))
+	}
+	return commonos.NormalizeHostname(result.GetStdout()), nil
+}
+
+func setSystemHostname(hctx *runner.StepContext, hostLabel, name string) error {
+	cmd := fmt.Sprintf("hostnamectl set-hostname %s", name)
+	result, err := hctx.Execute(cmd, true)
+	if err != nil {
+		return fmt.Errorf("[%s] failed to set hostname: %w", hostLabel, err)
+	}
+	if result != nil && result.GetExitCode() != 0 {
+		return fmt.Errorf("[%s] hostnamectl failed: %s", hostLabel, result.GetStderr())
+	}
+	return nil
 }

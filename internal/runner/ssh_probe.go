@@ -33,19 +33,19 @@ func ProbePasswordSSH(logger *logging.Logger, stepID string, cfg ssh.Config) (ok
 	cfg.Logger = logger
 	cfg.StepID = stepID
 
-	connectLabel := fmt.Sprintf("ssh connect user=%s@%s:%d auth=password", cfg.User, cfg.Host, cfg.Port)
-	logger.LogCommandStart(cfg.Host, stepID, connectLabel)
+	connectInfo := ssh.BuildConnectAttemptInfo(cfg, true, "")
+	ssh.LogConnectStart(logger, connectInfo, stepID, 1, 1)
 	connStart := time.Now()
 	exec, connErr := ssh.NewExecutor(cfg)
 	if connErr != nil {
-		logger.LogCommandResult(cfg.Host, stepID, "", connErr.Error(), -1, time.Since(connStart))
+		ssh.LogConnectResult(logger, connectInfo, stepID, false, connErr.Error(), time.Since(connStart))
 		if ssh.IsAuthenticationFailure(connErr) {
-			return false, "auth_failed", nil
+			return false, "auth_failed", ssh.WrapConnectError(connectInfo, connErr)
 		}
-		return false, "connect_failed", connErr
+		return false, "connect_failed", ssh.WrapConnectError(connectInfo, connErr)
 	}
 	defer exec.Close()
-	logger.LogCommandResult(cfg.Host, stepID, "(session established)", "", 0, time.Since(connStart))
+	ssh.LogConnectResult(logger, connectInfo, stepID, true, "", time.Since(connStart))
 
 	ctx := &StepContext{
 		Executor:      SSHExecutorAdapter(exec),

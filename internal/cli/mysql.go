@@ -26,6 +26,7 @@ Use global -l/--list-steps on install or standby to list steps.`,
 }
 
 func init() {
+	mysqlCmd.Hidden = true // 不对外开放；命令仍可用，但不出现在 yinstall -h
 	mysqlCmd.AddCommand(mysqlInstallCmd)
 	mysqlCmd.AddCommand(mysqlStandbyCmd)
 }

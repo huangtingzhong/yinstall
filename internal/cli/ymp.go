@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/yinstall/internal/logging"
 	"github.com/yinstall/internal/runner"
 	ossteps "github.com/yinstall/internal/steps/os"
 	ympsteps "github.com/yinstall/internal/steps/ymp"
@@ -148,7 +147,7 @@ func runYMP(cmd *cobra.Command, args []string) error {
 		rid = fmt.Sprintf("ymp-%s", time.Now().Format("20060102-150405"))
 	}
 
-	logger, err := logging.NewLogger(rid, flags.LogDir, AppVersion, AppAuthor, AppContact)
+	logger, err := newSessionLogger(rid, flags.LogDir)
 	if err != nil {
 		return fmt.Errorf("failed to initialize logger: %w", err)
 	}

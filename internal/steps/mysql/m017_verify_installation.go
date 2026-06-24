@@ -21,6 +21,9 @@ func StepM017VerifyInstallation() *runner.Step {
 			}
 			ctx.Logger.Info("MySQL verify: %s", out)
 			ctx.SetResult("mysql_version_running", out)
+			if !hasCustomSQLScript(ctx) {
+				return printMysqlInstallSummary(ctx, "M-017")
+			}
 			return nil
 		},
 	}

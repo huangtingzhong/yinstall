@@ -11,7 +11,7 @@ func StepMR007PlanReplicaLayout() *runner.Step {
 	return &runner.Step{
 		ID:          "MR-007",
 		Name:        "Plan Replica Layout",
-		Description: "Resolve replica software (>= primary), validate version, plan server_id",
+		Description: "Resolve replica software (match primary version), validate version, plan server_id",
 		Tags:        []string{"mysql-standby", "replica"},
 		PreCheck: func(ctx *runner.StepContext) error {
 			if replicaPort(ctx) <= 0 {

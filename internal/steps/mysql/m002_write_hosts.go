@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/yinstall/internal/runner"
 	ossteps "github.com/yinstall/internal/steps/os"
@@ -48,8 +47,5 @@ func ensureMysqlHostnameDefault(ctx *runner.StepContext) {
 	if ctx.Params == nil {
 		ctx.Params = map[string]interface{}{}
 	}
-	if strings.TrimSpace(ctx.GetParamString("os_hostname", "")) != "" {
-		return
-	}
-	ctx.Params["os_hostname"] = "mysql"
+	ctx.Params["os_hostname_default_prefix"] = "mysql"
 }

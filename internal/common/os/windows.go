@@ -60,6 +60,59 @@ func WindowsLogicalCPUs(ctx *runner.StepContext) string {
 	return strings.TrimSpace(res.GetStdout())
 }
 
+// WindowsComputerName returns NetBIOS computer name.
+func WindowsComputerName(ctx *runner.StepContext) string {
+	res, _ := ctx.Execute(`powershell -NoProfile -Command "$env:COMPUTERNAME"`, false)
+	if res == nil {
+		return ""
+	}
+	return strings.TrimSpace(res.GetStdout())
+}
+
+// WindowsFQDN returns fully qualified domain name (best effort).
+func WindowsFQDN(ctx *runner.StepContext) string {
+	res, _ := ctx.Execute(`powershell -NoProfile -Command "[System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName"`, false)
+	if res == nil {
+		return ""
+	}
+	return strings.TrimSpace(res.GetStdout())
+}
+
+// WindowsDomainInfo returns domain join state and domain or workgroup name.
+func WindowsDomainInfo(ctx *runner.StepContext) (joined bool, name string) {
+	cmd := `powershell -NoProfile -Command "$cs = Get-CimInstance Win32_ComputerSystem; if ($cs.PartOfDomain) { 'DOMAIN|' + $cs.Domain } else { 'WORKGROUP|' + $cs.Workgroup }"`
+	res, _ := ctx.Execute(cmd, false)
+	if res == nil {
+		return false, ""
+	}
+	line := strings.TrimSpace(res.GetStdout())
+	parts := strings.SplitN(line, "|", 2)
+	if len(parts) != 2 {
+		return false, ""
+	}
+	return parts[0] == "DOMAIN", strings.TrimSpace(parts[1])
+}
+
+// DriveLetterFromPath extracts "D:" from paths like D:\SQL or D:/SQL.
+func DriveLetterFromPath(path string) string {
+	path = strings.TrimSpace(path)
+	if len(path) >= 2 && path[1] == ':' {
+		return strings.ToUpper(string(path[0])) + ":"
+	}
+	return ""
+}
+
+// ParseFirewallPorts splits comma-separated port list, skipping empties.
+func ParseFirewallPorts(portsStr string) []string {
+	var out []string
+	for _, p := range strings.Split(portsStr, ",") {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // IsVCRedistInstalled checks whether VC++ 2015-2022 x64 runtime is present on Windows.
 func IsVCRedistInstalled(ctx *runner.StepContext) bool {
 	cmd := `powershell -NoProfile -Command "Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Installed -ErrorAction SilentlyContinue"`

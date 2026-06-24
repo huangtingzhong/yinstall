@@ -51,6 +51,7 @@ var (
 
 	osFirewallMode  string
 	osFirewallPorts string
+	osSELinuxMode   string
 
 	yacMultipathEnable   bool
 	yacMultipathPkgs     string
@@ -154,18 +155,12 @@ func runOS(cmd *cobra.Command, args []string) error {
 
 	ResolveOSUserPassword(cmd, flags, osUser, &osUserPassword)
 
-	// 本地模式下，除非用户显式指定，否则不注入默认的 os-user-password，
-	// 避免在 local 执行时出现不必要的“登录凭据”参数。
-	if flags.Local && !cmd.Flags().Changed("os-user-password") {
-		osUserPassword = ""
-	}
-
 	rid := flags.RunID
 	if rid == "" {
 		rid = fmt.Sprintf("os-%s", time.Now().Format("20060102-150405"))
 	}
 
-	logger, err := logging.NewLogger(rid, flags.LogDir, AppVersion, AppAuthor, AppContact)
+	logger, err := newSessionLogger(rid, flags.LogDir)
 	if err != nil {
 		return fmt.Errorf("failed to initialize logger: %w", err)
 	}
@@ -272,52 +267,54 @@ func buildOSYumISOParams() map[string]interface{} {
 
 func buildOSParams(isYACMode bool, targetCount int) map[string]interface{} {
 	params := map[string]interface{}{
-		"os_user":                  osUser,
-		"os_user_uid":              osUserUID,
-		"os_group":                 osGroup,
-		"os_group_gid":             osGroupGID,
-		"os_dba_group":             osDBAGroup,
-		"os_dba_group_gid":         osDBAGroupGID,
-		"os_user_shell":            osUserShell,
-		"os_user_password":         osUserPassword,
-		"os_sudoers_enable":        osSudoersEnable,
-		"os_timezone":              osTimezone,
-		"os_ntp_server":            osNTPServer,
-		"os_hostname":              osHostname,
-		"os_sysctl_file":           osSysctlFile,
-		"os_limits_file":           osLimitsFile,
-		"os_kernel_args_enable":    osKernelArgsEnable,
-		"os_kernel_args":           osKernelArgs,
-		"os_hugepages_enable":      osHugepagesEnable,
-		"os_deps_db_packages":      osDepsPkgs,
-		"os_deps_tools_packages":   osToolsPkgs,
-		"os_ignore_install_errors": osIgnoreInstallErrors,
-		"os_zstd_source_tarball":   osZstdSourceTarball,
-		"os_firewall_mode":         osFirewallMode,
-		"os_firewall_ports":        osFirewallPorts,
-		"yac_mode":                 isYACMode,
-		"yac_target_count":         targetCount,
-		"yac_multipath_enable":     yacMultipathEnable,
-		"yac_multipath_packages":   yacMultipathPkgs,
-		"yac_multipath_conf":       yacMultipathConf,
-		"yac_multipath_auto_wwid":  yacMultipathAutoWWID,
-		"yac_udev_rules_file":      yacUdevRulesFile,
-		"yac_udev_owner":           yacUdevOwner,
-		"yac_udev_group":           yacUdevGroup,
-		"yac_udev_mode":            yacUdevMode,
-		"os_local_disks":           osLocalDisks,
-		"os_local_vg":              osLocalVG,
-		"os_local_lv":              osLocalLV,
-		"os_local_mount":           osLocalMount,
-		"yac_systemdg":             yacSystemDG,
-		"yac_datadg":               yacDataDG,
-		"yac_archdg":               yacArchDG,
-		"yac_archdg_enable":        yacArchDGEnable,
-		"yac_scan_ips":             yacScanIPs,
-		"yac_disk_pattern":         yacDiskPattern,
-		"yac_exclude_disks":        yacExcludeDisks,
-		"yac_systemdg_size_max":    yacSystemdgSizeMax,
-		"yac_auto_confirm":         yacAutoConfirm,
+		"os_user":                    osUser,
+		"os_user_uid":                osUserUID,
+		"os_group":                   osGroup,
+		"os_group_gid":               osGroupGID,
+		"os_dba_group":               osDBAGroup,
+		"os_dba_group_gid":           osDBAGroupGID,
+		"os_user_shell":              osUserShell,
+		"os_user_password":           osUserPassword,
+		"os_sudoers_enable":          osSudoersEnable,
+		"os_timezone":                osTimezone,
+		"os_ntp_server":              osNTPServer,
+		"os_hostname":                osHostname,
+		"os_hostname_default_prefix": "yashandb",
+		"os_sysctl_file":             osSysctlFile,
+		"os_limits_file":             osLimitsFile,
+		"os_kernel_args_enable":      osKernelArgsEnable,
+		"os_kernel_args":             osKernelArgs,
+		"os_hugepages_enable":        osHugepagesEnable,
+		"os_deps_db_packages":        osDepsPkgs,
+		"os_deps_tools_packages":     osToolsPkgs,
+		"os_ignore_install_errors":   osIgnoreInstallErrors,
+		"os_zstd_source_tarball":     osZstdSourceTarball,
+		"os_firewall_mode":           osFirewallMode,
+		"os_firewall_ports":          osFirewallPorts,
+		"os_selinux_mode":            osSELinuxMode,
+		"yac_mode":                   isYACMode,
+		"yac_target_count":           targetCount,
+		"yac_multipath_enable":       yacMultipathEnable,
+		"yac_multipath_packages":     yacMultipathPkgs,
+		"yac_multipath_conf":         yacMultipathConf,
+		"yac_multipath_auto_wwid":    yacMultipathAutoWWID,
+		"yac_udev_rules_file":        yacUdevRulesFile,
+		"yac_udev_owner":             yacUdevOwner,
+		"yac_udev_group":             yacUdevGroup,
+		"yac_udev_mode":              yacUdevMode,
+		"os_local_disks":             osLocalDisks,
+		"os_local_vg":                osLocalVG,
+		"os_local_lv":                osLocalLV,
+		"os_local_mount":             osLocalMount,
+		"yac_systemdg":               yacSystemDG,
+		"yac_datadg":                 yacDataDG,
+		"yac_archdg":                 yacArchDG,
+		"yac_archdg_enable":          yacArchDGEnable,
+		"yac_scan_ips":               yacScanIPs,
+		"yac_disk_pattern":           yacDiskPattern,
+		"yac_exclude_disks":          yacExcludeDisks,
+		"yac_systemdg_size_max":      yacSystemdgSizeMax,
+		"yac_auto_confirm":           yacAutoConfirm,
 	}
 	for k, v := range buildOSYumISOParams() {
 		params[k] = v
@@ -335,6 +332,19 @@ func createExecutor(target string, flags GlobalFlags, logger *logging.Logger, st
 }
 
 func createExecutorWithTargetOS(target string, flags GlobalFlags, logger *logging.Logger, stepID string, targetOS string) (ssh.Executor, error) {
+	if flags.Local {
+		cfg := ssh.Config{
+			Host:       target,
+			AuthMethod: "local",
+			Logger:     logger,
+			StepID:     stepID,
+			TargetOS:   targetOS,
+		}
+		return ssh.NewExecutor(cfg)
+	}
+	if targetOS == ssh.TargetOSWindows || strings.EqualFold(flags.SSHUser, "Administrator") {
+		return createWindowsExecutor(target, flags, logger, stepID)
+	}
 	cfg := ssh.Config{
 		Host:       target,
 		Port:       flags.SSHPort,
@@ -346,12 +356,6 @@ func createExecutorWithTargetOS(target string, flags GlobalFlags, logger *loggin
 		StepID:     stepID,
 		TargetOS:   targetOS,
 	}
-	if targetOS == "" && strings.EqualFold(flags.SSHUser, "Administrator") {
-		cfg.TargetOS = ssh.TargetOSWindows
-	}
-	if flags.Local {
-		cfg.AuthMethod = "local"
-	}
 	return connectSSHWithRetry(cfg, flags.SSHPassword != "", logger)
 }
 
@@ -362,28 +366,35 @@ func connectSSHWithRetry(cfg ssh.Config, passwordProvided bool, logger *logging.
 	}
 
 	target := cfg.Host
+	stepID := cfg.StepID
+	defaultPassword := defaultSSHPassword()
+	connectInfo := ssh.BuildConnectAttemptInfo(cfg, passwordProvided, defaultPassword)
 	var (
 		executor ssh.Executor
 		lastErr  error
 	)
 	for attempt := 1; attempt <= sshConnectMaxRetries; attempt++ {
+		ssh.LogConnectStart(logger, connectInfo, stepID, attempt, sshConnectMaxRetries)
+		connStart := time.Now()
 		if !passwordProvided {
-			executor, lastErr = ssh.NewExecutorWithFallback(cfg, defaultSSHPassword())
+			executor, lastErr = ssh.NewExecutorWithFallback(cfg, defaultPassword)
 		} else {
 			executor, lastErr = ssh.NewExecutor(cfg)
 		}
 		if lastErr == nil {
+			ssh.LogConnectResult(logger, connectInfo, stepID, true, "", time.Since(connStart))
 			return executor, nil
 		}
+		ssh.LogConnectResult(logger, connectInfo, stepID, false, lastErr.Error(), time.Since(connStart))
 		if attempt < sshConnectMaxRetries {
 			if logger != nil {
-				logger.Warn("SSH connection attempt %d/%d failed for %s: %v, retrying in %v...",
-					attempt, sshConnectMaxRetries, target, lastErr, sshConnectRetryDelay)
+				logger.Warn("SSH connection attempt %d/%d failed for %s:\n%s  Error: %v\nretrying in %v...",
+					attempt, sshConnectMaxRetries, target, connectInfo.FormatBlock(), lastErr, sshConnectRetryDelay)
 			}
 			time.Sleep(sshConnectRetryDelay)
 		}
 	}
-	return nil, fmt.Errorf("failed to connect to %s after %d attempts: %w", target, sshConnectMaxRetries, lastErr)
+	return nil, ssh.WrapConnectErrorAfterRetries(connectInfo, sshConnectMaxRetries, lastErr)
 }
 
 // defaultSSHPassword 返回默认SSH密码
@@ -412,4 +423,18 @@ func (a *runnerExecAdapter) Close() error {
 
 func (a *runnerExecAdapter) Upload(localPath, remotePath string, uploadCtx *ssh.UploadContext) error {
 	return a.e.Upload(localPath, remotePath, uploadCtx)
+}
+
+func (a *runnerExecAdapter) SetExecuteTimeout(d time.Duration) {
+	if s, ok := a.e.(interface{ SetExecuteTimeout(time.Duration) }); ok {
+		s.SetExecuteTimeout(d)
+	}
+}
+
+// SSHExecutor exposes the underlying transport for WinRM vs SSH detection.
+func (a *runnerExecAdapter) SSHExecutor() ssh.Executor {
+	if a == nil {
+		return nil
+	}
+	return a.e
 }

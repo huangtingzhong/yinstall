@@ -7,11 +7,12 @@ import (
 
 	"github.com/spf13/cobra"
 	commonmysql "github.com/yinstall/internal/common/mysql"
+	commonwin "github.com/yinstall/internal/common/win_os"
 	"github.com/yinstall/internal/logging"
 	"github.com/yinstall/internal/runner"
-	"github.com/yinstall/internal/ssh"
 	mysqlsteps "github.com/yinstall/internal/steps/mysql"
 	ossteps "github.com/yinstall/internal/steps/os"
+	winsteps "github.com/yinstall/internal/steps/win_os"
 )
 
 var (
@@ -34,10 +35,12 @@ var (
 	mysqlStage            string
 	mysqlVersion          string
 	mysqlHome             string
+	mysqlSELinuxMode      string
 )
 
 func registerMysqlInstallFlags(cmd *cobra.Command) {
 	registerAllOSFlags(cmd, registerOSFlagsConfig{forMySQL: true})
+	registerWinOSExtensionFlags(cmd, registerWinOSFlagsConfig{whenSkipOSFalse: " (only when --skip-os=false on Windows targets)"})
 
 	cmd.Flags().IntVar(&mysqlPort, "mysql-port", 3306, "MySQL port")
 	cmd.Flags().StringVar(&mysqlBase, "mysql-base", "/mysql/app/mysql", "MySQL base directory")
@@ -57,10 +60,14 @@ func registerMysqlInstallFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&mysqlStage, "stage", commonmysql.DefaultInstallStage(), "Install stage: all/a (software+instance), software/s (binary only), instance/i (new port instance)")
 	cmd.Flags().StringVar(&mysqlVersion, "mysql-version", "", "MySQL software version for replica layout (auto-detect on standby when empty)")
 	cmd.Flags().StringVar(&mysqlHome, "mysql-home", "", "MySQL installation home for mysql/mysqldump client (default: PATH lookup)")
+	cmd.Flags().StringVar(&mysqlSELinuxMode, "mysql-selinux-mode", "auto", "SELinux on Linux: auto (label when Enforcing), label (force), skip")
 }
 
 func buildMysqlParams(targetCount int, flags GlobalFlags, stage string) map[string]interface{} {
 	p := buildOSParams(false, targetCount)
+	for k, v := range buildWinOSParams(mysqlSkipOS, commonwin.ProfileMySQL()) {
+		p[k] = v
+	}
 	p["os_user"] = "mysql"
 	p["os_group"] = "mysql"
 	p["os_user_shell"] = "/sbin/nologin"
@@ -76,7 +83,13 @@ func buildMysqlParams(targetCount int, flags GlobalFlags, stage string) map[stri
 	p["os_kernel_args"] = "elevator=deadline transparent_hugepage=never numa=off"
 	p["os_firewall_mode"] = "open-ports"
 	p["os_firewall_ports"] = fmt.Sprintf("%d,%d0", mysqlPort, mysqlPort)
-	p["os_local_mount"] = "/mysql"
+	if strings.TrimSpace(osLocalMount) == "" {
+		p["os_local_mount"] = mysqlBase
+	} else {
+		p["os_local_mount"] = osLocalMount
+	}
+	p["windows_transport"] = "auto"
+	p["winrm_port"] = defaultWinRMPort
 	p["os_local_mount_opts"] = "nobarrier,largeio,noatime,nodiratime"
 	p["os_deps_db_packages"] = "make gcc-c++ cmake bison-devel ncurses-devel libaio libnuma"
 	p["os_deps_tools_packages"] = "unzip bind-utils sysstat setuptool telnet iotop openssh-clients net-tools libvncserver tigervnc-server device-mapper-multipath dstat lsof ntp psmisc redhat-lsb-core parted xhost strace showmount expect tcl sysfsutils gdisk rsync screen"
@@ -92,9 +105,7 @@ func buildMysqlParams(targetCount int, flags GlobalFlags, stage string) map[stri
 	p["mysql_innodb_buffer_pool_size"] = mysqlInnodbBufferPool
 	p["mysql_remote_root"] = mysqlRemoteRoot
 	p["mysql_skip_os"] = mysqlSkipOS
-	if strings.TrimSpace(osHostname) == "" {
-		p["os_hostname"] = "mysql"
-	}
+	p["os_hostname_default_prefix"] = "mysql"
 	p["mysql_env_file"] = mysqlEnvFile
 	p["mysql_custom_sql_script"] = mysqlCustomSQLScript
 	p["mysql_skip_systemd"] = mysqlSkipSystemd
@@ -103,6 +114,7 @@ func buildMysqlParams(targetCount int, flags GlobalFlags, stage string) map[stri
 	p["mysql_enforce_gtid_consistency"] = mysqlEnforceGtid
 	p["mysql_stage"] = stage
 	p["mysql_version"] = mysqlVersion
+	p["mysql_selinux_mode"] = mysqlSELinuxMode
 	if strings.TrimSpace(mysqlHome) != "" {
 		p["mysql_home"] = strings.TrimSpace(mysqlHome)
 	}
@@ -110,16 +122,17 @@ func buildMysqlParams(targetCount int, flags GlobalFlags, stage string) map[stri
 }
 
 func buildMysqlAllSteps(skipOS bool) []*runner.Step {
+	return mysqlStepCatalog(skipOS)
+}
+
+// mysqlStepCatalog returns B-001 + (Linux B-* or W-* catalog) + M-* for filtering and -l.
+func mysqlStepCatalog(skipOS bool) []*runner.Step {
 	var all []*runner.Step
+	all = append(all, ossteps.StepB001CheckConnectivity())
 	if !skipOS {
+		all = append(all, winsteps.GetPreInstanceSteps(commonwin.ProfileMySQL())...)
 		all = append(all, filterOSStepsForMySQL(ossteps.GetAllSteps())...)
-	} else {
-		for _, s := range ossteps.GetAllSteps() {
-			if s.ID == "B-001" {
-				all = append(all, s)
-				break
-			}
-		}
+		all = append(all, winsteps.GetPostInstanceSteps(commonwin.ProfileMySQL())...)
 	}
 	all = append(all, mysqlsteps.GetAllSteps()...)
 	return all
@@ -152,7 +165,7 @@ func isMySQLExcludedOSStep(id string) bool {
 	return false
 }
 
-func splitMysqlSteps(steps []*runner.Step) (b001, m001 *runner.Step, osSteps, mysqlSteps []*runner.Step) {
+func splitMysqlSteps(steps []*runner.Step) (b001, m001 *runner.Step, winOSSteps, winOSPostSteps, osSteps, mysqlSteps []*runner.Step) {
 	for _, s := range steps {
 		switch s.ID {
 		case "B-001":
@@ -160,14 +173,21 @@ func splitMysqlSteps(steps []*runner.Step) (b001, m001 *runner.Step, osSteps, my
 		case "M-001":
 			m001 = s
 		default:
-			if strings.HasPrefix(s.ID, "B-") {
+			switch {
+			case strings.HasPrefix(s.ID, "W-"):
+				if s.ID == "W-012" || s.ID == "W-014" {
+					winOSPostSteps = append(winOSPostSteps, s)
+				} else {
+					winOSSteps = append(winOSSteps, s)
+				}
+			case strings.HasPrefix(s.ID, "B-"):
 				osSteps = append(osSteps, s)
-			} else if strings.HasPrefix(s.ID, "M-") {
+			case strings.HasPrefix(s.ID, "M-"):
 				mysqlSteps = append(mysqlSteps, s)
 			}
 		}
 	}
-	return b001, m001, osSteps, mysqlSteps
+	return b001, m001, winOSSteps, winOSPostSteps, osSteps, mysqlSteps
 }
 
 func detectSharedPlatform(shared map[string]interface{}) string {
@@ -195,7 +215,7 @@ func mysqlRefreshHostPlatforms(cmd *cobra.Command, hostInfos []*HostInfo, flags 
 			updatedFlags.SSHUser = "Administrator"
 		}
 		info.Executor.Close()
-		exec, err := createExecutorWithTargetOS(info.Host, updatedFlags, logger, "M-001", ssh.TargetOSWindows)
+		exec, err := createWindowsExecutor(info.Host, updatedFlags, logger, "M-001")
 		if err != nil {
 			return hostInfos, updatedFlags, fmt.Errorf("failed to reconnect Windows host %s: %w", info.Host, err)
 		}
@@ -229,7 +249,7 @@ func filterMysqlInstallStepsByStage(steps []*runner.Step, stage string) []*runne
 		if step == nil {
 			continue
 		}
-		if strings.HasPrefix(step.ID, "B-") {
+		if strings.HasPrefix(step.ID, "B-") || strings.HasPrefix(step.ID, "W-") {
 			out = append(out, step)
 			continue
 		}
@@ -281,14 +301,14 @@ func validateMysqlCleanStage(cleanType, stage string, cmdChangedStage bool) erro
 // RunMysqlInstallOnHosts executes the MySQL install workflow on target hosts.
 func RunMysqlInstallOnHosts(cmd *cobra.Command, flags GlobalFlags, logger *logging.Logger, stage string, params map[string]interface{}) error {
 	allSteps := buildMysqlAllSteps(mysqlSkipOS)
-	steps := filterSteps(allSteps, flags)
+	steps := ensureConnectivityStep(allSteps, filterSteps(allSteps, flags))
 	steps = filterMysqlInstallStepsByStage(steps, stage)
 	if len(steps) == 0 {
 		logger.Info("No steps to execute after filtering")
 		return nil
 	}
 
-	b001, m001, osSteps, mysqlRest := splitMysqlSteps(steps)
+	b001, m001, winOSSteps, winOSPostSteps, osSteps, mysqlRest := splitMysqlSteps(steps)
 	logger.Info("Steps to execute: %d", len(steps))
 	for _, s := range steps {
 		logger.Info("  [%s] %s", s.ID, s.Name)
@@ -332,11 +352,41 @@ func RunMysqlInstallOnHosts(cmd *cobra.Command, flags GlobalFlags, logger *loggi
 	platform := detectSharedPlatform(sharedResults)
 	logger.Info("Detected target platform: %s", platform)
 
-	if !mysqlSkipOS && platform != mysqlsteps.PlatformWindows && len(osSteps) > 0 {
-		logger.Info("======== Phase: OS baseline ========")
-		res := RunPerHostStepsEx(osSteps, hostInfos, params, flags, logger, stepIdx, totalSteps, sharedResults, nil, progress)
-		stepIdx += len(osSteps)
+	if !mysqlSkipOS {
+		switch platform {
+		case mysqlsteps.PlatformWindows:
+			if len(winOSSteps) > 0 {
+				logger.Info("======== Phase: Windows OS pre-instance ========")
+				res := RunPerHostStepsEx(winOSSteps, hostInfos, params, flags, logger, stepIdx, totalSteps, sharedResults, nil, progress)
+				stepIdx += len(winOSSteps)
+				if res.LastError != nil {
+					return res.LastError
+				}
+				if flags.Precheck && res.PrecheckFailed {
+					return fmt.Errorf("precheck failed")
+				}
+			}
+		default:
+			if len(osSteps) > 0 {
+				logger.Info("======== Phase: OS baseline ========")
+				res := RunPerHostStepsEx(osSteps, hostInfos, params, flags, logger, stepIdx, totalSteps, sharedResults, nil, progress)
+				stepIdx += len(osSteps)
+				if res.LastError != nil {
+					return res.LastError
+				}
+				if flags.Precheck && res.PrecheckFailed {
+					return fmt.Errorf("precheck failed")
+				}
+			}
+		}
+	}
+
+	if len(mysqlRest) > 0 {
+		logger.Info("======== Phase: MySQL steps ========")
+		res := RunPerHostStepsEx(mysqlRest, hostInfos, params, flags, logger, stepIdx, totalSteps, sharedResults, nil, progress)
+		stepIdx += len(mysqlRest)
 		if res.LastError != nil {
+			logger.Error("MySQL installation completed with errors")
 			return res.LastError
 		}
 		if flags.Precheck && res.PrecheckFailed {
@@ -344,11 +394,10 @@ func RunMysqlInstallOnHosts(cmd *cobra.Command, flags GlobalFlags, logger *loggi
 		}
 	}
 
-	if len(mysqlRest) > 0 {
-		logger.Info("======== Phase: MySQL steps ========")
-		res := RunPerHostStepsEx(mysqlRest, hostInfos, params, flags, logger, stepIdx, totalSteps, sharedResults, nil, progress)
+	if !mysqlSkipOS && platform == mysqlsteps.PlatformWindows && len(winOSPostSteps) > 0 {
+		logger.Info("======== Phase: Windows OS post-instance ========")
+		res := RunPerHostStepsEx(winOSPostSteps, hostInfos, params, flags, logger, stepIdx, totalSteps, sharedResults, nil, progress)
 		if res.LastError != nil {
-			logger.Error("MySQL installation completed with errors")
 			return res.LastError
 		}
 		if flags.Precheck && res.PrecheckFailed {

@@ -123,7 +123,13 @@ func StepM008ExtractPackage() *runner.Step {
 			} else {
 				mysqlLogPhase(ctx, "plan", "M-008 extract")
 			}
-			return run(ctx)
+			if err := run(ctx); err != nil {
+				return err
+			}
+			if installStage(ctx) == commonmysql.StageSoftware {
+				return printMysqlInstallSummary(ctx, "M-008")
+			}
+			return nil
 		},
 		PostCheck: func(ctx *runner.StepContext) error {
 			layout, err := layoutFromCtx(ctx)

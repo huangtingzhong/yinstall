@@ -6,6 +6,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	commonwin "github.com/yinstall/internal/common/win_os"
 	"github.com/yinstall/internal/runner"
 	"github.com/yinstall/internal/steps/clean"
 	collectsteps "github.com/yinstall/internal/steps/collect"
@@ -14,6 +15,7 @@ import (
 	mysqlstandbysteps "github.com/yinstall/internal/steps/mysql_standby"
 	ossteps "github.com/yinstall/internal/steps/os"
 	standbysteps "github.com/yinstall/internal/steps/standby"
+	winsteps "github.com/yinstall/internal/steps/win_os"
 	ycmsteps "github.com/yinstall/internal/steps/ycm"
 	ympsteps "github.com/yinstall/internal/steps/ymp"
 )
@@ -76,7 +78,9 @@ func PrintMySQLInstallStepCatalog(skipOS bool) {
 	if skipOS {
 		printStepSection("OS (only when --skip-os: connectivity)", osStepsB001Only())
 	} else {
-		printStepSection("OS baseline (MySQL profile)", filterOSStepsForMySQL(ossteps.GetAllSteps()))
+		printStepSection("Windows OS pre-instance (when target is Windows)", winsteps.GetPreInstanceSteps(commonwin.ProfileMySQL()))
+		printStepSection("OS baseline Linux (when target is Linux)", filterOSStepsForMySQL(ossteps.GetAllSteps()))
+		printStepSection("Windows OS post-instance (when target is Windows)", winsteps.GetPostInstanceSteps(commonwin.ProfileMySQL()))
 	}
 	printStepSection("MySQL installation", mysqlsteps.GetAllSteps())
 	fmt.Fprintln(os.Stdout, "")
@@ -172,7 +176,7 @@ func PrintCleanStepCatalog() {
 		clean.GetStepByID("CLEAN-YCM"),
 		clean.GetStepByID("CLEAN-YMP"),
 	})
-	printStepSection("MySQL cleanup (--type mysql)", clean.GetMysqlCleanSteps())
+	printStepSection("MSSQL cleanup (--type mssql, hidden)", clean.GetMssqlCleanSteps())
 	fmt.Fprintln(os.Stdout, "Use -s/--include-steps (e.g. CLEAN-DB-002) to run a single DB cleanup phase.")
 	fmt.Fprintln(os.Stdout, "")
 }

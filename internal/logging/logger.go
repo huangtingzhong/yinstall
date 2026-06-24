@@ -249,6 +249,31 @@ func (l *Logger) Warn(format string, args ...interface{}) {
 	l.debugWrite("WARN", fmt.Sprintf(format, args...))
 }
 
+// DebugWrite 写入 debug 日志文件（供 ssh 等包记录不经 redact 的排障信息）。
+func (l *Logger) DebugWrite(level, msg string) {
+	l.debugWrite(level, msg)
+}
+
+// LogInvocationCommandLine 将启动 yinstall 的完整命令行写入 debug 日志（仅 debug，不进终端）。
+func (l *Logger) LogInvocationCommandLine(argv []string) {
+	if l == nil || len(argv) == 0 {
+		return
+	}
+	l.debugWrite("INFO", "invocation| "+FormatInvocationCommandLine(argv))
+}
+
+// FormatInvocationCommandLine 将 argv 格式化为单行 shell 风格命令（--log-redact 时脱敏密码类 flag）。
+func FormatInvocationCommandLine(argv []string) string {
+	if len(argv) == 0 {
+		return ""
+	}
+	parts := make([]string, len(redactInvocationArgs(argv)))
+	for i, arg := range redactInvocationArgs(argv) {
+		parts[i] = quoteShellArg(arg)
+	}
+	return strings.Join(parts, " ")
+}
+
 // debugWrite 写入 debug 日志文件；time.Now() 在锁内取值保证时间戳有序
 func (l *Logger) debugWrite(level, msg string) {
 	l.mu.Lock()
@@ -547,6 +572,67 @@ func redact(s string) string {
 		})
 	}
 	return result
+}
+
+func redactInvocationArgs(argv []string) []string {
+	out := append([]string(nil), argv...)
+	if !redactSensitive {
+		return out
+	}
+	for i := 0; i < len(out); i++ {
+		arg := out[i]
+		if key, _, ok := strings.Cut(arg, "="); ok {
+			if isSensitiveInvocationFlag(key) {
+				out[i] = key + "=***REDACTED***"
+			}
+			continue
+		}
+		if !isSensitiveInvocationFlag(arg) {
+			continue
+		}
+		if i+1 < len(out) && !strings.HasPrefix(out[i+1], "-") {
+			out[i+1] = "***REDACTED***"
+			i++
+		}
+	}
+	return out
+}
+
+func isSensitiveInvocationFlag(flag string) bool {
+	flag = strings.TrimSpace(flag)
+	if flag == "" {
+		return false
+	}
+	if flag == "-P" {
+		return true
+	}
+	flag = strings.TrimLeft(flag, "-")
+	flag = strings.ToLower(flag)
+	if strings.Contains(flag, "password") || strings.Contains(flag, "passwd") ||
+		strings.Contains(flag, "secret") || strings.Contains(flag, "token") {
+		return true
+	}
+	return false
+}
+
+func quoteShellArg(s string) string {
+	if s == "" {
+		return "''"
+	}
+	if !needsShellQuote(s) {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func needsShellQuote(s string) bool {
+	for _, r := range s {
+		switch r {
+		case ' ', '\t', '\n', '\r', '"', '\'', '\\', '$', '`', '*', '?', '[', ']', '(', ')', '{', '}', '|', '&', ';', '<', '>', '!', '#', '~':
+			return true
+		}
+	}
+	return false
 }
 
 // ensureDirectory 确保目录存在，如果存在则不创建，如果存在同名文件则删除并创建目录

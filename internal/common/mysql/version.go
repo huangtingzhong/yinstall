@@ -82,6 +82,15 @@ func ReplicaVersionOK(replica, primary string) (bool, error) {
 	return cmp >= 0, nil
 }
 
+// ReplicaVersionMatchesPrimary reports replica version equals primary (standby one-click software install).
+func ReplicaVersionMatchesPrimary(replica, primary string) (bool, error) {
+	cmp, err := CompareMySQLVersion(replica, primary)
+	if err != nil {
+		return false, err
+	}
+	return cmp == 0, nil
+}
+
 // UsesReplicationSourceSyntax is true for MySQL 8.0.26+.
 func UsesReplicationSourceSyntax(version string) bool {
 	v, err := ParseMySQLVersion(version)

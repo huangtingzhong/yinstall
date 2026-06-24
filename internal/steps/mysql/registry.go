@@ -20,6 +20,7 @@ func GetAllSteps() []*runner.Step {
 		StepM010GenerateMyCnf(),
 		StepM011InitializeDatadir(),
 		StepM012PrepareLogFiles(),
+		StepM012bSELinuxContext(),
 		StepM013ConfigureAutostart(),
 		StepM014StartMysqld(),
 		StepM015SetRootPassword(),
