@@ -1,161 +1,163 @@
-# yasinstaller 项目说明
+# yinstall（yasinstaller）
 
-YashanDB 安装自动化工具：通过 SSH 在目标机上执行 OS 基线、数据库、YMP/YCM 等安装与清理。
+面向 YashanDB 生态的 **自动化安装与运维编排 CLI**。在控制端（macOS/Linux）通过 SSH 在目标 Linux 主机上，按预定义步骤执行 OS 基线、数据库安装、主备扩容、YCM/YMP 部署、环境清理、诊断采集与 OS 压测。
+
+主程序名为 **`yinstall`**（早期版本曾用 `yasinstall`）。仓库目录名为 `yasinstaller`。
 
 ---
 
-## 一、项目组成
+## 功能概览
 
-| 类型 | 说明 |
+| 子命令 | 说明 | 步骤前缀 |
+|--------|------|----------|
+| `os` | OS 基线（用户、内核、依赖、存储、YAC 多路径等） | B- |
+| `db` | YashanDB 单机 / YAC 集群安装 | C-（可选 B-） |
+| `standby` | 向已有主库添加备库 | E- |
+| `ycm` | 安装 YCM（云管） | G- |
+| `ymp` | 安装 YMP（迁移平台） | H- |
+| `clean` | 卸载清理 DB / YCM / YMP | CLEAN- |
+| `collect` | 只读采集 OS/DB 环境并本地归档 | R- |
+| `stressos` | CPU/MEM/IO/NET 压测并归档 | S- |
+
+扩展能力（开发中/专项场景）：`mysql`、`mssql`（含 install / standby / mirror / ag 等子命令）。
+
+每个子命令支持 `yinstall <cmd> -l` 查看步骤目录；`yinstall <cmd> --help` 查看完整参数。
+
+---
+
+## 构建
+
+```bash
+make build-current          # 当前平台 → build/yinstall_<os>_<arch>
+make build-all              # Linux / Windows / macOS 多架构
+./build.sh --current        # 等同 make build-current
+
+make check-debug-logging    # 安装步骤 debug 日志静态检查（需本地 scripts/）
+```
+
+输出示例：`build/yinstall_darwin_arm64`、`build/yinstall_linux_amd64`。
+
+---
+
+## 快速开始
+
+### 单机数据库（跳过 OS，包放 `./software/`）
+
+```bash
+./build/yinstall_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m) db \
+  -t 10.10.10.130 \
+  --skip-os \
+  --os-user yashan \
+  --db-admin-password 'YourSaPassword' \
+  --precheck
+```
+
+`--db-package` 可省略：C-007 会在 `-R`、`$HOME`、`-L`（默认 `./software`、`./pkg` 等）中按版本自动发现最新安装包。
+
+### OS 基线 + 安装
+
+```bash
+yinstall os -t 10.10.10.130
+yinstall db  -t 10.10.10.130 --os-user-password '...'
+```
+
+`os` / `db` 成功后默认 **`--archive`** 挂钩采集（可用 `--archive=false` 关闭）。
+
+### 单步调试
+
+```bash
+yinstall db -t 10.10.10.130 --skip-os --precheck -s C-007
+yinstall db -t 10.10.10.130 --dry-run -s C-014-C-021
+```
+
+### 诊断采集 / 压测
+
+```bash
+yinstall collect -t 10.10.10.130 --profile full -o ./output/collect
+yinstall stressos -t 10.10.10.130 --cpu --mem --io -o ./output/stress
+```
+
+---
+
+## 执行模型
+
+每个步骤：**PreCheck → Action → PostCheck**
+
+| 模式 | 行为 |
 |------|------|
-| **yasinstall** | Go 编译的主程序（CLI），支持多子命令，通过 SSH 在目标机执行安装 |
-| **ymp_install_command.sh** | 辅助脚本：根据变量生成并打印 `yasinstall ymp` 的完整命令，便于复制执行 |
-| **ymp_install_cmd.txt** | YMP 安装命令的文本模板与参数说明 |
-| **docs/installer.md** | 安装规范文档（需求、硬件、OS、安装步骤等；本地 docs/，不入库） |
-| **requirements.md** | 需求/规格文档 |
+| 默认 | PreCheck 通过后执行 Action/PostCheck |
+| `--precheck` | 仅 PreCheck |
+| `--dry-run` | PreCheck 后跳过 Action/PostCheck |
+| `-s` / `-e` | 包含 / 排除步骤（支持范围如 `B-001-B-010`） |
+| `-F` / `-f` | 强制全部 / 指定步骤（可能删除已有资源） |
+
+日志：Session 日志 + Debug 日志，默认目录 `--log-dir`（默认 `./logs`）。
 
 ---
 
-## 二、主程序 yasinstall
+## 常用全局参数
 
-### 2.1 子命令一览
+| 参数 | 简写 | 说明 |
+|------|------|------|
+| `--targets` | `-t` | 目标主机（逗号分隔）；未指定时本机执行 |
+| `--ssh-user` | `-u` | SSH 用户（默认 `root`） |
+| `--ssh-password` | `-P` | SSH 密码（未指定时可尝试密钥） |
+| `--ssh-key-path` | | 私钥路径（默认 `~/.ssh/id_rsa`） |
+| `--local-software-dirs` | `-L` | 控制端软件目录（默认 `./software,./pkg` 等） |
+| `--remote-software-dir` | `-R` | 目标机软件目录（默认 `/data/yashan/soft`） |
+| `--include-steps` | `-s` | 只执行指定步骤 |
+| `--exclude-steps` | `-e` | 排除步骤 |
+| `--list-steps` | `-l` | 打印步骤列表后退出 |
+| `--output` | `-o` | collect/stress 归档目录 |
+| `--archive` | `-a` | 安装成功后自动 collect（os/db 默认开启） |
+| `--log-redact` | | 日志中脱敏密码 |
+
+完整参数以 `yinstall <command> --help` 为准。
+
+---
+
+## 项目结构
 
 ```text
-yasinstall [command]
-```
-
-| 子命令 | 说明 |
-|--------|------|
-| **os** | 执行 OS 基线准备 |
-| **db** | 安装 YashanDB 数据库（单机/YAC） |
-| **standby** | 为现有集群添加备库 |
-| **ycm** | 安装 YCM（YashanDB Cloud Manager） |
-| **ymp** | 安装 YMP（YashanDB Migration Platform） |
-| **clean** | 清理 YashanDB/YCM/YMP 安装 |
-
-### 2.2 全局参数（所有子命令可用）
-
-**目标与 SSH：**
-
-- `--targets <IP或主机列表>`：目标主机（逗号分隔，必填，除非用 `--local`）
-- `--ssh-user`：SSH 用户（默认 root）
-- `--ssh-password` / `-P`：SSH 密码
-- `--ssh-port`：SSH 端口（默认 22）
-- `--ssh-auth password|key`：认证方式
-- `--ssh-key-path`：私钥路径（key 认证时）
-- `--local`：本机执行，不通过 SSH
-
-**执行控制：**
-
-- `--dry-run`：跳过各步骤的 Action/PostCheck（PreCheck 及 db 等命令里的全局预检查仍可能执行）
-- `--precheck`：只做检查，不做变更
-- `-s`/`--include-steps`、`-e`/`--exclude-steps`：只执行/跳过指定步骤
-- `-f`/`--force-steps`：强制重新执行指定步骤（会删除已有资源）；`-F`/`--force` 表示对所有步骤强制
-
-**路径与日志：**
-
-- `-L`/`--local-software-dirs`：本地软件目录（默认 `./software,./pkg`）
-- `-R`/`--remote-software-dir`：目标机软件目录（默认 `/data/yashan/soft`）
-- `--log-dir`：日志目录（默认 `~/.yasinstall/logs`）
-
-### 2.3 YMP 安装命令用法（yasinstall ymp）
-
-**必填：**
-
-- `--targets`：目标主机
-- `--ymp-package`：YMP zip 路径
-- `--ymp-instantclient-basic`：Oracle InstantClient Basic zip 路径
-- `--ymp-db-package`：YashanDB 包路径（嵌入式库用）
-
-**常用可选：**
-
-- `--skip-os`：是否跳过 OS 基线（默认 true，即跳过）
-- `--ymp-user` / `--ymp-user-password`：YMP 系统用户及密码
-- `--ymp-install-dir`：安装目录（默认 `/opt/ymp`）
-- `--ymp-port`：Web 端口（默认 8090，db=port+1, yasom=port+3, yasagent=port+4）
-- `--ymp-jdk-enable`：是否安装 JDK（默认不安装，仅校验已有 JDK）
-- `--ymp-jdk-package` / `--ymp-jdk-version`：JDK 包路径与版本（启用 JDK 安装时）
-- `--ymp-instantclient-sqlplus`：Oracle SQLPlus zip（可选）
-- `--ymp-oracle-env-file`：Oracle 环境变量文件路径
-- `--ymp-deps-packages`：依赖包列表（默认 `libaio lsof`）
-- `--ymp-cleanup`：失败时是否允许清理（慎用）
-
-**示例：**
-
-```bash
-./yasinstall ymp \
-  --targets 10.10.10.135 \
-  --ssh-user root \
-  --ssh-password 'your-password' \
-  --ymp-package "/path/to/ymp.zip" \
-  --ymp-instantclient-basic "/path/to/instantclient-basic.zip" \
-  --ymp-db-package "/path/to/yashandb-package" \
-  --ymp-user ymp \
-  --ymp-install-dir /opt/ymp \
-  --ymp-port 8090 \
-  --skip-os
-```
-
-### 2.4 清理命令（yasinstall clean）
-
-```bash
-# 清理 YMP 示例
-yasinstall clean -t ymp --targets 10.10.10.125 --ymp-home /opt/ymp
+cmd/yinstall/          # 入口
+internal/cli/          # 子命令与参数
+internal/runner/       # 步骤编排
+internal/steps/        # 各域步骤实现（os/db/ycm/ymp/...）
+internal/ssh/          # SSH 执行与上传
+internal/common/       # 公共逻辑
+build/                 # 编译产物（不入库）
+docs/                  # 本地文档（默认不入库）
+tmp/ scripts/          # 本地临时/脚本（不入库）
 ```
 
 ---
 
-## 三、脚本 ymp_install_command.sh
+## 文档（本地）
 
-### 3.1 作用
+以下文件在 `.gitignore` 中，clone 后需在本机维护：
 
-- 在脚本内填写**必填路径**和**可选参数**（目标机、SSH、YMP 用户、端口、JDK 等）。
-- 运行后**生成并打印**对应的 `./yasinstall ymp ...` 完整命令，方便检查后复制执行，避免手写一长串参数。
-
-### 3.2 使用步骤
-
-1. **编辑脚本，填写必填变量（第 12–18 行）：**
-   - `YMP_PACKAGE`：YMP 软件包路径
-   - `INSTANTCLIENT_BASIC`：Oracle InstantClient Basic 包路径
-   - `DB_PACKAGE`：YashanDB 包路径（嵌入式库）
-
-2. **按需修改可选变量：**
-   - `SKIP_OS`：是否跳过 OS 基线（true/false）
-   - `YMP_USER` / `YMP_USER_PASSWORD`：YMP 用户与密码
-   - `YMP_INSTALL_DIR`、`YMP_PORT`：安装目录与端口
-   - `JDK_ENABLE`、`JDK_VERSION`、`JDK_PACKAGE`：是否安装 JDK 及包路径
-   - `INSTANTCLIENT_SQLPLUS`、`ORACLE_ENV_FILE`、`DEPS_PACKAGES` 等
-
-3. **修改目标与 SSH（第 71–73 行）：**  
-   脚本内写死了 `--targets 10.10.10.135`、`--ssh-user root`、`--ssh-password 'huangyihan'`，使用前请改成你的目标机和账号密码。
-
-4. **运行脚本：**
-   ```bash
-   cd /path/to/yasinstaller
-   chmod +x ymp_install_command.sh
-   ./ymp_install_command.sh
-   ```
-   脚本会检查必填变量是否为空，然后**在终端打印**完整命令；若需执行，复制输出的命令再运行即可。
-
-### 3.3 注意事项
-
-- 脚本**不会自动执行**安装，只做参数拼接与输出。
-- 密码等敏感信息不要提交到版本库，建议用环境变量或临时修改后执行。
-- 软件包路径可以是本地路径；yasinstall 会按 `--local-software-dirs` / `--remote-software-dir` 处理上传与使用。
-
----
-
-## 四、快速参考
-
-| 需求 | 操作 |
+| 路径 | 说明 |
 |------|------|
-| 查看所有子命令 | `./yasinstall --help` |
-| 查看 YMP 参数说明 | `./yasinstall ymp --help` |
-| 只生成 YMP 安装命令（不执行） | 编辑并运行 `./ymp_install_command.sh`，复制输出命令 |
-| 实际执行 YMP 安装 | 使用 `./yasinstall ymp ...`（或脚本输出的命令） |
-| 安装规范与环境要求 | 查阅 `docs/installer.md` |
+| `docs/02-product/01-product-manual.md` | 产品说明书（参数、案例、步骤逻辑） |
+| `docs/02-product/02-step-logic.md` | 步骤 PreCheck/Action 参考 |
+| `docs/installer.md` | 开发者 API、Params、排障 |
 
 ---
 
-*文档根据当前代码与 `--help` 输出整理，若二进制或参数有更新，请以 `./yasinstall --help` 与 `./yasinstall ymp --help` 为准。*
-# yinstall
+## 开发验证
+
+```bash
+go fmt ./...
+go vet ./...
+go test ./... -count=1
+```
+
+测试机参考（内网）：单机 `10.10.10.130`；YAC `10.10.10.125`、`10.10.10.126`。
+
+---
+
+## 许可证与联系
+
+构建信息见 `yinstall --version`（含构建时间、Git commit）。
+
+参数与步骤以当前二进制 `yinstall <command> -h` / `-l` 为准。
