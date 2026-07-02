@@ -29,7 +29,7 @@ func StepC014GenConfig() *runner.Step {
 				return skipPrecheckDryRunWhenUpstreamDBArtifactMissing(ctx, fmt.Errorf("yasboot not found at %s", yasbootPath))
 			}
 
-			return nil
+			return ensureMultitenantPackageVersionCtx(ctx, "C-014")
 		},
 
 		Action: func(ctx *runner.StepContext) error {
@@ -210,11 +210,17 @@ func genStandaloneConfig(ctx *runner.StepContext, yasbootPath, clusterName, user
 	if dbMode == "mysql" {
 		genCmd += " \\\n--mode mysql"
 	}
+	if ctx.GetParamBool("db_enable_pluggable", false) {
+		genCmd += " \\\n--enable-pluggable-database"
+	}
 
 	extra := ctx.GetParamString(ParamYasbootGenExtraArgs, "")
 	genCmd = AppendYasbootGenExtraArgs(genCmd, extra)
 	if strings.TrimSpace(extra) != "" {
 		ctx.Logger.Info("yasboot package se gen: appending extra args: %s", strings.TrimSpace(extra))
+	}
+	if ctx.GetParamBool("db_enable_pluggable", false) {
+		ctx.Logger.Info("yasboot package se gen: multitenant mode enabled (--enable-pluggable-database)")
 	}
 
 	dbLogPhase(ctx, "config-gen-start", "standalone package se gen")
@@ -291,9 +297,15 @@ func genYACConfig(ctx *runner.StepContext, yasbootPath, clusterName, user, passw
 	})
 
 	extra := ctx.GetParamString(ParamYasbootGenExtraArgs, "")
+	if ctx.GetParamBool("db_enable_pluggable", false) {
+		genCmd += " \\\n--enable-pluggable-database"
+	}
 	genCmd = AppendYasbootGenExtraArgs(genCmd, extra)
 	if strings.TrimSpace(extra) != "" {
 		ctx.Logger.Info("yasboot package ce gen: appending extra args: %s", strings.TrimSpace(extra))
+	}
+	if ctx.GetParamBool("db_enable_pluggable", false) {
+		ctx.Logger.Info("yasboot package ce gen: multitenant mode enabled (--enable-pluggable-database)")
 	}
 
 	dbLogPhase(ctx, "config-gen-start", fmt.Sprintf("yac nodes=%d access=%s", nodeCount, accessMode))

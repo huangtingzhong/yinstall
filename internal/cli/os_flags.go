@@ -9,7 +9,7 @@ import (
 const defaultOSUserPassword = "aaBB11@@33$$"
 
 // ApplyOSUserPasswordFromSSHLogin 当 SSH 登录用户与产品用户相同、且采用密码认证并提供了 --ssh-password 时，
-// 在未显式指定 --os-user-password 的情况下，将产品用户密码与 SSH 登录密码对齐（供 yasboot / C-001P 使用）。
+// 在未显式指定 --os-user-password 的情况下，将产品用户密码与 SSH 登录密码对齐（供 yasboot / C-001 使用）。
 func ApplyOSUserPasswordFromSSHLogin(cmd *cobra.Command, flags GlobalFlags, productUser string, osPassword *string) bool {
 	if cmd == nil || osPassword == nil {
 		return false
@@ -195,7 +195,7 @@ func registerOSYACDiskGroupFlags(cmd *cobra.Command, cfg registerOSFlagsConfig) 
 	cmd.Flags().StringVar(&yacDiskPattern, "yac-disk-pattern", "", prefix+cfg.whenSkipOSFalse("Disk path pattern for filtering (e.g., '/dev/sd[c-z]', empty=all disks)"))
 	suffix := "Disks to exclude from YAC auto-discovery (comma-separated; exact path, /dev basename, or alias like data2)"
 	if cfg.forDB {
-		suffix += "; applies to C-001B when --skip-os and B-021 when full OS baseline"
+		suffix += "; applies to C-001 when --skip-os and B-021 when full OS baseline"
 	} else {
 		suffix += cfg.whenSkipOSFalse("")
 	}

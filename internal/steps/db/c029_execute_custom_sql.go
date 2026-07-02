@@ -2,8 +2,7 @@ package db
 
 import (
 	"fmt"
-	"path"          // 远端（Linux）路径拼接
-	"path/filepath" // 本地操作系统路径（Windows 上 filepath.IsAbs 等）
+	"path/filepath"
 	"strings"
 
 	"github.com/yinstall/internal/common/file"
@@ -12,10 +11,11 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC030ExecuteCustomSQL 执行自定义 SQL 脚本
-func StepC030ExecuteCustomSQL() *runner.Step {
+// StepC029ExecuteCustomSQL 执行自定义 SQL 脚本。
+// CDB 模式：在 --db-pdb 指定的每个 PDB 内执行；非 CDB：在实例内执行。
+func StepC029ExecuteCustomSQL() *runner.Step {
 	return &runner.Step{
-		ID:          "C-030",
+		ID:          "C-029",
 		Name:        "Execute Custom SQL Script",
 		Description: "Execute custom SQL script using yasql",
 		Tags:        []string{"db", "sql", "custom"},
@@ -26,61 +26,76 @@ func StepC030ExecuteCustomSQL() *runner.Step {
 			if sqlScript == "" {
 				return fmt.Errorf("no custom SQL script specified, skipping")
 			}
+			if ctxCDBEnabled(ctx) {
+				names, err := pdbNamesFromCtx(ctx)
+				if err != nil {
+					return fmt.Errorf("invalid --db-pdb for custom SQL: %w", err)
+				}
+				if len(names) == 0 {
+					return fmt.Errorf("multitenant custom SQL requires at least one --db-pdb")
+				}
+			}
 			return nil
 		},
 
 		Action: func(ctx *runner.StepContext) error {
 			dbLogPhase(ctx, "plan", "op=yasql-script-file")
 			sqlScript := ctx.GetParamString("db_custom_sql_script", "")
-			installPath := ctx.GetParamString("db_install_path", "/data/yashan/yasdb_home")
 			sysPassword := ctx.GetParamString("db_admin_password", "")
 			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
 			beginPort := ctx.GetParamInt("db_begin_port", 1688)
+			user := ctx.GetParamString("os_user", "yashan")
 
 			if sysPassword == "" {
 				return fmt.Errorf("db_admin_password is required for SQL execution")
 			}
 
-			// 解析脚本路径（支持 remote:, local:, r:, l: 前缀）
 			remotePath, err := resolveScriptPath(ctx, sqlScript)
 			if err != nil {
 				return fmt.Errorf("failed to resolve SQL script path: %w", err)
 			}
+			ctx.Logger.Info("Custom SQL script resolved: %s", remotePath)
 
-			ctx.Logger.Info("Executing custom SQL script: %s", remotePath)
+			firstHost := ctx.HostsToRun()[0]
+			hctx := ctx.ForHost(firstHost)
+			envFile := resolveDBEnvFile(ctx, hctx)
 
-			// 构建 yasql 命令（installPath 是远端 Linux 路径，使用 path.Join）
-			yasqlPath := path.Join(installPath, "bin/yasql")
-
-			// yasql 连接命令：yasql sys/password@localhost:port/yasdb -f script.sql
-			connectStr := fmt.Sprintf("sys/%s@localhost:%d/%s", commonos.YasqlQuotePassword(sysPassword), beginPort, clusterName)
-			cmd := fmt.Sprintf("%s %s -f %s", yasqlPath, connectStr, remotePath)
-
-			ctx.Logger.Info("Running yasql command...")
-			dbLogPhase(ctx, "query-start", fmt.Sprintf("label=custom-script path=%s", remotePath))
-			result, err := ctx.Execute(cmd, false)
-			if err != nil {
-				return fmt.Errorf("failed to execute yasql: %w", err)
+			runScript := func(serviceName, containerLabel string) error {
+				connectStr := commonsql.BuildYasqlTCPConnect(commonsql.YasqlConnectHost(hctx), "sys", sysPassword, beginPort, serviceName)
+				yasqlCmd := fmt.Sprintf("yasql -S %s -f %s", connectStr, commonos.ShellSingleQuote(remotePath))
+				hctx.Logger.Info("Executing custom SQL in %s: %s", containerLabel, remotePath)
+				dbLogPhase(hctx, "query-start", fmt.Sprintf("label=custom-script container=%s path=%s", containerLabel, remotePath))
+				result, err := commonos.ExecuteAsUserWithEnv(hctx, user, envFile, yasqlCmd, false)
+				if err != nil {
+					return fmt.Errorf("failed to execute yasql in %s: %w", containerLabel, err)
+				}
+				yr := &commonsql.YasqlResult{
+					Stdout:   result.GetStdout(),
+					Stderr:   result.GetStderr(),
+					ExitCode: result.GetExitCode(),
+					Success:  result.GetExitCode() == 0,
+				}
+				if err := commonsql.ValidateYasqlResultSuccess(yr); err != nil {
+					dbLogPhase(hctx, "query-fail", fmt.Sprintf("label=custom-script container=%s exit=%d", containerLabel, result.GetExitCode()))
+					hctx.Logger.Error("SQL script execution failed in %s: %v", containerLabel, err)
+					hctx.Logger.Error("STDOUT: %s", result.GetStdout())
+					hctx.Logger.Error("STDERR: %s", result.GetStderr())
+					return fmt.Errorf("SQL script execution failed in %s: %w", containerLabel, err)
+				}
+				dbLogPhase(hctx, "query-done", fmt.Sprintf("label=custom-script container=%s exit=0", containerLabel))
+				hctx.Logger.Info("Custom SQL executed successfully in %s", containerLabel)
+				if out := strings.TrimSpace(result.GetStdout()); out != "" {
+					hctx.Logger.Info("Output (%s): %s", containerLabel, out)
+				}
+				return nil
 			}
 
-			yr := &commonsql.YasqlResult{
-				Stdout:   result.GetStdout(),
-				Stderr:   result.GetStderr(),
-				ExitCode: result.GetExitCode(),
-				Success:  result.GetExitCode() == 0,
+			if ctxCDBEnabled(hctx) {
+				return forEachPDBTarget(hctx, func(pdbName string) error {
+					return runScript(pdbName, "PDB "+pdbName)
+				})
 			}
-			if err := commonsql.ValidateYasqlResultSuccess(yr); err != nil {
-				dbLogPhase(ctx, "query-fail", fmt.Sprintf("label=custom-script exit=%d", result.GetExitCode()))
-				ctx.Logger.Error("SQL script execution failed: %v", err)
-				ctx.Logger.Error("STDOUT: %s", result.GetStdout())
-				ctx.Logger.Error("STDERR: %s", result.GetStderr())
-				return fmt.Errorf("SQL script execution failed: %w", err)
-			}
-
-			dbLogPhase(ctx, "query-done", "label=custom-script exit=0")
-			ctx.Logger.Info("Custom SQL script executed successfully")
-			ctx.Logger.Info("Output: %s", result.GetStdout())
-			return nil
+			return runScript(clusterName, "CDB$ROOT")
 		},
 
 		PostCheck: func(ctx *runner.StepContext) error {

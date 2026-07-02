@@ -7,10 +7,10 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC027ConfigAutostartScript 配置数据库开机自启脚本
-func StepC027ConfigAutostartScript() *runner.Step {
+// StepC032ConfigAutostartScript 配置数据库开机自启脚本
+func StepC032ConfigAutostartScript() *runner.Step {
 	return &runner.Step{
-		ID:          "C-027",
+		ID:          "C-032",
 		Name:        "Configure Autostart Script",
 		Description: "Create yashan_monit.sh script for database autostart",
 		Tags:        []string{"db", "autostart"},
@@ -28,7 +28,7 @@ func StepC027ConfigAutostartScript() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			dbLogPhase(ctx, "plan", "C-027: Configure Autostart Script")
+			dbLogPhase(ctx, "plan", "C-032: Configure Autostart Script")
 			for _, th := range ctx.HostsToRun() {
 				hctx := ctx.ForHost(th)
 				user := hctx.GetParamString("os_user", "yashan")

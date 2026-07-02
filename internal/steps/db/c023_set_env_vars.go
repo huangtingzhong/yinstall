@@ -7,10 +7,10 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC024SetEnvVars 配置数据库用户相关环境变量
-func StepC024SetEnvVars() *runner.Step {
+// StepC023SetEnvVars 配置数据库用户相关环境变量
+func StepC023SetEnvVars() *runner.Step {
 	return &runner.Step{
-		ID:          "C-024",
+		ID:          "C-023",
 		Name:        "Set Environment Variables",
 		Description: "Configure environment variables for DB user",
 		Tags:        []string{"db", "env"},
@@ -29,7 +29,7 @@ func StepC024SetEnvVars() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			dbLogPhase(ctx, "plan", "C-024: Set Environment Variables")
+			dbLogPhase(ctx, "plan", "C-023: Set Environment Variables")
 			for _, th := range ctx.HostsToRun() {
 				hctx := ctx.ForHost(th)
 				user := hctx.GetParamString("os_user", "yashan")

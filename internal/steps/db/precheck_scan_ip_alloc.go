@@ -17,7 +17,7 @@ func RunScanIPAllocation(hosts []HostExec, params map[string]interface{}, logger
 	}
 
 	firstHost := hosts[0].Host
-	logger.ConsoleWithType("C-013-SCAN", "Local SCAN IP Allocation", firstHost, "start", "", "", 0)
+	logger.ConsoleWithType("C-010", "Local SCAN IP Allocation", firstHost, "start", "", "", 0)
 	logger.Info("Running local SCAN IP allocation...")
 
 	scanIPsRaw := getParamString(params, "yac_scan_ips", "")
@@ -45,7 +45,7 @@ func RunScanIPAllocation(hosts []HostExec, params map[string]interface{}, logger
 		}
 		params["yac_scan_ips_list"] = scanIPs
 		logger.Info("SCAN IPs validated: %v", scanIPs)
-		logger.ConsoleWithType("C-013-SCAN", "Local SCAN IP Allocation", firstHost, "success", "",
+		logger.ConsoleWithType("C-010", "Local SCAN IP Allocation", firstHost, "success", "",
 			fmt.Sprintf("SCAN: %s -> %v", scanName, scanIPs), time.Duration(0))
 		return nil
 	}
@@ -110,7 +110,7 @@ func RunScanIPAllocation(hosts []HostExec, params map[string]interface{}, logger
 
 	params["yac_scan_ips_list"] = []string{scanIP}
 	logger.Info("Auto-generated SCAN IP: %s (name: %s)", scanIP, scanName)
-	logger.ConsoleWithType("C-013-SCAN", "Local SCAN IP Allocation", firstHost, "success", "",
+	logger.ConsoleWithType("C-010", "Local SCAN IP Allocation", firstHost, "success", "",
 		fmt.Sprintf("SCAN: %s -> %s", scanName, scanIP), time.Duration(0))
 	return nil
 }

@@ -9,11 +9,11 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC031ConfigureDefaultProfile 安装后 profile 与 date_format 配置（installer.md §5.4 等）。
-// 须在 C-024（环境变量）之后执行，以便 source env_file 后使用 yasql / as sysdba。
-func StepC031ConfigureDefaultProfile() *runner.Step {
+// StepC025ConfigureDefaultProfile 安装后 profile 与 date_format 配置（installer.md §5.4 等）。
+// 须在 C-023（环境变量）之后执行，以便 source env_file 后使用 yasql / as sysdba。
+func StepC025ConfigureDefaultProfile() *runner.Step {
 	return &runner.Step{
-		ID:          "C-031",
+		ID:          "C-025",
 		Name:        "Configure Default Profile",
 		Description: "Configure DEFAULT profile and date_format (SPFILE)",
 		Tags:        []string{"db", "profile", "security"},
@@ -30,7 +30,7 @@ func StepC031ConfigureDefaultProfile() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			dbLogPhase(ctx, "plan", "C-031: Configure Default Profile (profile+date_format, per-statement)")
+			dbLogPhase(ctx, "plan", fmt.Sprintf("C-025: Configure Default Profile in CDB$ROOT (profile+date_format)"))
 			firstHost := ctx.HostsToRun()[0]
 			hctx := ctx.ForHost(firstHost)
 
@@ -45,9 +45,9 @@ func StepC031ConfigureDefaultProfile() *runner.Step {
 				hctx.Logger.Info("Skipping ALTER PROFILE on MASTER: yasboot command/args contain enable-branch (local profile object)")
 			} else {
 				hctx.Logger.Info("Executing ALTER PROFILE via yasql (/ as sysdba)...")
-				res, err := dbRunSQLPhase(hctx, user, envFile, clusterName, "default-profile", c031SQLProfile, true)
+				res, err := dbRunSQLPhase(hctx, user, envFile, clusterName, "default-profile", c025SQLProfile, true)
 				if err != nil {
-					if isC031ProfileAlterSkippable(err, res) {
+					if isC025ProfileAlterSkippable(err, res) {
 						profileSkipped = true
 						dbLogPhase(hctx, "query-skip", "label=default-profile reason=local-object-on-master")
 						hctx.Logger.Warn("ALTER PROFILE skipped: %v (apply in user/branch container if required)", err)
@@ -56,20 +56,20 @@ func StepC031ConfigureDefaultProfile() *runner.Step {
 					}
 				}
 			}
-			ctx.SetResult(c031ResultProfileSkipped, profileSkipped)
+			ctx.SetResult(c025ResultProfileSkipped, profileSkipped)
 
 			hctx.Logger.Info("Executing ALTER SYSTEM date_format (SPFILE) via yasql...")
-			if _, err := dbRunSQLPhase(hctx, user, envFile, clusterName, "date-format-spfile", c031SQLDateFormat, true); err != nil {
+			if _, err := dbRunSQLPhase(hctx, user, envFile, clusterName, "date-format-spfile", c025SQLDateFormat, true); err != nil {
 				return fmt.Errorf("ALTER SYSTEM date_format failed: %w", err)
 			}
 
 			hctx.Logger.Info("Post-install SQL completed (profile_skipped=%v)", profileSkipped)
-			hctx.Logger.Info("Note: date_format (SPFILE) takes effect after database restart")
+			hctx.Logger.Info("Note: date_format (SPFILE) takes effect after C-030 cluster restart")
 			return nil
 		},
 
 		PostCheck: func(ctx *runner.StepContext) error {
-			if shouldSkipC031ProfilePostCheck(ctx) {
+			if shouldSkipC025ProfilePostCheck(ctx) {
 				dbLogPhase(ctx, "query-skip", "label=verify-failed-login-attempts reason=profile-skipped-or-enable-branch")
 				ctx.Logger.Info("Skipping DEFAULT profile verification (enable-branch or profile alter skipped on MASTER)")
 				return nil
@@ -96,7 +96,7 @@ func StepC031ConfigureDefaultProfile() *runner.Step {
 				out = strings.ToUpper(res.Stdout)
 			}
 			if !strings.Contains(out, "UNLIMITED") {
-				return fmt.Errorf("FAILED_LOGIN_ATTEMPTS is not UNLIMITED after C-031; query output: %s", strings.TrimSpace(res.Stdout))
+				return fmt.Errorf("FAILED_LOGIN_ATTEMPTS is not UNLIMITED after C-025; query output: %s", strings.TrimSpace(res.Stdout))
 			}
 
 			hctx.Logger.Info("Verified DEFAULT profile FAILED_LOGIN_ATTEMPTS = UNLIMITED")

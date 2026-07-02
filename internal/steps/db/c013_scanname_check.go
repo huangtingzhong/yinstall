@@ -44,8 +44,16 @@ func StepC013ScanNameCheck() *runner.Step {
 
 		Action: func(ctx *runner.StepContext) error {
 			dbLogPhase(ctx, "plan", "C-013: Resolve SCAN Name and Check Subnet")
-			// 实际解析与网段校验在 db.go 中通过 RunScanNameResolveAndSubnetCheck 执行，此处仅占位
-			return nil
+			if !ctx.GetParamBool("yac_mode", false) {
+				return nil
+			}
+			if ctx.GetParamString("yac_access_mode", "vip") != "scan" {
+				return nil
+			}
+			if ctx.GetParamString("yac_scan_mode", "") == "local" {
+				return nil
+			}
+			return RunScanNameResolveAndSubnetCheck(HostExecsFromStepContext(ctx), ctx.Params, ctx.Logger)
 		},
 
 		PostCheck: func(ctx *runner.StepContext) error {
@@ -74,7 +82,7 @@ func RunScanNameResolveAndSubnetCheck(hosts []HostExec, params map[string]interf
 	}
 
 	firstHost := hosts[0].Host
-	logger.ConsoleWithType("C-013-SCAN", "Resolve SCAN Name and Check Subnet", firstHost, "start", "", "", 0)
+	logger.ConsoleWithType("C-013", "Resolve SCAN Name and Check Subnet", firstHost, "start", "", "", 0)
 	logger.Info("Resolving SCAN name: %s", scanName)
 
 	// 1. 解析 SCAN 名为 IP 地址列表
@@ -129,6 +137,6 @@ func RunScanNameResolveAndSubnetCheck(hosts []HostExec, params map[string]interf
 	}
 
 	logger.Info("SCAN name %s resolved to %v; all IPs are in subnet %s", scanName, resolvedIPs, cidr)
-	logger.ConsoleWithType("C-013-SCAN", "Resolve SCAN Name and Check Subnet", firstHost, "success", "", fmt.Sprintf("IPs: %v", resolvedIPs), time.Duration(0))
+	logger.ConsoleWithType("C-013", "Resolve SCAN Name and Check Subnet", firstHost, "success", "", fmt.Sprintf("IPs: %v", resolvedIPs), time.Duration(0))
 	return nil
 }

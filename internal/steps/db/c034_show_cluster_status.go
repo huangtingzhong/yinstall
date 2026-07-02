@@ -9,10 +9,10 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC029ShowClusterStatus 安装流程末尾展示集群状态
-func StepC029ShowClusterStatus() *runner.Step {
+// StepC034ShowClusterStatus 安装流程末尾展示集群状态
+func StepC034ShowClusterStatus() *runner.Step {
 	return &runner.Step{
-		ID:          "C-029",
+		ID:          "C-034",
 		Name:        "Show Cluster Status",
 		Description: "Display cluster status information",
 		Tags:        []string{"db", "status", "display"},
@@ -24,7 +24,7 @@ func StepC029ShowClusterStatus() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			dbLogPhase(ctx, "plan", "C-029: Show Cluster Status")
+			dbLogPhase(ctx, "plan", "C-034: Show Cluster Status")
 			// 只在第一个节点执行（对于单机版）或主节点（对于YAC）
 			firstHost := ctx.HostsToRun()[0]
 			hctx := ctx.ForHost(firstHost)

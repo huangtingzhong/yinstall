@@ -9,10 +9,10 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC026VerifyInstall 验证安装结果与连通性
-func StepC026VerifyInstall() *runner.Step {
+// StepC031VerifyInstall 验证安装结果与连通性
+func StepC031VerifyInstall() *runner.Step {
 	return &runner.Step{
-		ID:          "C-026",
+		ID:          "C-031",
 		Name:        "Verify Installation",
 		Description: "Verify database installation and connectivity",
 		Tags:        []string{"db", "verify"},
@@ -70,14 +70,31 @@ func StepC026VerifyInstall() *runner.Step {
 					hctx.Logger.Warn("Failed to get cluster status")
 				}
 
-				hctx.Logger.Info("Step 2: Checking database connectivity...")
+				hctx.Logger.Info("Step 2: Checking CDB connectivity...")
 				if res, err := dbRunSQLPhase(hctx, user, envFile, clusterName, "connectivity-dual", "SELECT 1 FROM dual", false); err != nil {
 					if res != nil && !runner.CommandExitLogged(err) {
 						commonsql.ReportSQLFailure(hctx, "SELECT 1 FROM dual", res)
 					}
-					return fmt.Errorf("database connectivity check failed on host %s: %w", th.Host, err)
+					return fmt.Errorf("CDB connectivity check failed on host %s: %w", th.Host, err)
 				}
-				hctx.Logger.Info("Database connectivity: OK")
+				hctx.Logger.Info("CDB connectivity: OK")
+
+				if ctxCDBEnabled(hctx) {
+					hctx.Logger.Info("Step 2b: Checking PDB connectivity...")
+					if err := forEachPDBTarget(hctx, func(pdbName string) error {
+						label := "connectivity-dual-" + pdbName
+						if res, err := dbRunSQLInPDBPhase(hctx, user, envFile, clusterName, pdbName, label, "SELECT 1 FROM dual", false); err != nil {
+							if res != nil && !runner.CommandExitLogged(err) {
+								commonsql.ReportSQLFailure(hctx, "SELECT 1 FROM dual", res)
+							}
+							return fmt.Errorf("PDB %s connectivity check failed: %w", pdbName, err)
+						}
+						hctx.Logger.Info("  PDB %s connectivity: OK", pdbName)
+						return nil
+					}); err != nil {
+						return fmt.Errorf("PDB connectivity check failed on host %s: %w", th.Host, err)
+					}
+				}
 
 				hctx.Logger.Info("Step 3: Checking key processes...")
 				processes := []string{"yasom", "yasagent", "yasdb"}

@@ -11,7 +11,7 @@
 //
 //	yasboot monit summary -c <cluster>
 //
-// 与 C-029 / C-026 安装验证步骤一致，必须带 -c 集群名；勿使用无 -c 的 cluster status。
+// 与 C-034 / C-031 安装验证步骤一致，必须带 -c 集群名；勿使用无 -c 的 cluster status。
 // SQL 层状态（V$INSTANCE 等）由 R-026 采集。
 package collect
 

@@ -34,7 +34,7 @@ func StepC001Check() *runner.Step {
 	return &runner.Step{
 		ID:          "C-001",
 		Name:        "Check Connectivity and YAC Prerequisites",
-		Description: "Verify network connectivity; standalone: verify product user exists; YAC: verify UID/GID/username consistency and shared disks on all nodes",
+		Description: "Verify connectivity; YAC: network CIDR, product user password, optional udev disk discovery, UID/GID and shared disks",
 		Tags:        []string{"db", "connectivity", "yac", "precheck"},
 		Optional:    false,
 
@@ -54,8 +54,88 @@ func StepC001Check() *runner.Step {
 	}
 }
 
-// RunConnectivityAndYACPrecheck 执行 C-001 逻辑：网络检查；单机时检查产品用户存在；YAC 下检查所有节点 UID/GID/用户一致及共享盘可用
-// 由 db 命令在 Phase 2 前调用，传入所有节点的 HostExec 与 params
+// HostExecsFromStepContext 从多节点 StepContext 构建 HostExec 列表（供 C-009/C-010/C-013 等步骤调用）。
+func HostExecsFromStepContext(ctx *runner.StepContext) []HostExec {
+	if ctx == nil {
+		return nil
+	}
+	hosts := ctx.HostsToRun()
+	out := make([]HostExec, 0, len(hosts))
+	for _, th := range hosts {
+		hctx := ctx.ForHost(th)
+		out = append(out, HostExec{
+			Host:     th.Host,
+			Executor: &stepCtxC001Executor{hctx: hctx},
+		})
+	}
+	return out
+}
+
+type stepCtxC001Executor struct {
+	hctx *runner.StepContext
+}
+
+func (a *stepCtxC001Executor) Execute(cmd string, sudo bool) (ExecResultForC001, error) {
+	if a == nil || a.hctx == nil {
+		return nil, fmt.Errorf("nil step context")
+	}
+	r, err := a.hctx.Execute(cmd, sudo)
+	if err != nil {
+		return nil, err
+	}
+	return &stepCtxC001Result{r: r}, nil
+}
+
+func (a *stepCtxC001Executor) Host() string {
+	if a == nil || a.hctx == nil || a.hctx.Executor == nil {
+		return ""
+	}
+	return a.hctx.Executor.Host()
+}
+
+type stepCtxC001Result struct {
+	r runner.ExecResult
+}
+
+func (a *stepCtxC001Result) GetStdout() string {
+	if a == nil || a.r == nil {
+		return ""
+	}
+	return a.r.GetStdout()
+}
+
+func (a *stepCtxC001Result) GetExitCode() int {
+	if a == nil || a.r == nil {
+		return -1
+	}
+	return a.r.GetExitCode()
+}
+
+// RunC001FullPrecheck 执行 C-001 全部逻辑：连通性/YAC 前置、网段校验、产品用户密码、skip-os 磁盘发现。
+func RunC001FullPrecheck(hosts []HostExec, params map[string]interface{}, logger *logging.Logger, isYACMode, skipOS, precheckMode, dryRun bool) error {
+	if err := RunConnectivityAndYACPrecheck(hosts, params, logger, isYACMode); err != nil {
+		return err
+	}
+	if !isYACMode {
+		return nil
+	}
+	if err := RunNetworkValidation(hosts, params, logger); err != nil {
+		return err
+	}
+	if !dryRun {
+		if err := RunYACProductUserPasswordEnsure(hosts, params, logger, precheckMode); err != nil {
+			return err
+		}
+	}
+	if skipOS {
+		if err := RunYACUdevDiskDiscovery(hosts, params, logger); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RunConnectivityAndYACPrecheck 执行 C-001 连通性与 YAC 身份/共享盘检查。
 func RunConnectivityAndYACPrecheck(hosts []HostExec, params map[string]interface{}, logger *logging.Logger, isYACMode bool) error {
 	if len(hosts) == 0 {
 		return fmt.Errorf("no hosts to check")

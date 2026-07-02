@@ -23,6 +23,15 @@ func StepC010WriteHosts() *runner.Step {
 				ctx.Logger.Info("Not YAC mode, skipping")
 				return fmt.Errorf("not YAC mode")
 			}
+			accessMode := ctx.GetParamString("yac_access_mode", "vip")
+			if accessMode == "scan" {
+				scanMode := ctx.GetParamString("yac_scan_mode", "")
+				if scanMode == "local" {
+					if err := RunScanIPAllocation(HostExecsFromStepContext(ctx), ctx.Params, ctx.Logger); err != nil {
+						return fmt.Errorf("local SCAN IP allocation failed: %w", err)
+					}
+				}
+			}
 			return nil
 		},
 

@@ -240,7 +240,7 @@ func scanDisksOnNode(ctx *runner.StepContext, diskPattern string, excludeDisks [
 			continue
 		}
 
-		// 跳过排除列表中的磁盘（与 C-001B 共用匹配规则）
+		// 跳过排除列表中的磁盘（与 C-001 共用匹配规则）
 		if commonos.IsDiskPathExcluded(diskPath, excludeDisks) {
 			continue
 		}

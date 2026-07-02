@@ -11,7 +11,7 @@ import (
 	"github.com/yinstall/internal/ssh"
 )
 
-const yacPasswordEnsureStepID = "C-001P"
+const yacPasswordEnsureStepID = "C-001"
 
 // RunYACProductUserPasswordEnsure 在 YAC 安装前校验各节点产品用户 SSH 密码；
 // 失败且 yac_ensure_os_password 为 true 时，在具备 root/sudo 的节点上将密码重置为 os_user_password。
@@ -21,7 +21,7 @@ func RunYACProductUserPasswordEnsure(hosts []HostExec, params map[string]interfa
 		return fmt.Errorf("no hosts for YAC password ensure")
 	}
 	if !getParamBool(params, "yac_ensure_os_password", true) {
-		logger.Info("C-001P: yac_ensure_os_password=false, skipping product user password check")
+		logger.Info("C-001: yac_ensure_os_password=false, skipping product user password check")
 		return nil
 	}
 
@@ -49,12 +49,12 @@ func RunYACProductUserPasswordEnsure(hosts []HostExec, params map[string]interfa
 			return fmt.Errorf("host %s: password probe: %w", h.Host, probeErr)
 		}
 		if ok {
-			logger.Info("C-001P: SSH password OK for %s@%s", user, h.Host)
+			logger.Info("C-001: SSH password OK for %s@%s", user, h.Host)
 			dbLogPhase(hctx, "op-done", "probe=ok")
 			continue
 		}
 		dbLogPhase(hctx, "op-fail", fmt.Sprintf("probe=%s", probeNote))
-		logger.Warn("C-001P: product user %q cannot SSH to %s with --os-user-password (will reset via root/sudo if allowed)", user, h.Host)
+		logger.Warn("C-001: product user %q cannot SSH to %s with --os-user-password (will reset via root/sudo if allowed)", user, h.Host)
 		if !autoFix {
 			return fmt.Errorf("host %s: product user %q password does not match --os-user-password (precheck; auto-fix disabled)", h.Host, user)
 		}
@@ -86,7 +86,7 @@ func RunYACProductUserPasswordEnsure(hosts []HostExec, params map[string]interfa
 		if pa.ViaRoot {
 			via = "root"
 		}
-		logger.Info("C-001P: resetting password for %s@%s (via %s)", user, host, via)
+		logger.Info("C-001: resetting password for %s@%s (via %s)", user, host, via)
 		dbLogPhase(hctx, "reset-priv", fmt.Sprintf("via=%s login_user=%s", via, pa.User))
 
 		dbLogPhase(hctx, "reset-cmd", commonos.ProductUserPasswordShellCmdLabel(user))
@@ -107,7 +107,7 @@ func RunYACProductUserPasswordEnsure(hosts []HostExec, params map[string]interfa
 			return fmt.Errorf("host %s: password still invalid for %q after reset; check sshd PasswordAuthentication and user account", host, user)
 		}
 		dbLogPhase(hctx, "op-done", "reprobe=ok")
-		logger.Info("C-001P: password reset and verified for %s@%s", user, host)
+		logger.Info("C-001: password reset and verified for %s@%s", user, host)
 	}
 
 	targetIPs := getParamStringSliceFromParams(params, "target_ips")
@@ -121,7 +121,7 @@ func RunYACProductUserPasswordEnsure(hosts []HostExec, params map[string]interfa
 	}
 
 	logger.ConsoleWithType(yacPasswordEnsureStepID, "Ensure product user password (YAC)", firstHost, "success", "", "", 0)
-	logger.Info("C-001P: product user password ready on all YAC nodes")
+	logger.Info("C-001: product user password ready on all YAC nodes")
 	return nil
 }
 
@@ -144,7 +144,7 @@ func probeYACPasswordMeshFromFirstNode(first HostExec, params map[string]interfa
 
 	result, _ := rootCtx.Execute("command -v sshpass 2>/dev/null || echo NOT_FOUND", false)
 	if result != nil && strings.Contains(result.GetStdout(), "NOT_FOUND") {
-		rootCtx.Logger.Warn("C-001P: sshpass not found on %s; skip mesh SSH probe (yasboot ce gen may still require sshpass on first node)", first.Host)
+		rootCtx.Logger.Warn("C-001: sshpass not found on %s; skip mesh SSH probe (yasboot ce gen may still require sshpass on first node)", first.Host)
 		dbLogPhase(rootCtx, "mesh-skip", "reason=sshpass_missing")
 		return nil
 	}
@@ -172,7 +172,7 @@ func probeYACPasswordMeshFromFirstNode(first HostExec, params map[string]interfa
 		}
 		dbLogPhase(rootCtx, "op-done", fmt.Sprintf("mesh-probe peer=%s", ip))
 	}
-	logger.Info("C-001P: mesh SSH probe OK from %s to %d target(s)", first.Host, len(targetIPs))
+	logger.Info("C-001: mesh SSH probe OK from %s to %d target(s)", first.Host, len(targetIPs))
 	return nil
 }
 
@@ -234,7 +234,7 @@ func (a *c001RunnerExecutor) Close() error {
 }
 
 func (a *c001RunnerExecutor) Upload(localPath, remotePath string, uploadCtx *ssh.UploadContext) error {
-	return fmt.Errorf("upload not supported in C-001P adapter")
+	return fmt.Errorf("upload not supported in C-001 adapter")
 }
 
 func getParamIntFromParams(params map[string]interface{}, key string, def int) int {

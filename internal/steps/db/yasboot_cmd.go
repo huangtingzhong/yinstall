@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"strings"
 
 	commonos "github.com/yinstall/internal/common/os"
@@ -20,6 +21,12 @@ func BuildClusterDeployInner(yasbootPath, configPath, password string, isYAC boo
 		inner += " --yfs-force-create"
 	}
 	return commonos.YasbootAppendExtraArgs(inner, deployExtra, false)
+}
+
+// BuildClusterRestartCommand 组装 yasboot cluster restart（单机与 YAC 均在首节点执行，YAC 会重启全部节点）。
+func BuildClusterRestartCommand(clusterName string, extra string) string {
+	inner := fmt.Sprintf("yasboot cluster restart -c %s -m open", commonos.ShellSingleQuote(clusterName))
+	return commonos.YasbootAppendExtraArgs(inner, extra, false)
 }
 
 // AppendYasbootGenExtraArgs 将 gen 阶段附加参数拼到 package se/ce gen 命令末尾。

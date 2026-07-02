@@ -9,11 +9,11 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC025ConfigureTPCC 配置 TPCC 相关数据库参数
-// 须在 C-024（环境变量）之后执行，以便 source env_file 后使用部署实例的 yasql 与 / as sysdba。
-func StepC025ConfigureTPCC() *runner.Step {
+// StepC027ConfigureTPCC 配置 TPCC 相关数据库参数
+// 须在 C-023（环境变量）之后执行，以便 source env_file 后使用部署实例的 yasql 与 / as sysdba。
+func StepC027ConfigureTPCC() *runner.Step {
 	return &runner.Step{
-		ID:          "C-025",
+		ID:          "C-027",
 		Name:        "Configure TPCC Parameters",
 		Description: "Configure database parameters for TPCC workload optimization",
 		Tags:        []string{"db", "config", "tpcc", "optimization"},
@@ -59,7 +59,7 @@ func StepC025ConfigureTPCC() *runner.Step {
 				envFile = commonos.DetermineEnvFile(homeDir, beginPort)
 			}
 
-			hctx.Logger.Info("Configuring TPCC optimization parameters...")
+			hctx.Logger.Info("Configuring TPCC optimization parameters in CDB$ROOT...")
 
 			tpccSQLs := []string{
 				"ALTER SYSTEM SET UNDO_RETENTION = 30 SCOPE=SPFILE",

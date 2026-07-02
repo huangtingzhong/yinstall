@@ -37,6 +37,10 @@ var (
 	dbYasbootGenExtraArgs    string // 追加到 yasboot package se/ce gen 的额外参数
 	dbYasbootDeployExtraArgs string // 追加到 yasboot cluster deploy 的额外参数
 
+	// 多租户（CDB / PDB）
+	dbEnablePluggable bool
+	dbPDBSpecs        []string
+
 	// 是否跳过 OS 基线配置
 	dbSkipOS bool
 
@@ -48,7 +52,7 @@ var (
 	yacScanName      string
 	yacDiskFoundPath string
 
-	// YAC db skip-os 下 C-001B udev 磁盘发现
+	// YAC db skip-os 下 C-001 内 udev 磁盘发现
 	yacAutoDiscoverDisks      bool
 	yacDiscoverRoot           string
 	yacDiscoverFallbackMapper bool
@@ -109,9 +113,11 @@ func init() {
 	dbCmd.Flags().BoolVar(&dbTPCC, "db-tpcc", false, "Enable TPCC parameter optimization (default: false)")
 	dbCmd.Flags().MarkHidden("db-tpcc")
 	dbCmd.Flags().BoolVar(&dbUnifiedAudit, "db-unified-audit", false, "Enable unified auditing, audit policies, and purge jobs (default: false)")
-	dbCmd.Flags().StringVar(&dbSpfileParams, "db-spfile-params", "", "Custom SPFILE parameters as name=value|name=value (empty=skip C-033; values may include quotes, e.g. date_format='yyyy-mm-dd hh24:mi:ss')")
+	dbCmd.Flags().StringVar(&dbSpfileParams, "db-spfile-params", "", "Custom SPFILE parameters as name=value|name=value (empty=skip C-026; values may include quotes, e.g. date_format='yyyy-mm-dd hh24:mi:ss')")
 	dbCmd.Flags().StringVar(&dbYasbootGenExtraArgs, "yasboot-gen-extra-args", "", "Extra arguments appended to yasboot package se gen / package ce gen (space-separated)")
 	dbCmd.Flags().StringVar(&dbYasbootDeployExtraArgs, "yasboot-deploy-extra-args", "", "Extra arguments appended to yasboot cluster deploy (space-separated)")
+	dbCmd.Flags().BoolVar(&dbEnablePluggable, "db-enable-pluggable", false, "Deploy as CDB (multitenant); passes --enable-pluggable-database to yasboot package se/ce gen (mutually exclusive with --db-mode mysql)")
+	dbCmd.Flags().StringSliceVar(&dbPDBSpecs, "db-pdb", nil, "PDB to create after install (repeatable). Bare name or key=value. Short keys: name,user,password,datafile,size,file_convert,compat,archivelog,open. Official aliases: admin_user,admin_password,tablespace_datafile,tablespace_size,compat_mode,file_name_convert,file_convert_from,file_convert_to")
 
 	// YAC 网络参数
 	dbCmd.Flags().StringVar(&yacInterCIDR, "yac-inter-cidr", "", "YAC inter-connect CIDR (required for YAC)")
@@ -123,7 +129,7 @@ func init() {
 	dbCmd.Flags().BoolVar(&yacAutoDiscoverDisks, "yac-auto-discover-disks", false,
 		"Auto-discover YAC disk groups from /dev/yfs when --skip-os (default: true if --skip-os is set)")
 	dbCmd.Flags().StringVar(&yacDiscoverRoot, "yac-discover-root", "/dev/yfs",
-		"Root directory for C-001B udev disk discovery (default: /dev/yfs)")
+		"Root directory for C-001 udev disk discovery when --skip-os (default: /dev/yfs)")
 	dbCmd.Flags().BoolVar(&yacDiscoverFallbackMapper, "yac-discover-fallback-mapper", true,
 		"When /dev/yfs is empty, discover sys*/data* under /dev/mapper")
 	dbCmd.Flags().BoolVar(&yacEnsureOSPassword, "yac-ensure-os-password", true,
@@ -191,6 +197,22 @@ func runDB(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--db-mode mysql is not supported for YAC cluster installation (yasboot package ce gen does not accept --mode mysql)")
 	}
 
+	if dbEnablePluggable && dbMode == "mysql" {
+		return fmt.Errorf("--db-enable-pluggable is mutually exclusive with --db-mode mysql (use compat=mysql on --db-pdb instead)")
+	}
+
+	if len(dbPDBSpecs) > 0 {
+		dbEnablePluggable = true
+		if _, err := dbsteps.ParsePDBSpecs(dbPDBSpecs); err != nil {
+			return fmt.Errorf("invalid --db-pdb: %w", err)
+		}
+	}
+	if dbEnablePluggable && strings.TrimSpace(dbPackage) != "" {
+		if err := dbsteps.ValidateMultitenantDBPackage(dbPackage); err != nil {
+			return err
+		}
+	}
+
 	// 校验必填参数
 	if dbSysPassword == "" && !flags.DryRun && !flags.Precheck {
 		return fmt.Errorf("--db-sys-password is required for database creation")
@@ -201,7 +223,7 @@ func runDB(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--os-user-password is required for yasboot gen-config (SSH password of product user)")
 	}
 
-	// --skip-os 时默认开启 C-001B udev 磁盘发现（除非用户显式改过 flag）
+	// --skip-os 时默认开启 C-001 内 udev 磁盘发现（除非用户显式改过 flag）
 	if dbSkipOS && !cmd.Flags().Changed("yac-auto-discover-disks") {
 		yacAutoDiscoverDisks = true
 	}
@@ -215,7 +237,7 @@ func runDB(cmd *cobra.Command, args []string) error {
 					"        or run without --skip-os to use OS step B-021 auto discovery,\n" +
 					"        or pass --yac-systemdg and --yac-datadg explicitly")
 			}
-			// --skip-os=false：OS 步骤中的 B-021 会自动发现磁盘；skip-os + auto-discover：C-001B
+			// --skip-os=false：OS 步骤中的 B-021 会自动发现磁盘；skip-os + auto-discover：C-001
 		}
 		// SCAN 模式的 scanname 解析在下方构建 params 之后进行
 	}
@@ -242,6 +264,12 @@ func runDB(cmd *cobra.Command, args []string) error {
 		logger.Info("DB mode: (empty)")
 	} else {
 		logger.Info("DB mode: %s", dbMode)
+	}
+	if dbEnablePluggable {
+		logger.Info("Multitenant: CDB enabled (--enable-pluggable-database)")
+		if len(dbPDBSpecs) > 0 {
+			logger.Info("PDB specs: %d", len(dbPDBSpecs))
+		}
 	}
 
 	if isYACMode {
@@ -403,14 +431,13 @@ func runDB(cmd *cobra.Command, args []string) error {
 		logger.Info("======== Phase 2: Executing steps ========")
 	}
 
-	// 构建 hostExecs 供 C-001、C-009-VIP、C-013-SCAN 等全局预检查使用
+	// 构建 hostExecs 供 C-001 全局预检查使用
 	hostExecs := make([]dbsteps.HostExec, 0, len(hostInfos))
 	for _, info := range hostInfos {
 		hostExecs = append(hostExecs, dbsteps.HostExec{Host: info.Host, Executor: &c001ExecAdapter{e: &runnerExecAdapter{e: info.Executor}}})
 	}
 
-	// C-001 作为全局预检只运行一次（网络 + 单机策略 + YAC UID/GID + 各节点共享盘）。
-	// 合并 OS 步骤时列表首项常为 B-021 而非 C-001，故只要计划中包含 C-001 即执行全局预检，并去掉第一个 C-001 占位步骤以免重复。
+	// C-001 作为全局预检只运行一次（连通性 + YAC 网段/密码/磁盘发现等，合并为单一步骤 ID）。
 	var stepsToRun []*runner.Step
 	if len(otherSteps) > 0 && stepsContainID(otherSteps, "C-001") {
 		(&runner.StepContext{
@@ -418,7 +445,7 @@ func runDB(cmd *cobra.Command, args []string) error {
 			Params:        params,
 			CurrentStepID: "C-001",
 		}).LogPhase("plan", fmt.Sprintf("global-precheck hosts=%d yac=%v", len(hostExecs), isYACMode))
-		if err := dbsteps.RunConnectivityAndYACPrecheck(hostExecs, params, logger, isYACMode); err != nil {
+		if err := dbsteps.RunC001FullPrecheck(hostExecs, params, logger, isYACMode, dbSkipOS, flags.Precheck, flags.DryRun); err != nil {
 			if flags.Precheck {
 				pc := &runner.StepContext{Logger: logger, Params: params, Results: make(map[string]interface{}), Precheck: flags.Precheck}
 				pc.ReportPrecheckIssue(runner.PrecheckIssue{
@@ -436,137 +463,11 @@ func runDB(cmd *cobra.Command, args []string) error {
 			}
 		} else {
 			(&runner.StepContext{Logger: logger, CurrentStepID: "C-001"}).LogPhase("op-done", "global-connectivity-precheck")
-			logger.Info("C-001: global connectivity/YAC precheck completed (placeholder step C-001 is not repeated in the numbered list below)")
+			logger.Info("C-001: global precheck completed (placeholder step C-001 is not repeated in the numbered list below)")
 		}
 		stepsToRun = removeFirstStepWithID(otherSteps, "C-001")
 	} else {
 		stepsToRun = otherSteps
-	}
-
-	// C-001A：在 VIP/SCAN 之前做网段 CIDR 校验与自动探测
-	if isYACMode {
-		if err := dbsteps.RunNetworkValidation(hostExecs, params, logger); err != nil {
-			if flags.Precheck {
-				pc := &runner.StepContext{Logger: logger, Params: params, Results: make(map[string]interface{}), Precheck: flags.Precheck}
-				pc.ReportPrecheckIssue(runner.PrecheckIssue{
-					StepID:   "C-001A",
-					StepName: "Network validation",
-					Severity: runner.PrecheckSeverityError,
-					Code:     "PC.DB.C001A",
-					Message:  err.Error(),
-				})
-			} else {
-				for _, info := range hostInfos {
-					info.Executor.Close()
-				}
-				return fmt.Errorf("C-001A network validation failed: %w", err)
-			}
-		}
-	}
-
-	// C-001P：YAC 产品用户密码校验；错误时按 --os-user-password 自动改密（需 root/sudo）
-	if isYACMode && !flags.DryRun {
-		if err := dbsteps.RunYACProductUserPasswordEnsure(hostExecs, params, logger, flags.Precheck); err != nil {
-			if flags.Precheck {
-				pc := &runner.StepContext{Logger: logger, Params: params, Results: make(map[string]interface{}), Precheck: flags.Precheck}
-				pc.ReportPrecheckIssue(runner.PrecheckIssue{
-					StepID:   "C-001P",
-					StepName: "Ensure product user password",
-					Severity: runner.PrecheckSeverityError,
-					Code:     "PC.DB.C001P",
-					Message:  err.Error(),
-				})
-			} else {
-				for _, info := range hostInfos {
-					info.Executor.Close()
-				}
-				return fmt.Errorf("C-001P product user password ensure failed: %w", err)
-			}
-		}
-	}
-
-	// C-001B：skip-os 时从 /dev/yfs（或 mapper）发现 diskgroup
-	if isYACMode && dbSkipOS {
-		if err := dbsteps.RunYACUdevDiskDiscovery(hostExecs, params, logger); err != nil {
-			if flags.Precheck {
-				pc := &runner.StepContext{Logger: logger, Params: params, Results: make(map[string]interface{}), Precheck: flags.Precheck}
-				pc.ReportPrecheckIssue(runner.PrecheckIssue{
-					StepID:   "C-001B",
-					StepName: "YAC udev disk discovery",
-					Severity: runner.PrecheckSeverityError,
-					Code:     "PC.DB.C001B",
-					Message:  err.Error(),
-				})
-			} else {
-				for _, info := range hostInfos {
-					info.Executor.Close()
-				}
-				return fmt.Errorf("C-001B udev disk discovery failed: %w", err)
-			}
-		}
-	}
-
-	// C-009-VIP：vip/scan 模式执行；direct 模式跳过 VIP
-	if isYACMode && dbsteps.YACAccessModeRequiresVIP(yacAccessMode) {
-		if err := dbsteps.RunVIPValidationOrAutoGenerate(hostExecs, params, logger); err != nil {
-			if flags.Precheck {
-				pc := &runner.StepContext{Logger: logger, Params: params, Results: make(map[string]interface{}), Precheck: flags.Precheck}
-				pc.ReportPrecheckIssue(runner.PrecheckIssue{
-					StepID:   "C-009-VIP",
-					StepName: "VIP validation",
-					Severity: runner.PrecheckSeverityError,
-					Code:     "PC.DB.C009",
-					Message:  err.Error(),
-				})
-			} else {
-				for _, info := range hostInfos {
-					info.Executor.Close()
-				}
-				return fmt.Errorf("C-009-VIP VIP check failed: %w", err)
-			}
-		}
-	}
-
-	// C-013-SCAN runs once when YAC scan mode（与步骤 C-013 SCAN 名解析对应）
-	if isYACMode && yacAccessMode == "scan" {
-		scanMode, _ := params["yac_scan_mode"].(string)
-		if scanMode == "local" {
-			if err := dbsteps.RunScanIPAllocation(hostExecs, params, logger); err != nil {
-				if flags.Precheck {
-					pc := &runner.StepContext{Logger: logger, Params: params, Results: make(map[string]interface{}), Precheck: flags.Precheck}
-					pc.ReportPrecheckIssue(runner.PrecheckIssue{
-						StepID:   "C-013-SCAN",
-						StepName: "Local SCAN IP allocation",
-						Severity: runner.PrecheckSeverityError,
-						Code:     "PC.DB.C013.LOCAL",
-						Message:  err.Error(),
-					})
-				} else {
-					for _, info := range hostInfos {
-						info.Executor.Close()
-					}
-					return fmt.Errorf("C-013-SCAN local SCAN IP allocation failed: %w", err)
-				}
-			}
-		} else {
-			if err := dbsteps.RunScanNameResolveAndSubnetCheck(hostExecs, params, logger); err != nil {
-				if flags.Precheck {
-					pc := &runner.StepContext{Logger: logger, Params: params, Results: make(map[string]interface{}), Precheck: flags.Precheck}
-					pc.ReportPrecheckIssue(runner.PrecheckIssue{
-						StepID:   "C-013-SCAN",
-						StepName: "SCAN name resolve and subnet check",
-						Severity: runner.PrecheckSeverityError,
-						Code:     "PC.DB.C013.DNS",
-						Message:  err.Error(),
-					})
-				} else {
-					for _, info := range hostInfos {
-						info.Executor.Close()
-					}
-					return fmt.Errorf("C-013-SCAN SCAN name check failed: %w", err)
-				}
-			}
-		}
 	}
 
 	// 分离 OS 步骤和 DB 步骤
@@ -727,6 +628,8 @@ func buildDBParams(isYACMode bool, targetCount int) map[string]interface{} {
 	params["db_spfile_params"] = dbSpfileParams
 	params[dbsteps.ParamYasbootGenExtraArgs] = dbYasbootGenExtraArgs
 	params[dbsteps.ParamYasbootDeployExtraArgs] = dbYasbootDeployExtraArgs
+	params["db_enable_pluggable"] = dbEnablePluggable
+	params["db_pdb_specs"] = dbPDBSpecs
 
 	// YAC 网络相关参数
 	params["yac_inter_cidr"] = yacInterCIDR

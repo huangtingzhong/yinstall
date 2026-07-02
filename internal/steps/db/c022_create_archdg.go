@@ -8,10 +8,10 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC023CreateArchDG 部署完成后创建独立的归档磁盘组（ArchDG）
-func StepC023CreateArchDG() *runner.Step {
+// StepC022CreateArchDG 部署完成后创建独立的归档磁盘组（ArchDG）
+func StepC022CreateArchDG() *runner.Step {
 	return &runner.Step{
-		ID:          "C-023",
+		ID:          "C-022",
 		Name:        "Create Archive Diskgroup",
 		Description: "Create independent archive diskgroup on shared storage (optional)",
 		Tags:        []string{"db", "yac", "archdg"},

@@ -57,7 +57,7 @@ func RunNetworkValidation(hosts []HostExec, params map[string]interface{}, logge
 	}
 
 	firstHost := hosts[0].Host
-	logger.ConsoleWithType("C-001A", "Network CIDR Validation", firstHost, "start", "", "", 0)
+	logger.ConsoleWithType("C-001", "Network CIDR Validation", firstHost, "start", "", "", 0)
 	logger.Info("Running network CIDR validation and auto-detection...")
 
 	publicNetwork := getParamString(params, "yac_public_network", "")
@@ -79,7 +79,7 @@ func RunNetworkValidation(hosts []HostExec, params map[string]interface{}, logge
 	params["yac_inter_cidr"] = detectedInter
 	logger.Info("Inter-connect CIDR: %s", detectedInter)
 
-	logger.ConsoleWithType("C-001A", "Network CIDR Validation", firstHost, "success", "",
+	logger.ConsoleWithType("C-001", "Network CIDR Validation", firstHost, "success", "",
 		fmt.Sprintf("public=%s inter=%s", detectedPublic, detectedInter), time.Duration(0))
 	return nil
 }

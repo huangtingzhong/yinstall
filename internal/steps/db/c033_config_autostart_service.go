@@ -7,17 +7,17 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StepC028ConfigAutostartService 配置 systemd 服务以实现数据库开机自启
-func StepC028ConfigAutostartService() *runner.Step {
+// StepC033ConfigAutostartService 配置 systemd 服务以实现数据库开机自启
+func StepC033ConfigAutostartService() *runner.Step {
 	return &runner.Step{
-		ID:          "C-028",
+		ID:          "C-033",
 		Name:        "Configure Autostart Service",
 		Description: "Create and enable systemd service for database autostart",
 		Tags:        []string{"db", "autostart", "systemd"},
 		Optional:    true,
 
 		PreCheck: func(ctx *runner.StepContext) error {
-			if err := commonos.PrivilegedAccessSkipError(ctx, "database autostart service (C-028)"); err != nil {
+			if err := commonos.PrivilegedAccessSkipError(ctx, "database autostart service (C-033)"); err != nil {
 				return err
 			}
 			for _, th := range ctx.HostsToRun() {
@@ -27,14 +27,14 @@ func StepC028ConfigAutostartService() *runner.Step {
 				}
 				result, _ := hctx.Execute(fmt.Sprintf("test -x %s", commonos.ScriptPath), false)
 				if result == nil || result.GetExitCode() != 0 {
-					return runner.SkipPrecheckDryRunWhenUpstreamArtifactMissing(ctx, fmt.Errorf("yashan_monit.sh not found or not executable on %s, run C-027 first", th.Host))
+					return runner.SkipPrecheckDryRunWhenUpstreamArtifactMissing(ctx, fmt.Errorf("yashan_monit.sh not found or not executable on %s, run C-032 first", th.Host))
 				}
 			}
 			return nil
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			dbLogPhase(ctx, "plan", "C-028: Configure Autostart Service")
+			dbLogPhase(ctx, "plan", "C-033: Configure Autostart Service")
 			for _, th := range ctx.HostsToRun() {
 				hctx := ctx.ForHost(th)
 				beginPort := hctx.GetParamInt("db_begin_port", 1688)

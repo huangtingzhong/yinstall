@@ -1,5 +1,5 @@
 // r025_db_autostart.go - 数据库自启动配置采集（可选）
-// YashanDB 自启动通过 yashan_monit.sh + systemd 实现（C-028 步骤创建）：
+// YashanDB 自启动通过 yashan_monit.sh + systemd 实现（C-033 步骤创建）：
 //   - 单实例：service=yashan_monit，arg=bashrc
 //   - 多实例：service=yashan_monit_<port>，arg=<port>
 //   - 脚本位置：/usr/local/bin/yashan_monit.sh（与 commonos.ScriptPath 一致）
@@ -26,7 +26,7 @@ func StepR025DBAutostartArchDG() *runner.Step {
 		Action: func(ctx *runner.StepContext) error {
 			dir := filepath.Join(collectHostDir(ctx), "db", "autostart")
 
-			// 确定服务名候选列表（与 C-028 / commonos.DetermineServiceName 一致）
+			// 确定服务名候选列表（与 C-033 / commonos.DetermineServiceName 一致）
 			beginPort := ctx.GetParamInt("db_begin_port", 1688)
 			yasdbCount := commonos.GetYasdbProcessCount(ctx)
 			singleService, _ := commonos.DetermineServiceName(yasdbCount, beginPort)

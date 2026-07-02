@@ -22,7 +22,24 @@ func OutputContainsYasError(output string) bool {
 	return yasErrorCodePattern.MatchString(output)
 }
 
-func errIfYasqlOutputHasError(r *YasqlResult) error {
+// YasqlErrPDBAlreadyOpen is returned when ALTER OPEN runs against an already-open PDB.
+const YasqlErrPDBAlreadyOpen = "YAS-02882"
+
+func ignoreYasCodesSet(codes []string) map[string]bool {
+	if len(codes) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(codes))
+	for _, c := range codes {
+		c = strings.TrimSpace(c)
+		if c != "" {
+			out[c] = true
+		}
+	}
+	return out
+}
+
+func errIfYasqlOutputHasError(r *YasqlResult, ignoreCodes map[string]bool) error {
 	if r == nil {
 		return nil
 	}
@@ -31,6 +48,9 @@ func errIfYasqlOutputHasError(r *YasqlResult) error {
 		return nil
 	}
 	code := yasErrorCodePattern.FindString(combined)
+	if code != "" && ignoreCodes != nil && ignoreCodes[code] {
+		return nil
+	}
 	if code == "" {
 		code = "YAS-NNNNN"
 	}
@@ -63,10 +83,15 @@ func ReportSQLFailure(ctx *runner.StepContext, cmd string, r *YasqlResult) {
 
 // ValidateYasqlResultSuccess 校验 yasql 结果：先检查 YAS-NNNNN，再检查退出码（供直连 ctx.Execute yasql 的路径统一使用）。
 func ValidateYasqlResultSuccess(r *YasqlResult) error {
+	return ValidateYasqlResultSuccessIgnore(r)
+}
+
+// ValidateYasqlResultSuccessIgnore 校验 yasql 结果，ignoreYasCodes 中的 YAS 错误码视为可忽略。
+func ValidateYasqlResultSuccessIgnore(r *YasqlResult, ignoreYasCodes ...string) error {
 	if r == nil {
 		return fmt.Errorf("yasql result is nil")
 	}
-	if err := errIfYasqlOutputHasError(r); err != nil {
+	if err := errIfYasqlOutputHasError(r, ignoreYasCodesSet(ignoreYasCodes)); err != nil {
 		return err
 	}
 	if !r.Success || r.ExitCode != 0 {
@@ -106,7 +131,7 @@ func buildYasqlConnArg(cfg *YasqlConfig) (string, error) {
 	return "", fmt.Errorf("either AsSysdba=true or User/Password must be provided")
 }
 
-func yasqlResultFromExec(result runner.ExecResult, execErr error) (*YasqlResult, error) {
+func yasqlResultFromExec(result runner.ExecResult, execErr error, ignoreYasCodes ...string) (*YasqlResult, error) {
 	yasqlResult := &YasqlResult{Success: false}
 	if result != nil {
 		yasqlResult.Stdout = result.GetStdout()
@@ -117,7 +142,7 @@ func yasqlResultFromExec(result runner.ExecResult, execErr error) (*YasqlResult,
 	if execErr != nil {
 		return yasqlResult, fmt.Errorf("failed to execute yasql: %w", execErr)
 	}
-	if err := ValidateYasqlResultSuccess(yasqlResult); err != nil {
+	if err := ValidateYasqlResultSuccessIgnore(yasqlResult, ignoreYasCodes...); err != nil {
 		yasqlResult.Success = false
 		return yasqlResult, err
 	}
@@ -153,9 +178,15 @@ func executeYasqlViaRemoteFile(ctx *runner.StepContext, cfg *YasqlConfig, sql st
 	}
 	remoteQ := commonos.ShellSingleQuote(remotePath)
 
-	connStr, err := buildYasqlConnArg(cfg)
-	if err != nil {
-		return nil, err
+	var connStr string
+	if s := strings.TrimSpace(cfg.ConnectString); s != "" {
+		connStr = s
+	} else {
+		var err error
+		connStr, err = buildYasqlConnArg(cfg)
+		if err != nil {
+			return nil, err
+		}
 	}
 	yasqlBin := "yasql"
 	if cfg.Silent {
@@ -171,7 +202,7 @@ func executeYasqlViaRemoteFile(ctx *runner.StepContext, cfg *YasqlConfig, sql st
 		result, execErr = commonos.ExecuteAsUser(ctx, cfg.OSUser, yasqlCmd, cfg.ShowOutput)
 	}
 	_, _ = ctx.Execute(fmt.Sprintf("rm -f %s", remoteQ), false)
-	return yasqlResultFromExec(result, execErr)
+	return yasqlResultFromExec(result, execErr, cfg.IgnoreYasErrorCodes...)
 }
 
 // ExecuteSQLAsSysdbaInstallLayoutCtx 使用安装目录布局执行 sysdba SQL（远端 -f），并进行退出码与 YAS-NNNNN 校验。
@@ -211,15 +242,17 @@ func ExecuteSQLAsSysdbaInstallLayoutCtx(ctx *runner.StepContext, osUser, install
 
 // YasqlConfig yasql 执行配置
 type YasqlConfig struct {
-	User        string // 数据库用户，如 sys
-	Password    string // 数据库密码
-	ClusterName string // 集群名称
-	AsSysdba    bool   // 是否使用 as sysdba 连接
-	OSUser      string // 操作系统用户（执行 yasql 命令的用户）
-	EnvFile     string // 环境变量文件路径
-	Silent      bool   // 是否静默模式 (-s)
-	Quiet       bool   // 是否安静模式 (-q，不显示 banner）
-	ShowOutput  bool   // 是否显示命令输出
+	User                string   // 数据库用户，如 sys
+	Password            string   // 数据库密码
+	ClusterName         string   // 集群名称
+	ConnectString       string   // 若非空，直接作为 yasql 连接串（如 sys/pass@host:1888/PDB1）
+	IgnoreYasErrorCodes []string // 校验输出时忽略的 YAS-NNNNN 错误码（如 PDB 已 OPEN 时的 YAS-02882）
+	AsSysdba            bool     // 是否使用 as sysdba 连接
+	OSUser              string   // 操作系统用户（执行 yasql 命令的用户）
+	EnvFile             string   // 环境变量文件路径
+	Silent              bool     // 是否静默模式 (-s)
+	Quiet               bool     // 是否安静模式 (-q，不显示 banner）
+	ShowOutput          bool     // 是否显示命令输出
 }
 
 // YasqlResult yasql 执行结果
@@ -291,7 +324,117 @@ func ExecuteSQLAsSysdba(ctx *runner.StepContext, osUser, envFile, clusterName, s
 //   - YasqlResult: 执行结果
 //   - error: 错误信息
 func ExecuteSQLAsSysdbaCtx(ctx *runner.StepContext, osUser, envFile, clusterName, sql string, showOutput bool) (*YasqlResult, error) {
-	return ExecuteSQLAsSysdba(ctx, osUser, envFile, clusterName, sql, showOutput)
+	return ExecuteSQLAsSysdbaCtxIgnore(ctx, osUser, envFile, clusterName, sql, showOutput)
+}
+
+// ExecuteSQLAsSysdbaCtxIgnore 以 sysdba 执行 SQL，ignoreYasCodes 中的 YAS 错误码视为可忽略。
+func ExecuteSQLAsSysdbaCtxIgnore(ctx *runner.StepContext, osUser, envFile, clusterName, sql string, showOutput bool, ignoreYasCodes ...string) (*YasqlResult, error) {
+	cfg := &YasqlConfig{
+		ClusterName:         clusterName,
+		AsSysdba:            true,
+		OSUser:              osUser,
+		EnvFile:             envFile,
+		Quiet:               true,
+		Silent:              true,
+		ShowOutput:          showOutput,
+		IgnoreYasErrorCodes: ignoreYasCodes,
+	}
+	return ExecuteSQL(ctx, cfg, sql)
+}
+
+// YasqlConnectHost 返回 yasql TCP 连接用的 host（YAC VIP/SCAN 优先，否则当前执行节点 IP）。
+func YasqlConnectHost(ctx *runner.StepContext) string {
+	if ctx == nil {
+		return ""
+	}
+	isYAC := ctx.GetParamBool("yac_mode", false) || len(ctx.TargetHosts) > 1
+	accessMode := strings.ToLower(strings.TrimSpace(ctx.GetParamString("yac_access_mode", "vip")))
+
+	if isYAC && accessMode != "direct" {
+		if accessMode == "scan" {
+			for _, ip := range ctx.GetParamStringSlice("yac_scan_ips_list") {
+				if h := strings.TrimSpace(ip); h != "" {
+					return h
+				}
+			}
+		}
+		for _, ip := range ctx.GetParamStringSlice("yac_vips") {
+			if h := strings.TrimSpace(ip); h != "" {
+				return h
+			}
+		}
+	}
+
+	if ctx.Executor != nil {
+		if h := strings.TrimSpace(ctx.Executor.Host()); h != "" && !strings.EqualFold(h, "local") {
+			return h
+		}
+	}
+	for _, ip := range ctx.GetParamStringSlice("target_ips") {
+		if h := strings.TrimSpace(ip); h != "" {
+			return h
+		}
+	}
+	return ""
+}
+
+// WrapSQLForPDBContainer prefixes SQL with ALTER SESSION SET CONTAINER for execution in a PDB.
+//
+// Deprecated: YashanDB 不支持 ALTER SESSION SET CONTAINER；请用 ExecuteSQLAsSysdbaInPDBCtx（TCP 连 PDB）。
+func WrapSQLForPDBContainer(pdbName, sql string) string {
+	id := strings.TrimSpace(pdbName)
+	body := strings.TrimSpace(sql)
+	if body != "" && !strings.HasSuffix(body, ";") {
+		body += ";"
+	}
+	if body == "" {
+		return fmt.Sprintf("ALTER SESSION SET CONTAINER = %s;", sqlPDBIdentifier(id))
+	}
+	return fmt.Sprintf("ALTER SESSION SET CONTAINER = %s;\n%s", sqlPDBIdentifier(id), body)
+}
+
+func sqlPDBIdentifier(name string) string {
+	name = strings.TrimSpace(name)
+	if matched, _ := regexp.MatchString(`^[A-Za-z_][A-Za-z0-9_$#]*$`, name); matched {
+		return name
+	}
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+// ExecuteSQLAsSysdbaInPDBCtx runs SQL in the given PDB via sys@host:port/pdbName TCP 连接。
+func ExecuteSQLAsSysdbaInPDBCtx(ctx *runner.StepContext, osUser, envFile, clusterName, pdbName, sql string, showOutput bool) (*YasqlResult, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("step context is required")
+	}
+	password := ctx.GetParamString("db_admin_password", "")
+	if password == "" {
+		return nil, fmt.Errorf("db_admin_password is required for PDB SQL execution")
+	}
+	port := ctx.GetParamInt("db_begin_port", 1688)
+	connectStr := BuildYasqlTCPConnect(YasqlConnectHost(ctx), "sys", password, port, pdbName)
+	cfg := &YasqlConfig{
+		ConnectString: connectStr,
+		OSUser:        osUser,
+		EnvFile:       envFile,
+		Quiet:         true,
+		Silent:        true,
+		ShowOutput:    showOutput,
+	}
+	return ExecuteSQL(ctx, cfg, sql)
+}
+
+// BuildYasqlTCPConnect builds user/pass@host:port/service for yasql -f script execution.
+func BuildYasqlTCPConnect(host, user, password string, port int, service string) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	return fmt.Sprintf("%s/%s@%s:%d/%s", user, commonos.YasqlQuotePassword(password), host, port, service)
+}
+
+// BuildYasqlLocalTCPConnect builds user/pass@localhost:port/service (prefer BuildYasqlTCPConnect with target host).
+func BuildYasqlLocalTCPConnect(user, password string, port int, service string) string {
+	return BuildYasqlTCPConnect("localhost", user, password, port, service)
 }
 
 // QueryParameter 查询数据库参数（便捷函数）
@@ -335,14 +478,11 @@ func QueryParameter(ctx *runner.StepContext, osUser, envFile, clusterName, param
 	return "", fmt.Errorf("parameter %s not found or has no value", paramName)
 }
 
+// yasqlTwoColumnRowPattern matches yasql fixed-width two-column result rows (e.g. V$PDBS NAME/STATUS).
+var yasqlTwoColumnRowPattern = regexp.MustCompile(`^(\S+(?:\$\S+)?)\s+(\S+)\s*$`)
+
 // ParseYasqlOutput 解析 yasql 输出为键值对
-// 适用于查询结果为两列（name, value）的场景
-//
-// 参数：
-//   - output: yasql 输出
-//
-// 返回：
-//   - map[string]string: 键值对映射
+// 适用于查询结果为两列（name, value 或 name, status）的场景；支持 | 分隔与空格对齐两种格式。
 func ParseYasqlOutput(output string) map[string]string {
 	result := make(map[string]string)
 	lines := strings.Split(output, "\n")
@@ -354,7 +494,10 @@ func ParseYasqlOutput(output string) map[string]string {
 		}
 		// 跳过表头和分隔线
 		if strings.Contains(line, "---") ||
-			strings.Contains(strings.ToLower(line), "name") && strings.Contains(strings.ToLower(line), "value") {
+			(strings.Contains(strings.ToLower(line), "name") && (strings.Contains(strings.ToLower(line), "value") || strings.Contains(strings.ToLower(line), "status"))) {
+			continue
+		}
+		if strings.Contains(strings.ToLower(line), "rows fetched") {
 			continue
 		}
 
@@ -366,6 +509,12 @@ func ParseYasqlOutput(output string) map[string]string {
 			if key != "" && value != "" && !strings.EqualFold(value, "null") {
 				result[key] = value
 			}
+			continue
+		}
+
+		// 解析空格对齐两列（V$PDBS 等）
+		if m := yasqlTwoColumnRowPattern.FindStringSubmatch(line); len(m) == 3 {
+			result[m[1]] = m[2]
 		}
 	}
 

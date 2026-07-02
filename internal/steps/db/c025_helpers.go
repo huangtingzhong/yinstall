@@ -8,13 +8,13 @@ import (
 )
 
 const (
-	c031SQLProfile           = "ALTER PROFILE default LIMIT failed_login_attempts UNLIMITED"
-	c031SQLDateFormat        = "ALTER SYSTEM SET date_format='yyyy-mm-dd hh24:mi:ss' SCOPE=SPFILE"
-	c031ResultProfileSkipped = "c031_profile_skipped"
+	c025SQLProfile           = "ALTER PROFILE default LIMIT failed_login_attempts UNLIMITED"
+	c025SQLDateFormat        = "ALTER SYSTEM SET date_format='yyyy-mm-dd hh24:mi:ss' SCOPE=SPFILE"
+	c025ResultProfileSkipped = "c025_profile_skipped"
 )
 
-// isC031ProfileAlterSkippable 判断 ALTER PROFILE 是否因 MASTER 容器无法修改 local object 而可跳过。
-func isC031ProfileAlterSkippable(err error, res *commonsql.YasqlResult) bool {
+// isC025ProfileAlterSkippable 判断 ALTER PROFILE 是否因 MASTER 容器无法修改 local object 而可跳过。
+func isC025ProfileAlterSkippable(err error, res *commonsql.YasqlResult) bool {
 	var b strings.Builder
 	if err != nil {
 		b.WriteString(err.Error())
@@ -35,14 +35,14 @@ func isC031ProfileAlterSkippable(err error, res *commonsql.YasqlResult) bool {
 	return false
 }
 
-func shouldSkipC031ProfilePostCheck(ctx *runner.StepContext) bool {
+func shouldSkipC025ProfilePostCheck(ctx *runner.StepContext) bool {
 	if ctx == nil {
 		return false
 	}
 	if StepContextHasEnableBranch(ctx) {
 		return true
 	}
-	if v, ok := ctx.Results[c031ResultProfileSkipped].(bool); ok && v {
+	if v, ok := ctx.Results[c025ResultProfileSkipped].(bool); ok && v {
 		return true
 	}
 	return false

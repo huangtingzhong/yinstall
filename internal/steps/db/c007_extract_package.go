@@ -41,6 +41,9 @@ func StepC007ExtractPackage() *runner.Step {
 				// 将找到的包路径设置到参数中，供 Action 使用
 				ctx.Params["db_package"] = latestPkg
 			}
+			if err := ensureMultitenantPackageVersionCtx(ctx, "C-007"); err != nil {
+				return err
+			}
 			return nil
 		},
 

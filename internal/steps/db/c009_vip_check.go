@@ -33,7 +33,7 @@ func (a *pingExecutorAdapter) Execute(cmd string, sudo bool) (commonos.PingExecR
 	return &pingResultAdapter{r: r}, nil
 }
 
-// StepC009VIPCheck VIP 校验或自动生成步骤；实际逻辑由 RunVIPValidationOrAutoGenerate 在 db 命令中调用
+// StepC009VIPCheck VIP 校验或自动生成步骤（vip/scan 模式）
 func StepC009VIPCheck() *runner.Step {
 	return &runner.Step{
 		ID:          "C-009",
@@ -54,8 +54,13 @@ func StepC009VIPCheck() *runner.Step {
 
 		Action: func(ctx *runner.StepContext) error {
 			dbLogPhase(ctx, "plan", "C-009: Validate or Auto-Generate VIP")
-			// 实际校验/自动生成在 db.go 中通过 RunVIPValidationOrAutoGenerate 执行，此处仅占位
-			return nil
+			if !ctx.GetParamBool("yac_mode", false) {
+				return nil
+			}
+			if !YACAccessModeRequiresVIP(ctx.GetParamString("yac_access_mode", "vip")) {
+				return nil
+			}
+			return RunVIPValidationOrAutoGenerate(HostExecsFromStepContext(ctx), ctx.Params, ctx.Logger)
 		},
 
 		PostCheck: func(ctx *runner.StepContext) error {
@@ -75,7 +80,7 @@ func RunVIPValidationOrAutoGenerate(hosts []HostExec, params map[string]interfac
 	}
 
 	firstHost := hosts[0].Host
-	logger.ConsoleWithType("C-009-VIP", "Validate or Auto-Generate VIP", firstHost, "start", "", "", 0)
+	logger.ConsoleWithType("C-009", "Validate or Auto-Generate VIP", firstHost, "start", "", "", 0)
 	logger.Info("Running VIP validation or auto-generation...")
 
 	vips := getParamStringSliceFromParams(params, "yac_vips")
@@ -105,7 +110,7 @@ func RunVIPValidationOrAutoGenerate(hosts []HostExec, params map[string]interfac
 			}
 		}
 		logger.Info("VIP addresses validated: %v (not in use)", vips)
-		logger.ConsoleWithType("C-009-VIP", "Validate or Auto-Generate VIP", firstHost, "success", "", "", time.Duration(0))
+		logger.ConsoleWithType("C-009", "Validate or Auto-Generate VIP", firstHost, "success", "", "", time.Duration(0))
 		return nil
 	}
 
@@ -157,7 +162,7 @@ func RunVIPValidationOrAutoGenerate(hosts []HostExec, params map[string]interfac
 
 	params["yac_vips"] = generated
 	logger.Info("Auto-generated VIP addresses: %v", generated)
-	logger.ConsoleWithType("C-009-VIP", "Validate or Auto-Generate VIP", firstHost, "success", "", fmt.Sprintf("VIPs: %v", generated), time.Duration(0))
+	logger.ConsoleWithType("C-009", "Validate or Auto-Generate VIP", firstHost, "success", "", fmt.Sprintf("VIPs: %v", generated), time.Duration(0))
 	return nil
 }
 

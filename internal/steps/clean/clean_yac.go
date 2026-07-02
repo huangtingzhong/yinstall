@@ -75,7 +75,7 @@ func inferYASCSHome(ctx *runner.StepContext, dataRoot string) string {
 	return path.Join(ycsRoot, name)
 }
 
-// discoverYACDiskPathsFromYFS 单节点 / ycsctl 不可用时，从 /dev/yfs 枚举共享盘（与 db C-001B 一致）。
+// discoverYACDiskPathsFromYFS 单节点 / ycsctl 不可用时，从 /dev/yfs 枚举共享盘（与 db C-001 一致）。
 func discoverYACDiskPathsFromYFS(ctx *runner.StepContext, root string) ([]string, error) {
 	root = strings.TrimRight(strings.TrimSpace(root), "/")
 	if root == "" {

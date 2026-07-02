@@ -2,7 +2,9 @@
 
 面向 YashanDB 生态的 **自动化安装与运维编排 CLI**。在控制端（macOS/Linux）通过 SSH 在目标 Linux 主机上，按预定义步骤执行 OS 基线、数据库安装、主备扩容、YCM/YMP 部署、环境清理、诊断采集与 OS 压测。
 
-主程序名为 **`yinstall`**（早期版本曾用 `yasinstall`）。仓库目录名为 `yasinstaller`。
+**开源仓库**：[https://github.com/huangtingzhong/yinstall](https://github.com/huangtingzhong/yinstall)
+
+主程序名为 **`yinstall`**（早期版本曾用 `yasinstall`）。仓库目录名本地常为 `yasinstaller`，GitHub 仓库名为 `yinstall`。
 
 ---
 
@@ -28,6 +30,9 @@
 ## 构建
 
 ```bash
+git clone https://github.com/huangtingzhong/yinstall.git
+cd yinstall
+
 make build-current          # 当前平台 → build/yinstall_<os>_<arch>
 make build-all              # Linux / Windows / macOS 多架构
 ./build.sh --current        # 等同 make build-current
@@ -138,7 +143,8 @@ tmp/ scripts/          # 本地临时/脚本（不入库）
 
 | 路径 | 说明 |
 |------|------|
-| `docs/02-product/01-product-manual.md` | 产品说明书（参数、案例、步骤逻辑） |
+| `docs/02-product/01-product-manual.md` | 工具使用手册**总目录** |
+| `docs/02-product/01-overview.md` 等分册 | 概述、模块、YAC、案例、参数等（见总目录） |
 | `docs/02-product/02-step-logic.md` | 步骤 PreCheck/Action 参考 |
 | `docs/installer.md` | 开发者 API、Params、排障 |
 

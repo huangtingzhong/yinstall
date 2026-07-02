@@ -1,4 +1,4 @@
-// discover_yac_disks_udev.go — C-001B：db --skip-os 时从 /dev/yfs（或 mapper）发现 YAC 磁盘组
+// discover_yac_disks_udev.go — C-001：db --skip-os 时从 /dev/yfs（或 mapper）发现 YAC 磁盘组
 package db
 
 import (
@@ -36,7 +36,7 @@ type yacAliasLayout struct {
 	Arch []string
 }
 
-// ShouldRunYACUdevDiskDiscovery 判断是否执行 C-001B。
+// ShouldRunYACUdevDiskDiscovery 判断是否执行 C-001。
 func ShouldRunYACUdevDiskDiscovery(params map[string]interface{}) bool {
 	if !getParamBool(params, "yac_mode", false) {
 		return false
@@ -65,24 +65,24 @@ func RunYACUdevDiskDiscovery(hosts []HostExec, params map[string]interface{}, lo
 		return fmt.Errorf("YAC udev disk discovery requires at least one target host")
 	}
 	if !ShouldRunYACUdevDiskDiscovery(params) {
-		logger.Info("C-001B: skipped (disk groups configured or auto-discover disabled)")
+		logger.Info("C-001: skipped (disk groups configured or auto-discover disabled)")
 		return nil
 	}
 
 	firstHost := hosts[0].Host
-	logger.ConsoleWithType("C-001B", "YAC Udev Disk Discovery", firstHost, "start", "", "", 0)
+	logger.ConsoleWithType("C-001", "YAC Udev Disk Discovery", firstHost, "start", "", "", 0)
 
 	root := getParamString(params, "yac_discover_root", yfsDiscoverRootDefault)
 	fallbackMapper := getParamBool(params, "yac_discover_fallback_mapper", true)
 	archEnable := getParamBool(params, "yac_archdg_enable", false)
 	excludes := commonos.ParseYACExcludeDisks(getParamString(params, "yac_exclude_disks", ""))
 
-	logger.Info("C-001B: discovering YAC disk groups (root=%s fallback_mapper=%v)", root, fallbackMapper)
+	logger.Info("C-001: discovering YAC disk groups (root=%s fallback_mapper=%v)", root, fallbackMapper)
 	if len(excludes) > 0 {
-		logger.Info("C-001B: exclude disks: %v", excludes)
+		logger.Info("C-001: exclude disks: %v", excludes)
 	}
 	logger.Debug(logging.LogEntry{
-		Host: firstHost, StepID: "C-001B", Level: "debug",
+		Host: firstHost, StepID: "C-001", Level: "debug",
 		Phase:   "discover-plan",
 		Message: fmt.Sprintf("hosts=%d root=%s arch_enable=%v excludes=%d", len(hosts), root, archEnable, len(excludes)),
 	})
@@ -132,7 +132,7 @@ func RunYACUdevDiskDiscovery(hosts []HostExec, params map[string]interface{}, lo
 		params["yac_archdg"] = archdg
 	}
 
-	logger.Info("C-001B discovery results:")
+	logger.Info("C-001 discovery results:")
 	logger.Info("  %s", systemdg)
 	logger.Info("  %s", datadg)
 	if archdg != "" {
@@ -140,12 +140,12 @@ func RunYACUdevDiskDiscovery(hosts []HostExec, params map[string]interface{}, lo
 	}
 
 	logger.Debug(logging.LogEntry{
-		Host: firstHost, StepID: "C-001B", Level: "debug",
+		Host: firstHost, StepID: "C-001", Level: "debug",
 		Phase:   "discover-done",
 		Message: fmt.Sprintf("systemdg_paths=%d datadg_paths=%d", len(ref.Sys), len(ref.Data)),
 	})
 
-	logger.ConsoleWithType("C-001B", "YAC Udev Disk Discovery", firstHost, "success", "",
+	logger.ConsoleWithType("C-001", "YAC Udev Disk Discovery", firstHost, "success", "",
 		fmt.Sprintf("system=%d data=%d", len(ref.Sys), len(ref.Data)), time.Duration(0))
 	return nil
 }
