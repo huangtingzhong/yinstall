@@ -122,7 +122,7 @@ func ResolveRuleContent(rule *CollectRule) (string, error) {
 func ExecuteRule(ctx *runner.StepContext, rule *CollectRule, hostDir string) {
 	content, err := ResolveRuleContent(rule)
 	if err != nil {
-		appendWarning(ctx, "R-035", fmt.Sprintf("[%s] resolve content: %v", rule.ID, err))
+		appendWarning(ctx, fmt.Sprintf("[%s] resolve content: %v", rule.ID, err))
 		return
 	}
 
@@ -136,7 +136,7 @@ func ExecuteRule(ctx *runner.StepContext, rule *CollectRule, hostDir string) {
 	}
 	destPath := filepath.Join(baseDir, filepath.FromSlash(rule.Dest))
 	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
-		appendWarning(ctx, "R-035", fmt.Sprintf("[%s] mkdir %s: %v", rule.ID, filepath.Dir(destPath), err))
+		appendWarning(ctx, fmt.Sprintf("[%s] mkdir %s: %v", rule.ID, filepath.Dir(destPath), err))
 		return
 	}
 
@@ -160,7 +160,7 @@ func ExecuteRule(ctx *runner.StepContext, rule *CollectRule, hostDir string) {
 	case "shell":
 		output, execErr = executeRuleShell(ctx, rule, content, timeout)
 	default:
-		appendWarning(ctx, "R-035", fmt.Sprintf("[%s] unknown rule type: %s", rule.ID, rule.Type))
+		appendWarning(ctx, fmt.Sprintf("[%s] unknown rule type: %s", rule.ID, rule.Type))
 		collectLogPhase(ctx, "rule-fail", fmt.Sprintf("id=%s err=unknown type %s", rule.ID, rule.Type))
 		return
 	}
@@ -173,7 +173,7 @@ func ExecuteRule(ctx *runner.StepContext, rule *CollectRule, hostDir string) {
 	}
 
 	if err := writeTextFile(destPath, output); err != nil {
-		appendWarning(ctx, "R-035", fmt.Sprintf("[%s] write %s: %v", rule.ID, destPath, err))
+		appendWarning(ctx, fmt.Sprintf("[%s] write %s: %v", rule.ID, destPath, err))
 	}
 }
 
@@ -188,7 +188,7 @@ func executeRuleSQL(ctx *runner.StepContext, rule *CollectRule, sql string, time
 	osUser := getCollectOSUser(ctx)
 	out, err := collectRunSQL(ctx, osUser, envFile, sql, timeout)
 	if err != nil {
-		appendWarning(ctx, "R-035", fmt.Sprintf("[%s] SQL failed: %v", rule.ID, err))
+		appendWarning(ctx, fmt.Sprintf("[%s] SQL failed: %v", rule.ID, err))
 	}
 	return out, err
 }
@@ -216,7 +216,7 @@ func executeRuleShell(ctx *runner.StepContext, rule *CollectRule, script string,
 	}
 
 	if err != nil {
-		appendWarning(ctx, "R-035", fmt.Sprintf("[%s] shell failed: %v", rule.ID, err))
+		appendWarning(ctx, fmt.Sprintf("[%s] shell failed: %v", rule.ID, err))
 	}
 	return out, err
 }

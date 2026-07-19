@@ -97,7 +97,7 @@ func truncateCmdForLog(cmd string) string {
 
 // collectLogPhase 写入结构化 debug 里程碑（仅 debug 文件，不进终端）。
 func collectLogPhase(ctx *runner.StepContext, phase, msg string) {
-	ctx.LogPhase(phase, msg)
+	ctx.LogPhase(phase, runner.StepMsg(ctx, msg))
 }
 
 // collectOutputStats 返回 stdout 体量摘要（字节数、行数），用于 op-done / query-done 等。
@@ -134,11 +134,11 @@ func collectDestLabel(ctx *runner.StepContext, destPath string) string {
 	return filepath.Base(destPath)
 }
 
-func warnCommandTimeout(ctx *runner.StepContext, stepID, cmd string, timeout time.Duration, exitCode int) {
+func warnCommandTimeout(ctx *runner.StepContext, cmd string, timeout time.Duration, exitCode int) {
 	if timeout <= 0 || !isCollectTimeoutExit(exitCode) {
 		return
 	}
-	appendWarning(ctx, stepID, fmt.Sprintf("command timed out after %ds: %s", int(timeout.Seconds()), truncateCmdForLog(cmd)))
+	appendWarning(ctx, fmt.Sprintf("command timed out after %ds: %s", int(timeout.Seconds()), truncateCmdForLog(cmd)))
 }
 
 // contextualExecutor 由 collectExecAdapter（internal/cli/collect.go）实现。
@@ -149,7 +149,7 @@ type contextualExecutor interface {
 }
 
 // collectExecute 执行远端命令；timeout>0 时通过 SSH session 超时（方案D）控制最长执行时间。
-// 始终写入 LogCommandStart/LogCommandResult，避免长命令执行期间 debug 无记录。
+// SSH/Local 实时写 debug；未挂接流式时事后 LogCommandResult。
 func collectExecute(ctx *runner.StepContext, cmd string, sudo bool, timeout time.Duration) (runner.ExecResult, error) {
 	if ctx == nil || ctx.Executor == nil {
 		return nil, fmt.Errorf("executor not available")
@@ -159,6 +159,7 @@ func collectExecute(ctx *runner.StepContext, cmd string, sudo bool, timeout time
 	if ctx.Logger != nil {
 		ctx.Logger.LogCommandStart(host, stepID, cmd)
 	}
+	finish := runner.BindCommandDebugStream(ctx.Executor, ctx.Logger, host, stepID)
 	start := time.Now()
 
 	var result runner.ExecResult
@@ -175,17 +176,9 @@ func collectExecute(ctx *runner.StepContext, cmd string, sudo bool, timeout time
 		result, err = ctx.Executor.Execute(cmd, sudo)
 	}
 
-	if ctx.Logger != nil {
-		dur := time.Since(start)
-		if result != nil {
-			ctx.Logger.LogCommandResult(host, stepID,
-				result.GetStdout(), result.GetStderr(), result.GetExitCode(), dur)
-		} else if err != nil {
-			ctx.Logger.LogCommandResult(host, stepID, "", err.Error(), -1, dur)
-		}
-	}
+	finish(result, err, time.Since(start))
 	if result != nil && timeout > 0 && isCollectTimeoutExit(result.GetExitCode()) {
-		warnCommandTimeout(ctx, ctx.CurrentStepID, cmd, timeout, result.GetExitCode())
+		warnCommandTimeout(ctx, cmd, timeout, result.GetExitCode())
 	}
 	return result, err
 }
@@ -367,7 +360,7 @@ func runAndSaveWithTimeout(ctx *runner.StepContext, cmd string, destPath string,
 			stderr = strings.TrimSpace(result.GetStderr())
 		}
 		msg := fmt.Sprintf("cmd=%q exit=%d stderr=%s", cmd, exitCode, stderr)
-		appendWarning(ctx, ctx.CurrentStepID, msg)
+		appendWarning(ctx, msg)
 		collectLogPhase(ctx, "op-fail",
 			fmt.Sprintf("dest=%s exit=%d %s err=%s", dest, exitCode, stats, stderr))
 	} else if timedOut {
@@ -411,7 +404,7 @@ func runAndSaveAsUser(ctx *runner.StepContext, osUser, envFile, cmd, destPath st
 			stderr = strings.TrimSpace(result.GetStderr())
 		}
 		msg := fmt.Sprintf("cmd=%q exit=%d stderr=%s", cmd, exitCode, stderr)
-		appendWarning(ctx, ctx.CurrentStepID, msg)
+		appendWarning(ctx, msg)
 		collectLogPhase(ctx, "op-fail",
 			fmt.Sprintf("dest=%s exit=%d %s err=%s", dest, exitCode, stats, stderr))
 	} else if timedOut {
@@ -440,7 +433,8 @@ const (
 )
 
 // appendError 向 ctx.Results[collect_errors] 追加一条结构化错误记录。
-func appendError(ctx *runner.StepContext, stepID, msg string) {
+func appendError(ctx *runner.StepContext, msg string) {
+	stepID := ctx.CurrentStepID
 	entry := map[string]string{"step": stepID, "level": "error", "message": msg}
 	existing, _ := ctx.Results[keyCollectErrors].([]map[string]string)
 	ctx.Results[keyCollectErrors] = append(existing, entry)
@@ -448,7 +442,8 @@ func appendError(ctx *runner.StepContext, stepID, msg string) {
 }
 
 // appendWarning 向 ctx.Results[collect_warnings] 追加一条结构化警告记录。
-func appendWarning(ctx *runner.StepContext, stepID, msg string) {
+func appendWarning(ctx *runner.StepContext, msg string) {
+	stepID := ctx.CurrentStepID
 	entry := map[string]string{"step": stepID, "level": "warning", "message": msg}
 	existing, _ := ctx.Results[keyCollectWarnings].([]map[string]string)
 	ctx.Results[keyCollectWarnings] = append(existing, entry)

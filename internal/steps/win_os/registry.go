@@ -5,62 +5,65 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-func allStepConstructors() []func() *runner.Step {
-	return []func() *runner.Step{
-		StepW001WindowsPlatformDetect,
-		StepW003TimezoneW32Time,
-		StepW004WindowsFirewall,
-		StepW005RemoteManagement,
-		StepW006PrepareDataVolume,
-		StepW007PagefileLPIM,
-		StepW008ServiceAccountPrep,
-		StepW009OSPrerequisites,
-		StepW010AntivirusExclusions,
-		StepW013PowerPlan,
-		StepW014SPNVerifyRegister,
-		StepW012OSBaselineVerify,
+func winStepEntries() []runner.StepEntry {
+	return []runner.StepEntry{
+		{New: stepPlatformDetect},
+		{New: stepTimezoneW32time},
+		{New: stepWindowsFirewall},
+		{New: stepRemoteManagement},
+		{New: stepPrepareDataVolume},
+		{New: stepPagefileLpim},
+		{New: stepServiceAccountPrep},
+		{New: stepPrerequisites},
+		{New: stepAntivirusExclusions},
+		{New: stepPowerPlan},
+		{New: stepSpnVerifyRegister},
+		{New: stepBaselineVerify},
 	}
 }
 
-// GetAllSteps returns all Windows OS steps in execution order.
+// GetAllSteps returns all Windows OS steps in execution order (W-001..W-NNN).
 func GetAllSteps() []*runner.Step {
-	out := make([]*runner.Step, 0, len(allStepConstructors()))
-	for _, fn := range allStepConstructors() {
-		out = append(out, fn())
+	return runner.BuildSteps(runner.StepSpec{
+		Prefix:  "W",
+		Entries: winStepEntries(),
+	})
+}
+
+func isPostInstanceStep(s *runner.Step) bool {
+	if s == nil {
+		return false
 	}
-	return out
-}
-
-var preInstanceIDs = map[string]bool{
-	"W-001": true, "W-003": true, "W-004": true, "W-005": true,
-	"W-006": true, "W-007": true, "W-008": true, "W-009": true, "W-010": true,
-	"W-013": true,
-}
-
-var postInstanceIDs = map[string]bool{
-	"W-014": true, "W-012": true,
-}
-
-func filterByIDs(steps []*runner.Step, ids map[string]bool) []*runner.Step {
-	var out []*runner.Step
-	for _, s := range steps {
-		if ids[s.ID] {
-			out = append(out, s)
+	for _, t := range s.Tags {
+		if t == "post-instance" {
+			return true
 		}
 	}
-	return out
+	return s.Name == "SPN Verify Register" || s.Name == "OS Baseline Verify"
 }
 
 // GetPreInstanceSteps returns W-* steps to run before SQL instance setup.
 func GetPreInstanceSteps(profile commonwin.Profile) []*runner.Step {
-	steps := filterByIDs(GetAllSteps(), preInstanceIDs)
-	return commonwin.FilterSteps(steps, profile)
+	all := GetAllSteps()
+	var pre []*runner.Step
+	for _, s := range all {
+		if !isPostInstanceStep(s) {
+			pre = append(pre, s)
+		}
+	}
+	return commonwin.FilterSteps(pre, profile)
 }
 
 // GetPostInstanceSteps returns W-* steps after SQL instance setup.
 func GetPostInstanceSteps(profile commonwin.Profile) []*runner.Step {
-	steps := filterByIDs(GetAllSteps(), postInstanceIDs)
-	return commonwin.FilterSteps(steps, profile)
+	all := GetAllSteps()
+	var post []*runner.Step
+	for _, s := range all {
+		if isPostInstanceStep(s) {
+			post = append(post, s)
+		}
+	}
+	return commonwin.FilterSteps(post, profile)
 }
 
 // GetStepsForProfile returns filtered steps for a product profile.

@@ -1,4 +1,4 @@
-.PHONY: all clean build-all build-linux build-windows build-darwin build-current help
+.PHONY: all clean build-all build-linux build-windows build-darwin build-current help check-debug-logging check-test-layout check-steps
 
 # Project information
 BINARY_NAME=yinstall
@@ -29,11 +29,19 @@ help:
 	@echo "  make build-current  - Build for current platform only"
 	@echo "  make clean          - Remove build directory"
 	@echo "  make check-debug-logging - Static check for install-step debug patterns"
+	@echo "  make check-test-layout   - Fail if *_test.go outside test/go/ (except legacy allowlist)"
+	@echo "  make check-steps         - Validate registry step IDs (no hardcoded Step.ID)"
 	@echo ""
 	@echo "Output directory: $(BUILD_DIR)/"
 
 check-debug-logging:
 	@bash scripts/check-debug-logging.sh
+
+check-test-layout:
+	@bash scripts/check-test-layout.sh
+
+check-steps:
+	@bash scripts/check-steps.sh
 
 update-version:
 	@echo "Updating version information..."

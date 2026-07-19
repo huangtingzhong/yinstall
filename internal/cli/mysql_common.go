@@ -128,7 +128,7 @@ func buildMysqlAllSteps(skipOS bool) []*runner.Step {
 // mysqlStepCatalog returns B-001 + (Linux B-* or W-* catalog) + M-* for filtering and -l.
 func mysqlStepCatalog(skipOS bool) []*runner.Step {
 	var all []*runner.Step
-	all = append(all, ossteps.StepB001CheckConnectivity())
+	all = append(all, ossteps.StepCheckConnectivity())
 	if !skipOS {
 		all = append(all, winsteps.GetPreInstanceSteps(commonwin.ProfileMySQL())...)
 		all = append(all, filterOSStepsForMySQL(ossteps.GetAllSteps())...)
@@ -151,7 +151,7 @@ func filterOSStepsForMySQL(steps []*runner.Step) []*runner.Step {
 
 func isMySQLExcludedOSStep(id string) bool {
 	switch id {
-	case "B-006", "B-011", "B-013", "B-014", "B-015", "B-016":
+	case "B-006", "B-011", "B-016":
 		return true
 	case "B-023":
 		return false
@@ -168,7 +168,7 @@ func isMySQLExcludedOSStep(id string) bool {
 func splitMysqlSteps(steps []*runner.Step) (b001, m001 *runner.Step, winOSSteps, winOSPostSteps, osSteps, mysqlSteps []*runner.Step) {
 	for _, s := range steps {
 		switch s.ID {
-		case "B-001":
+		case ossteps.FirstStepID():
 			b001 = s
 		case "M-001":
 			m001 = s

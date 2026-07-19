@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/yinstall/internal/logging"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -30,7 +29,7 @@ func RemoteMySQLAddress(host string, port int) string {
 	return fmt.Sprintf("%s:%d", host, port)
 }
 
-// DisplayRootPassword returns root password for terminal summary (respects log redact).
+// DisplayRootPassword returns root password for terminal summary.
 func DisplayRootPassword(ctx *runner.StepContext) string {
 	if ctx == nil {
 		return ""
@@ -38,9 +37,6 @@ func DisplayRootPassword(ctx *runner.StepContext) string {
 	pwd := strings.TrimSpace(ctx.GetParamString("mysql_root_password", ""))
 	if pwd == "" {
 		return "(not configured)"
-	}
-	if logging.RedactSensitive() {
-		return "***REDACTED***"
 	}
 	return pwd
 }
@@ -53,9 +49,6 @@ func DisplayReplicationPassword(ctx *runner.StepContext) string {
 	pwd := strings.TrimSpace(ctx.GetParamString("rep_password", ""))
 	if pwd == "" {
 		return "(not configured)"
-	}
-	if logging.RedactSensitive() {
-		return "***REDACTED***"
 	}
 	return pwd
 }

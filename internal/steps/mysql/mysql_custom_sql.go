@@ -1,0 +1,33 @@
+package mysql
+
+import (
+	"fmt"
+
+	commonsql "github.com/yinstall/internal/common/sql"
+	"github.com/yinstall/internal/runner"
+)
+
+// stepCustomSql runs optional custom SQL script.
+func stepCustomSql() *runner.Step {
+	return &runner.Step{
+		Name:        "Execute Custom SQL",
+		Description: "Run user-provided SQL script",
+		Tags:        []string{"mysql", "sql", "mysql-instance"},
+		Optional:    true,
+		PreCheck: func(ctx *runner.StepContext) error {
+			if ctx.GetParamString("mysql_custom_sql_script", "") == "" {
+				return fmt.Errorf("mysql_custom_sql_script not set")
+			}
+			return nil
+		},
+		Action: func(ctx *runner.StepContext) error {
+			layout, _ := layoutFromCtx(ctx)
+			script := ctx.GetParamString("mysql_custom_sql_script", "")
+			password := ctx.GetParamString("mysql_root_password", "")
+			if err := commonsql.ExecuteMysqlScript(ctx, layout, password, script); err != nil {
+				return err
+			}
+			return printMysqlInstallSummary(ctx, ctx.CurrentStepID)
+		},
+	}
+}

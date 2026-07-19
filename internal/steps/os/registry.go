@@ -1,49 +1,79 @@
 package os
 
-import (
-	"github.com/yinstall/internal/runner"
-)
+import "github.com/yinstall/internal/runner"
 
-// GetAllSteps 返回全部 OS 基线 steps（执行顺序即切片顺序）
+// GetAllSteps 返回全部 OS 基线 steps（ID 由 BuildSteps 自动赋 B-001..B-NNN）。
 func GetAllSteps() []*runner.Step {
-	return []*runner.Step{
-		StepB001CheckConnectivity(),
-		StepB002CreateGroup(),
-		StepB003CreateUser(),
-		StepB004SetUserPassword(),
-		StepB005ConfigureSudoers(),
-		StepB006ConfigureUmask(),
-		StepB007SetTimezone(),
-		StepB008WriteSysctlConfig(),
-		StepB009ApplySysctl(),
-		StepB010WriteLimitsConfig(),
-		StepB011ConfigureHugepages(),
-		StepB012WriteKernelArgs(),
-		StepB013MountISO(),
-		StepB014WriteYumRepo(),
-		StepB015InstallDeps(),
-		StepB016ConfigureChrony(),
-		StepB017DisableFirewall(),
-		StepB018OpenFirewallPorts(),
-		StepB019RebootCheck(),
-		// 本地磁盘/目录准备
-		StepB020SetupLocalDisk(),
-		// YAC 自动发现共享盘（未配置 diskgroups 时先于 B-022 执行）
-		StepB021AutoDiscoverSharedDisks(),
-		// YAC diskgroup 校验（须先于 multipath 相关步骤）
-		// B-022 检测到非多路径磁盘时会自动设置 yac_multipath_enable=true
-		StepB022ValidateYACDiskgroups(),
-		// 主机名配置
-		StepB023SetHostname(),
-		// YAC multipath 相关（按需执行；B-022 可自动打开）
-		StepB024InstallMultipath(),
-		StepB025CollectWWID(),
-		StepB026WriteMultipathConf(),
-		StepB027EnableMultipathd(),
-		StepB028VerifyMultipath(),
-		StepB029WriteUdevRules(),
-		StepB030TriggerUdev(),
-		StepB031VerifyDiskPermissions(),
-		StepB032ConfigureSELinux(),
+	return runner.BuildSteps(runner.StepSpec{
+		Prefix: "B",
+		Entries: []runner.StepEntry{
+			{New: stepCheckConnectivity},
+			{New: stepCreateGroup},
+			{New: stepCreateUser},
+			{New: stepSetPassword},
+			{New: stepConfigureSudoers},
+			{New: stepConfigureUmask},
+			{New: stepSetTimezone},
+			{New: stepWriteSysctl},
+			{New: stepApplySysctl},
+			{New: stepWriteLimits},
+			{New: stepConfigureHugepages},
+			{New: stepKernelArgs},
+			{New: stepMountIso},
+			{New: stepWriteYumRepo},
+			{New: stepInstallDeps},
+			{New: stepConfigureChrony},
+			{New: stepDisableFirewall},
+			{New: stepOpenFirewallPorts},
+			{New: stepRebootCheck},
+			{New: stepSetupLocalDisk},
+			{New: stepAutoDiscoverSharedDisks},
+			{New: stepValidateYacDiskgroups},
+			{New: stepSetHostname},
+			{New: stepInstallMultipath},
+			{New: stepCollectWwid},
+			{New: stepWriteMultipathConf},
+			{New: stepEnableMultipathd},
+			{New: stepVerifyMultipath},
+			{New: stepWriteUdevRules},
+			{New: stepTriggerUdev},
+			{New: stepVerifyDiskPermissions},
+			{New: stepConfigureSelinux},
+		},
+	})
+}
+
+// StepCheckConnectivity 供 collect/stress 等域包装复用的连通性步骤（ID 由调用方 registry 赋值）。
+func StepCheckConnectivity() *runner.Step {
+	return stepCheckConnectivity()
+}
+
+// FirstStepID returns B-001 (or first registry step ID).
+func FirstStepID() string {
+	return runner.FirstStepID(GetAllSteps(), "B")
+}
+
+// StepsByName returns steps whose Name matches any of the given names, in registry order.
+func StepsByName(names ...string) []*runner.Step {
+	want := make(map[string]bool, len(names))
+	for _, n := range names {
+		want[n] = true
 	}
+	var out []*runner.Step
+	for _, s := range GetAllSteps() {
+		if s != nil && want[s.Name] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// StepIDByName returns the registry ID for a step Name.
+func StepIDByName(name string) string {
+	return runner.StepIDByName(GetAllSteps(), name)
+}
+
+// StepSetHostname is exported for cross-package reuse (mysql write hosts).
+func StepSetHostname() *runner.Step {
+	return stepSetHostname()
 }

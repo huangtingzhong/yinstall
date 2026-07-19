@@ -4,20 +4,15 @@ import (
 	"fmt"
 	"path"
 	"strings"
-	"time"
 
 	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
 // buildFindYashanDBProcessPSCmd 构造 ps|grep，仅匹配当前清理目标相关进程：
-// - 使用 grep -F 固定串 + 路径末尾 /，避免 yasdb_home 匹配到 yasdb_home_2788；
-// - 使用 ~/.yasboot/<cluster>_yasdb_home/ 匹配 monit 等，不用裸 cluster 名（避免 yashandb 匹配 yashandb_2788）。
+// - PathMatchLiteralsForPS：尾 / 前缀 + 父目录/实例叶子，覆盖真实二进制路径与 -D/-L 无尾 /；
+// - ~/.yasboot/<cluster>_yasdb_home/ 与 -c <cluster> 固定串，避免误伤其它实例。
 func buildFindYashanDBProcessPSCmd(ctx *runner.StepContext, yasdbHome, yasdbData, yasdbLog, osUser, clusterName string, awkPrintPid bool) string {
-	homePat := PathLiteralPrefixForPS(yasdbHome)
-	dataPat := PathLiteralPrefixForPS(yasdbData)
-	logPat := PathLiteralPrefixForPS(yasdbLog)
-
 	u := strings.TrimSpace(osUser)
 	if u == "" {
 		u = "yashan"
@@ -26,21 +21,36 @@ func buildFindYashanDBProcessPSCmd(ctx *runner.StepContext, yasdbHome, yasdbData
 	if err != nil {
 		userHome = path.Join("/home", u)
 	}
-	yasbootPat := PathLiteralPrefixForPS(path.Join(userHome, ".yasboot", clusterName+"_yasdb_home"))
 
 	var grepFe []string
-	for _, pat := range []string{homePat, dataPat, logPat, yasbootPat} {
-		if pat == "" {
-			continue
+	addPats := func(p string) {
+		for _, pat := range PathMatchLiteralsForPS(p) {
+			grepFe = append(grepFe, "-e "+commonos.ShellSingleQuote(pat))
 		}
-		grepFe = append(grepFe, "-e "+commonos.ShellSingleQuote(pat))
 	}
+	addPats(yasdbHome)
+	addPats(yasdbData)
+	addPats(yasdbLog)
+	addPats(path.Join(userHome, ".yasboot", clusterName+"_yasdb_home"))
 	if alt, ok := ctx.Results[resultKeyCleanAltYasdbHome].(string); ok && strings.TrimSpace(alt) != "" {
-		if altPat := PathLiteralPrefixForPS(alt); altPat != "" {
-			grepFe = append(grepFe, "-e "+commonos.ShellSingleQuote(altPat))
-		}
+		addPats(alt)
+	}
+	if link, ok := ctx.Results[resultKeyCleanYasbootHomeLink].(string); ok && strings.TrimSpace(link) != "" {
+		addPats(link)
+	}
+	// CLI 数据根（sourced 可能是 .../db-1-1）
+	if paramData := strings.TrimSpace(ctx.GetParamString("yasdb_data", "")); paramData != "" {
+		addPats(paramData)
 	}
 	grepFe = appendYACPathPatterns(ctx, grepFe, yasdbData)
+
+	cn := strings.TrimSpace(clusterName)
+	if cn != "" {
+		// 空格定界，避免 yashandb 误匹配 yashandb_3788
+		grepFe = append(grepFe, "-e "+commonos.ShellSingleQuote(" -c "+cn+" "))
+		grepFe = append(grepFe, "-e "+commonos.ShellSingleQuote(" -c "+cn))
+	}
+
 	if len(grepFe) == 0 {
 		return `false`
 	}
@@ -54,6 +64,75 @@ func buildFindYashanDBProcessPSCmd(ctx *runner.StepContext, yasdbHome, yasdbData
 		return cmd + ` | awk '{print $2}'`
 	}
 	return cmd
+}
+
+// yasbootOMListenPorts 由 begin-port 推导 yasom/yasagent 监听端口（begin-13 / begin-12）。
+func yasbootOMListenPorts(beginPort int) (omPort, agentPort int) {
+	if beginPort <= 13 {
+		return 0, 0
+	}
+	return beginPort - 13, beginPort - 12
+}
+
+// collectCleanPIDs 合并多条 ps 查找命令的 PID（去重、去空）。
+func collectCleanPIDs(ctx *runner.StepContext, cmds ...string) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, cmd := range cmds {
+		cmd = strings.TrimSpace(cmd)
+		if cmd == "" || cmd == "false" {
+			continue
+		}
+		result, _ := ctx.Execute(cmd, false)
+		if result == nil || strings.TrimSpace(result.GetStdout()) == "" {
+			continue
+		}
+		for _, pid := range strings.Split(strings.TrimSpace(result.GetStdout()), "\n") {
+			pid = strings.TrimSpace(pid)
+			if pid == "" {
+				continue
+			}
+			if _, ok := seen[pid]; ok {
+				continue
+			}
+			seen[pid] = struct{}{}
+			out = append(out, pid)
+		}
+	}
+	return out
+}
+
+// buildFindYashanDBProcessByBeginPortPSCmd 按 begin-port 对应的 OM/DB 监听串匹配残留 yasom/yasagent/yasdb。
+// 覆盖 env 已删、仅剩 --init OM 的场景（path/-c 可能匹配不到）。
+// 默认端口 1688 禁用端口匹配，避免误杀现网 HA。
+func buildFindYashanDBProcessByBeginPortPSCmd(ctx *runner.StepContext, beginPort int, awkPrintPid bool) string {
+	if beginPort <= 0 || beginPort == 1688 {
+		return `false`
+	}
+	omPort, agentPort := yasbootOMListenPorts(beginPort)
+	if omPort == 0 {
+		return `false`
+	}
+	cmd := fmt.Sprintf(
+		`ps -ef | grep -E '%s' | grep -E %s | grep -v grep | grep -v yinstall`,
+		cleanDBProcessNamePattern(ctx),
+		commonos.ShellSingleQuote(fmt.Sprintf(":%d|:%d|:%d", omPort, agentPort, beginPort)),
+	)
+	if awkPrintPid {
+		return cmd + ` | awk '{print $2}'`
+	}
+	return cmd
+}
+
+// stopCleanDBSystemdUnit 停用并禁用 yashan_monit_<port>（仅非默认端口，避免误动 1688 HA）。
+func stopCleanDBSystemdUnit(ctx *runner.StepContext, beginPort int) {
+	if beginPort <= 0 || beginPort == 1688 {
+		return
+	}
+	unit := fmt.Sprintf("yashan_monit_%d", beginPort)
+	ctx.Logger.Info("Stopping systemd unit %s (if present)...", unit)
+	ctx.Execute(fmt.Sprintf("systemctl disable --now %s 2>/dev/null || true", commonos.ShellSingleQuote(unit)), true)
+	ctx.Execute(fmt.Sprintf("rm -f /etc/systemd/system/%s.service 2>/dev/null; systemctl daemon-reload 2>/dev/null || true", unit), true)
 }
 
 // buildFindMonitPSCmd 仅匹配当前集群 monit（其 -c 指向 ~/.yasboot/<cluster>_yasdb_home/.../monitrc），
@@ -102,7 +181,7 @@ func removeDir(ctx *runner.StepContext, path, label string) {
 	}
 }
 
-// removeCleanDBDirectoryTree 删除 sourced 的 HOME/DATA/LOG；YAC 时另删 CLI 级 data 根与 /data/.../yasdb_home 软件树。
+// removeCleanDBDirectoryTree 删除 sourced 的 HOME/DATA/LOG、stage 目录；YAC 时另删 CLI 级 data 根与 /data/.../yasdb_home 软件树。
 func removeCleanDBDirectoryTree(ctx *runner.StepContext) {
 	yasdbHome, yasdbData, yasdbLog, _, _, err := effectiveCleanDBPaths(ctx)
 	if err != nil {
@@ -112,6 +191,9 @@ func removeCleanDBDirectoryTree(ctx *runner.StepContext) {
 	removeDir(ctx, yasdbHome, "YASDB_HOME")
 	if alt, ok := ctx.Results[resultKeyCleanAltYasdbHome].(string); ok && strings.TrimSpace(alt) != "" {
 		removeDir(ctx, alt, "YASDB_HOME (install tree)")
+	}
+	if link, ok := ctx.Results[resultKeyCleanYasbootHomeLink].(string); ok && strings.TrimSpace(link) != "" {
+		removeDir(ctx, link, "YASDB_HOME (yasboot symlink)")
 	}
 	removeDir(ctx, yasdbData, "YASDB_DATA")
 	paramData := path.Clean(strings.ReplaceAll(ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data"), `\`, `/`))
@@ -123,6 +205,11 @@ func removeCleanDBDirectoryTree(ctx *runner.StepContext) {
 	}
 	removeDir(ctx, yasdbLog, "YASDB_LOG")
 	removeCleanYACExtraDirs(ctx)
+	if stageDir, err := resolveCleanDBStageDir(ctx); err != nil {
+		ctx.Logger.Warn("Skipping DB stage directory removal: %v", err)
+	} else {
+		removeDir(ctx, stageDir, "DB stage directory")
+	}
 }
 
 // verifyDirRemoved checks that a directory no longer exists
@@ -142,284 +229,5 @@ func verifyFileRemoved(ctx *runner.StepContext, path, label string) {
 		ctx.Logger.Warn("WARNING: %s still exists: %s", label, path)
 	} else {
 		ctx.Logger.Info("[OK] %s removed successfully", label)
-	}
-}
-
-// StepCleanDB Clean YashanDB installation
-func StepCleanDB() *runner.Step {
-	return &runner.Step{
-		ID:          "CLEAN-DB",
-		Name:        "Clean YashanDB",
-		Description: "Clean YashanDB installation by stopping processes and removing directories",
-		Tags:        []string{"clean", "db"},
-		// Optional: when nothing exists, treat as skip (no-op).
-		Optional: true,
-
-		PreCheck: func(ctx *runner.StepContext) error {
-			if err := prepareCleanDBEnv(ctx); err != nil {
-				return err
-			}
-			yasdbHome, yasdbData, yasdbLog, clusterName, _, err := effectiveCleanDBPaths(ctx)
-			if err != nil {
-				return err
-			}
-
-			ctx.Logger.Info("DB cleanup parameters (after source env validation):")
-			ctx.Logger.Info("  YASDB_HOME: %s", yasdbHome)
-			ctx.Logger.Info("  YASDB_DATA: %s", yasdbData)
-			ctx.Logger.Info("  YASDB_LOG: %s", yasdbLog)
-			ctx.Logger.Info("  Cluster Name: %s", clusterName)
-
-			// Validate paths are safe before proceeding
-			for _, p := range []struct{ name, path string }{
-				{"YASDB_HOME", yasdbHome},
-				{"YASDB_DATA", yasdbData},
-				{"YASDB_LOG", yasdbLog},
-			} {
-				if err := commonos.ValidateDeletePath(p.path); err != nil {
-					return fmt.Errorf("invalid delete path for %s: '%s': %w", p.name, p.path, err)
-				}
-			}
-
-			// Check if directories exist
-			ctx.Logger.Info("Checking if directories exist...")
-			var missingDirs []string
-			for _, p := range []struct{ name, path string }{
-				{"YASDB_HOME", yasdbHome},
-				{"YASDB_DATA", yasdbData},
-				{"YASDB_LOG", yasdbLog},
-			} {
-				result, _ := ctx.Execute(fmt.Sprintf("test -d %s", commonos.ShellSingleQuote(p.path)), false)
-				if result == nil || result.GetExitCode() != 0 {
-					ctx.Logger.Warn("Directory does not exist: %s (%s)", p.name, p.path)
-					missingDirs = append(missingDirs, fmt.Sprintf("%s (%s)", p.name, p.path))
-				} else {
-					ctx.Logger.Info("[OK] Directory exists: %s (%s)", p.name, p.path)
-				}
-			}
-
-			// If all directories are missing, skip cleanup
-			if len(missingDirs) == 3 {
-				ctx.Logger.Info("All YashanDB directories do not exist, skipping cleanup")
-				return fmt.Errorf("skip: all YashanDB directories do not exist")
-			}
-
-			// If some directories are missing, log warning but continue
-			if len(missingDirs) > 0 {
-				ctx.Logger.Warn("Some directories do not exist and will be skipped: %v", missingDirs)
-			}
-
-			return nil
-		},
-
-		Action: func(ctx *runner.StepContext) error {
-			yasdbHome, yasdbData, yasdbLog, clusterName, osUser, err := effectiveCleanDBPaths(ctx)
-			if err != nil {
-				return err
-			}
-
-			ctx.Logger.Info("Starting DB cleanup process (paths from sourced env)")
-
-			// 1. Find all YashanDB processes（固定串 + 路径尾 / + .yasboot/<cluster>_yasdb_home/，不误伤其他实例）
-			ctx.Logger.Info("Step 1: Finding YashanDB processes")
-			findProcessCmd := buildFindYashanDBProcessPSCmd(ctx, yasdbHome, yasdbData, yasdbLog, osUser, clusterName, true)
-			result, _ := ctx.Execute(findProcessCmd, false)
-
-			var pids []string
-			if result != nil && result.GetStdout() != "" {
-				pids = strings.Split(strings.TrimSpace(result.GetStdout()), "\n")
-				ctx.Logger.Info("Found %d processes to stop", len(pids))
-				for _, pid := range pids {
-					if strings.TrimSpace(pid) != "" {
-						ctx.Logger.Info("  PID: %s", pid)
-					}
-				}
-			} else {
-				ctx.Logger.Info("No YashanDB processes found")
-			}
-
-			// 2. Stop processes gracefully (SIGTERM)
-			if len(pids) > 0 {
-				ctx.Logger.Info("Step 2: Stopping processes gracefully (SIGTERM)")
-				for _, pid := range pids {
-					pid = strings.TrimSpace(pid)
-					if pid != "" {
-						ctx.Logger.Info("Sending SIGTERM to PID %s", pid)
-						ctx.Execute(fmt.Sprintf("kill -15 %s 2>/dev/null", pid), false)
-					}
-				}
-
-				ctx.Logger.Info("Waiting 5 seconds for processes to stop...")
-				time.Sleep(5 * time.Second)
-
-				// 3. Force kill remaining processes (SIGKILL)
-				ctx.Logger.Info("Step 3: Force killing remaining processes (SIGKILL)")
-				result, _ = ctx.Execute(findProcessCmd, false)
-				if result != nil && result.GetStdout() != "" {
-					remainingPids := strings.Split(strings.TrimSpace(result.GetStdout()), "\n")
-					for _, pid := range remainingPids {
-						pid = strings.TrimSpace(pid)
-						if pid != "" {
-							ctx.Logger.Info("Force killing PID %s", pid)
-							ctx.Execute(fmt.Sprintf("kill -9 %s 2>/dev/null", pid), false)
-						}
-					}
-					time.Sleep(2 * time.Second)
-				} else {
-					ctx.Logger.Info("All processes stopped gracefully")
-				}
-			}
-
-			// 4. Remove directories (with safety validation)
-			ctx.Logger.Info("Step 4: Removing directories")
-			removeCleanDBDirectoryTree(ctx)
-
-			// 5. Remove .yasboot files (use dynamic home directory lookup)
-			ctx.Logger.Info("Step 5: Removing .yasboot configuration files")
-
-			userHome, err := commonos.GetUserHomeDir(ctx, osUser)
-			if err != nil {
-				ctx.Logger.Warn("Cannot determine home directory for user %s, falling back to /home/%s", osUser, osUser)
-				userHome = fmt.Sprintf("/home/%s", osUser)
-			}
-			yasbootDir := fmt.Sprintf("%s/.yasboot", userHome)
-
-			envFile := fmt.Sprintf("%s/%s.env", yasbootDir, clusterName)
-			ctx.Logger.Info("Removing yasboot env file: %s", envFile)
-			if err := commonos.ValidateDeletePath(envFile); err != nil {
-				ctx.Logger.Warn("Skipping rm of env file: %v", err)
-			} else {
-				result, err = ctx.Execute(fmt.Sprintf("rm -f %s", commonos.ShellSingleQuote(envFile)), true)
-				if err != nil || (result != nil && result.GetExitCode() != 0) {
-					ctx.Logger.Warn("Failed to remove yasboot env file: %v", err)
-				} else {
-					ctx.Logger.Info("Yasboot env file removed successfully")
-				}
-			}
-
-			homeFile := fmt.Sprintf("%s/%s_yasdb_home", yasbootDir, clusterName)
-			ctx.Logger.Info("Removing yasboot home file: %s", homeFile)
-			if err := commonos.ValidateDeletePath(homeFile); err != nil {
-				ctx.Logger.Warn("Skipping rm of home file: %v", err)
-			} else {
-				result, err = ctx.Execute(fmt.Sprintf("rm -f %s", commonos.ShellSingleQuote(homeFile)), true)
-				if err != nil || (result != nil && result.GetExitCode() != 0) {
-					ctx.Logger.Warn("Failed to remove yasboot home file: %v", err)
-				} else {
-					ctx.Logger.Info("Yasboot home file removed successfully")
-				}
-			}
-
-			// 6. 清理 .bashrc 中该集群的环境变量条目
-			ctx.Logger.Info("Step 6: Cleaning up .bashrc environment entries for cluster '%s'", clusterName)
-			beginPort := ctx.GetParamInt("db_begin_port", 1688)
-			if cleanErr := commonos.CleanEnvVars(ctx, osUser, clusterName, yasdbData, beginPort); cleanErr != nil {
-				ctx.Logger.Warn("Failed to clean .bashrc entries: %v", cleanErr)
-			} else {
-				ctx.Logger.Info(".bashrc entries for cluster '%s' cleaned successfully", clusterName)
-			}
-
-			// 7. Final kill after directory removal
-			ctx.Logger.Info("Step 7: Final process cleanup after directory removal")
-			time.Sleep(2 * time.Second)
-			result, _ = ctx.Execute(findProcessCmd, false)
-			if result != nil && result.GetStdout() != "" {
-				remainingPids := strings.Split(strings.TrimSpace(result.GetStdout()), "\n")
-				var validPids []string
-				for _, pid := range remainingPids {
-					pid = strings.TrimSpace(pid)
-					if pid != "" {
-						validPids = append(validPids, pid)
-					}
-				}
-				if len(validPids) > 0 {
-					ctx.Logger.Info("Found %d processes after directory removal, force killing...", len(validPids))
-					for _, pid := range validPids {
-						ctx.Logger.Info("Force killing PID %s", pid)
-						ctx.Execute(fmt.Sprintf("kill -9 %s 2>/dev/null", pid), false)
-					}
-					time.Sleep(2 * time.Second)
-				} else {
-					ctx.Logger.Info("No processes found after directory removal")
-				}
-			} else {
-				ctx.Logger.Info("No processes found after directory removal")
-			}
-
-			ctx.Logger.Info("DB cleanup completed")
-			return nil
-		},
-
-		PostCheck: func(ctx *runner.StepContext) error {
-			yasdbHome, yasdbData, yasdbLog, clusterName, osUser, err := effectiveCleanDBPaths(ctx)
-			if err != nil {
-				return err
-			}
-
-			ctx.Logger.Info("Verifying cleanup results")
-
-			// 1. Check if processes still exist（与 Action 相同：精准路径 + .yasboot 目录，不含裸 cluster 名）
-			findProcessCmd := buildFindYashanDBProcessPSCmd(ctx, yasdbHome, yasdbData, yasdbLog, osUser, clusterName, false)
-			result, _ := ctx.Execute(findProcessCmd, false)
-
-			if result != nil && result.GetStdout() != "" {
-				ctx.Logger.Error("WARNING: Some processes are still running:")
-				ctx.Logger.Error("%s", result.GetStdout())
-				return fmt.Errorf("failed to stop all YashanDB processes")
-			} else {
-				ctx.Logger.Info("[OK] All processes stopped successfully")
-			}
-
-			// 2. Check if directories still exist（HOME/DATA 必须删净，否则备库扩容 yasboot host add 会报 path should be empty）
-			verifyPaths := []struct{ path, label string }{
-				{yasdbHome, "YASDB_HOME"},
-				{yasdbData, "YASDB_DATA"},
-			}
-			if alt, ok := ctx.Results[resultKeyCleanAltYasdbHome].(string); ok && strings.TrimSpace(alt) != "" {
-				verifyPaths = append(verifyPaths, struct{ path, label string }{alt, "YASDB_HOME (install tree)"})
-			}
-			for _, pair := range verifyPaths {
-				res, _ := ctx.Execute(fmt.Sprintf("test -d %s", commonos.ShellSingleQuote(pair.path)), false)
-				if res != nil && res.GetExitCode() == 0 {
-					return fmt.Errorf("cleanup incomplete: %s still exists at %s (rm may have failed or wrong path; check sudo/permissions and processes holding files)", pair.label, pair.path)
-				}
-				ctx.Logger.Info("[OK] %s removed: %s", pair.label, pair.path)
-			}
-			verifyDirRemoved(ctx, yasdbLog, "YASDB_LOG")
-
-			// 3. Check if .yasboot files still exist (use dynamic home directory)
-			userHome, err := commonos.GetUserHomeDir(ctx, osUser)
-			if err != nil {
-				userHome = fmt.Sprintf("/home/%s", osUser)
-			}
-			yasbootDir := fmt.Sprintf("%s/.yasboot", userHome)
-
-			envFile := fmt.Sprintf("%s/%s.env", yasbootDir, clusterName)
-			verifyFileRemoved(ctx, envFile, "Yasboot env file")
-
-			homeFile := fmt.Sprintf("%s/%s_yasdb_home", yasbootDir, clusterName)
-			verifyFileRemoved(ctx, homeFile, "Yasboot home file")
-
-			// 4. Check .bashrc no longer references this cluster
-			bashrc := fmt.Sprintf("%s/.bashrc", userHome)
-			needle := fmt.Sprintf("%s_yasdb_home", clusterName)
-			checkCmd := fmt.Sprintf(
-				"grep -cF %s %s 2>/dev/null || echo 0",
-				commonos.ShellSingleQuote(needle),
-				commonos.ShellSingleQuote(bashrc),
-			)
-			checkResult, _ := ctx.Execute(checkCmd, false)
-			if checkResult != nil {
-				count := strings.TrimSpace(checkResult.GetStdout())
-				if count == "0" {
-					ctx.Logger.Info("[OK] .bashrc no longer references cluster '%s'", clusterName)
-				} else {
-					ctx.Logger.Warn("WARNING: .bashrc still contains %s reference(s) to cluster '%s'", count, clusterName)
-				}
-			}
-
-			ctx.Logger.Info("Cleanup verification completed")
-			return nil
-		},
 	}
 }

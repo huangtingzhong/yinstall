@@ -7,31 +7,34 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// GetAllSteps returns MSSQL install steps MS-001..MS-020 in order.
+// GetAllSteps returns MSSQL install steps MS-001..MS-NNN in registry order.
 func GetAllSteps() []*runner.Step {
-	return []*runner.Step{
-		StepMS001PlatformTransportDetect(),
-		StepMS001RResolveInstance(),
-		StepMS002SQLInstallPreflight(),
-		StepMS003PortCheck(),
-		StepMS004ResolveSetupMedia(),
-		StepMS005PrepareDirectories(),
-		StepMS006DistributeSetupMedia(),
-		StepMS020WriteSetupSoftwareEnv(),
-		StepMS007GenerateConfigurationINI(),
-		StepMS008InstallInstance(),
-		StepMS009ConfigureTCPPort(),
-		StepMS010EnsureSQLServices(),
-		StepMS011ApplyCUSP(),
-		StepMS012ServiceAccount(),
-		StepMS013WriteSqlToolsEnv(),
-		StepMS014SetSAPassword(),
-		StepMS015RemoteSAAccess(),
-		StepMS018ConfigureMaxMemory(),
-		StepMS019WriteInstanceProfile(),
-		StepMS016VerifyInstallation(),
-		StepMS017CustomSQL(),
-	}
+	return runner.BuildSteps(runner.StepSpec{
+		Prefix: "MS",
+		Entries: []runner.StepEntry{
+			{New: stepPlatformTransportDetect},
+			{New: stepResolveInstance},
+			{New: stepSqlInstallPreflight},
+			{New: stepPortCheck},
+			{New: stepResolveSetupMedia},
+			{New: stepPrepareDirectories},
+			{New: stepDistributeSetupMedia},
+			{New: stepWriteSetupSoftwareEnv},
+			{New: stepGenerateConfigurationIni},
+			{New: stepInstallInstance},
+			{New: stepConfigureTcpPort},
+			{New: stepEnsureSqlServices},
+			{New: stepApplyCuSp},
+			{New: stepServiceAccount},
+			{New: stepWriteSqlToolsEnv},
+			{New: stepSetSaPassword},
+			{New: stepRemoteSaAccess},
+			{New: stepConfigureMaxMemory},
+			{New: stepWriteInstanceProfile},
+			{New: stepVerifyInstallation},
+			{New: stepCustomSql},
+		},
+	})
 }
 
 // GetInstallStepsForStage returns MS-* steps for embedded replica install.

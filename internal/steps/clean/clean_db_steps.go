@@ -14,7 +14,6 @@ import (
 // StepCleanDB001QueryYACDisks Query YAC disk information before cleanup
 func StepCleanDB001QueryYACDisks() *runner.Step {
 	return &runner.Step{
-		ID:          "CLEAN-DB-001",
 		Name:        "Query YAC Disk Information",
 		Description: "Query YAC shared disk information using ycsctl before cleanup",
 		Tags:        []string{"clean", "db", "yac", "disk", "query"},
@@ -95,13 +94,13 @@ func StepCleanDB001QueryYACDisks() *runner.Step {
 // StepCleanDB002StopProcesses Stop YashanDB processes
 func StepCleanDB002StopProcesses() *runner.Step {
 	return &runner.Step{
-		ID:          "CLEAN-DB-002",
 		Name:        "Stop YashanDB Processes",
 		Description: "Stop all YashanDB related processes",
 		Tags:        []string{"clean", "db", "process"},
 		Optional:    false,
 
 		PreCheck: func(ctx *runner.StepContext) error {
+			reportCleanStopImpact(ctx)
 			return nil
 		},
 
@@ -110,8 +109,12 @@ func StepCleanDB002StopProcesses() *runner.Step {
 			if err != nil {
 				return err
 			}
+			beginPort := ctx.GetParamInt("db_begin_port", 1688)
 
 			ctx.Logger.Info("Finding YashanDB processes (paths from sourced env)...")
+
+			// 0. 先停 systemd，避免 monit 拉起
+			stopCleanDBSystemdUnit(ctx, beginPort)
 
 			// 1. 先停止 monit 监控进程（防止自动重启）
 			ctx.Logger.Info("Step 1: Stopping monit monitoring process...")
@@ -131,71 +134,48 @@ func StepCleanDB002StopProcesses() *runner.Step {
 				ctx.Logger.Info("No monit process found")
 			}
 
-			// 2. 查找所有 YashanDB 进程（grep -F 固定路径前缀，不误伤 yasdb_home_2788 等）
+			// 2. 按 path/-c 与 begin-port（OM/DB 监听）合并查进程
 			ctx.Logger.Info("Step 2: Finding all YashanDB processes...")
 			findProcessCmd := buildFindYashanDBProcessPSCmd(ctx, yasdbHome, yasdbData, yasdbLog, osUser, clusterName, true)
-			result, _ = ctx.Execute(findProcessCmd, false)
-
-			var pids []string
-			if result != nil && result.GetStdout() != "" {
-				pids = strings.Split(strings.TrimSpace(result.GetStdout()), "\n")
+			findByPortCmd := buildFindYashanDBProcessByBeginPortPSCmd(ctx, beginPort, true)
+			pids := collectCleanPIDs(ctx, findProcessCmd, findByPortCmd)
+			if len(pids) == 0 {
+				ctx.Logger.Info("No YashanDB processes found")
+			} else {
 				ctx.Logger.Info("Found %d processes to stop", len(pids))
 				for _, pid := range pids {
-					if strings.TrimSpace(pid) != "" {
-						ctx.Logger.Info("  PID: %s", pid)
-					}
+					ctx.Logger.Info("  PID: %s", pid)
 				}
-			} else {
-				ctx.Logger.Info("No YashanDB processes found")
-				return nil
 			}
 
 			// 3. 优雅停止进程 (SIGTERM)
 			if len(pids) > 0 {
 				ctx.Logger.Info("Step 3: Stopping processes gracefully (SIGTERM)...")
 				for _, pid := range pids {
-					pid = strings.TrimSpace(pid)
-					if pid != "" {
-						ctx.Logger.Info("Sending SIGTERM to PID %s", pid)
-						ctx.Execute(fmt.Sprintf("kill -15 %s 2>/dev/null", pid), false)
-					}
+					ctx.Logger.Info("Sending SIGTERM to PID %s", pid)
+					ctx.Execute(fmt.Sprintf("kill -15 %s 2>/dev/null", pid), false)
 				}
 
-				// 等待进程停止
 				ctx.Logger.Info("Waiting 5 seconds for processes to stop...")
 				time.Sleep(5 * time.Second)
 
 				// 4. 强制终止残留进程 (SIGKILL)
 				ctx.Logger.Info("Step 4: Force killing remaining processes (SIGKILL)...")
-				result, _ = ctx.Execute(findProcessCmd, false)
-				if result != nil && result.GetStdout() != "" {
-					remainingPids := strings.Split(strings.TrimSpace(result.GetStdout()), "\n")
-					for _, pid := range remainingPids {
-						pid = strings.TrimSpace(pid)
-						if pid != "" {
-							ctx.Logger.Info("Force killing PID %s", pid)
-							ctx.Execute(fmt.Sprintf("kill -9 %s 2>/dev/null", pid), false)
-						}
-					}
-					time.Sleep(2 * time.Second)
-				} else {
-					ctx.Logger.Info("All processes stopped gracefully")
+				for _, pid := range collectCleanPIDs(ctx, findProcessCmd, findByPortCmd) {
+					ctx.Logger.Info("Force killing PID %s", pid)
+					ctx.Execute(fmt.Sprintf("kill -9 %s 2>/dev/null", pid), false)
 				}
+				time.Sleep(2 * time.Second)
 			}
 
 			// 5. 最后再次检查并强制终止
 			ctx.Logger.Info("Step 5: Final process check...")
 			time.Sleep(2 * time.Second)
-			result, _ = ctx.Execute(findProcessCmd, false)
-			if result != nil && result.GetStdout() != "" {
+			if remaining := collectCleanPIDs(ctx, findProcessCmd, findByPortCmd); len(remaining) > 0 {
 				ctx.Logger.Warn("Still found processes, performing final kill...")
-				remainingPids := strings.Split(strings.TrimSpace(result.GetStdout()), "\n")
-				for _, pid := range remainingPids {
-					pid = strings.TrimSpace(pid)
-					if pid != "" {
-						ctx.Logger.Info("Final kill PID %s", pid)
-						ctx.Execute(fmt.Sprintf("kill -9 %s 2>/dev/null", pid), false)
-					}
+				for _, pid := range remaining {
+					ctx.Logger.Info("Final kill PID %s", pid)
+					ctx.Execute(fmt.Sprintf("kill -9 %s 2>/dev/null", pid), false)
 				}
 				time.Sleep(3 * time.Second)
 			}
@@ -209,18 +189,15 @@ func StepCleanDB002StopProcesses() *runner.Step {
 			if err != nil {
 				return err
 			}
-
-			findProcessCmd := buildFindYashanDBProcessPSCmd(ctx, yasdbHome, yasdbData, yasdbLog, osUser, clusterName, false)
-			result, _ := ctx.Execute(findProcessCmd, false)
-
-			if result != nil && result.GetStdout() != "" {
-				ctx.Logger.Warn("WARNING: Some processes are still running (will be stopped after directory removal):")
-				ctx.Logger.Warn("%s", result.GetStdout())
-				// 不返回错误，因为删除目录后进程会自然停止
+			beginPort := ctx.GetParamInt("db_begin_port", 1688)
+			findProcessCmd := buildFindYashanDBProcessPSCmd(ctx, yasdbHome, yasdbData, yasdbLog, osUser, clusterName, true)
+			findByPortCmd := buildFindYashanDBProcessByBeginPortPSCmd(ctx, beginPort, true)
+			if remaining := collectCleanPIDs(ctx, findProcessCmd, findByPortCmd); len(remaining) > 0 {
+				ctx.Logger.Warn("WARNING: Some processes are still running (will be stopped after directory removal): %s",
+					strings.Join(remaining, ","))
 			} else {
 				ctx.Logger.Info("[OK] All processes stopped successfully")
 			}
-
 			return nil
 		},
 	}
@@ -229,9 +206,8 @@ func StepCleanDB002StopProcesses() *runner.Step {
 // StepCleanDB003RemoveDirectories Remove YashanDB directories
 func StepCleanDB003RemoveDirectories() *runner.Step {
 	return &runner.Step{
-		ID:          "CLEAN-DB-003",
 		Name:        "Remove YashanDB Directories",
-		Description: "Remove YashanDB installation, data and log directories",
+		Description: "Remove YashanDB installation, data, log and stage directories",
 		Tags:        []string{"clean", "db", "directory"},
 		Optional:    false,
 
@@ -240,15 +216,21 @@ func StepCleanDB003RemoveDirectories() *runner.Step {
 			if err != nil {
 				return err
 			}
+			stageDir, err := resolveCleanDBStageDir(ctx)
+			if err != nil {
+				return err
+			}
 			for _, p := range []struct{ name, path string }{
 				{"YASDB_HOME", yasdbHome},
 				{"YASDB_DATA", yasdbData},
 				{"YASDB_LOG", yasdbLog},
+				{"DB stage directory", stageDir},
 			} {
 				if err := commonos.ValidateDeletePath(p.path); err != nil {
 					return fmt.Errorf("invalid delete path for %s: '%s': %w", p.name, p.path, err)
 				}
 			}
+			reportCleanDirectoryImpact(ctx, yasdbHome, yasdbData, yasdbLog, stageDir)
 			return nil
 		},
 
@@ -269,10 +251,15 @@ func StepCleanDB003RemoveDirectories() *runner.Step {
 			if err != nil {
 				return err
 			}
+			stageDir, err := resolveCleanDBStageDir(ctx)
+			if err != nil {
+				return err
+			}
 
 			verifyDirRemoved(ctx, yasdbHome, "YASDB_HOME")
 			verifyDirRemoved(ctx, yasdbData, "YASDB_DATA")
 			verifyDirRemoved(ctx, yasdbLog, "YASDB_LOG")
+			verifyDirRemoved(ctx, stageDir, "DB stage directory")
 
 			return nil
 		},
@@ -282,13 +269,13 @@ func StepCleanDB003RemoveDirectories() *runner.Step {
 // StepCleanDB004RemoveConfig Remove YashanDB configuration files
 func StepCleanDB004RemoveConfig() *runner.Step {
 	return &runner.Step{
-		ID:          "CLEAN-DB-004",
 		Name:        "Remove YashanDB Configuration",
 		Description: "Remove .yasboot configuration files",
 		Tags:        []string{"clean", "db", "config"},
 		Optional:    false,
 
 		PreCheck: func(ctx *runner.StepContext) error {
+			reportCleanConfigImpact(ctx)
 			return nil
 		},
 
@@ -302,8 +289,7 @@ func StepCleanDB004RemoveConfig() *runner.Step {
 
 			userHome, err := commonos.GetUserHomeDir(ctx, osUser)
 			if err != nil {
-				ctx.Logger.Warn("Cannot determine home directory for user %s, falling back to /home/%s", osUser, osUser)
-				userHome = fmt.Sprintf("/home/%s", osUser)
+				return fmt.Errorf("cannot determine home directory for user %s: %w", osUser, err)
 			}
 			yasbootDir := fmt.Sprintf("%s/.yasboot", userHome)
 
@@ -355,7 +341,7 @@ func StepCleanDB004RemoveConfig() *runner.Step {
 
 			userHome, err := commonos.GetUserHomeDir(ctx, osUser)
 			if err != nil {
-				userHome = fmt.Sprintf("/home/%s", osUser)
+				return err
 			}
 			yasbootDir := fmt.Sprintf("%s/.yasboot", userHome)
 
@@ -373,7 +359,6 @@ func StepCleanDB004RemoveConfig() *runner.Step {
 // StepCleanDB005CleanYACDisks Clean YAC shared disks
 func StepCleanDB005CleanYACDisks() *runner.Step {
 	return &runner.Step{
-		ID:          "CLEAN-DB-005",
 		Name:        "Clean YAC Shared Disks",
 		Description: "Clean YAC shared disk headers using dd command",
 		Tags:        []string{"clean", "db", "yac", "disk"},
@@ -384,6 +369,7 @@ func StepCleanDB005CleanYACDisks() *runner.Step {
 			if cleanDisks == "" {
 				return fmt.Errorf("YAC disk cleanup not requested (use --clean-yac-disks to enable)")
 			}
+			reportCleanYACDiskImpact(ctx, cleanDisks)
 			return nil
 		},
 
@@ -531,7 +517,6 @@ func probeYACEnvironment(ctx *runner.StepContext) (bool, error) {
 // StepCleanDB006FinalCheck Final cleanup check
 func StepCleanDB006FinalCheck() *runner.Step {
 	return &runner.Step{
-		ID:          "CLEAN-DB-006",
 		Name:        "Final Cleanup Check",
 		Description: "Final check to ensure all processes are stopped",
 		Tags:        []string{"clean", "db", "verify"},
@@ -546,34 +531,39 @@ func StepCleanDB006FinalCheck() *runner.Step {
 			if err != nil {
 				return err
 			}
+			beginPort := ctx.GetParamInt("db_begin_port", 1688)
 
 			ctx.Logger.Info("Performing final process cleanup check...")
+			stopCleanDBSystemdUnit(ctx, beginPort)
 
 			findProcessCmd := buildFindYashanDBProcessPSCmd(ctx, yasdbHome, yasdbData, yasdbLog, osUser, clusterName, true)
+			findByPortCmd := buildFindYashanDBProcessByBeginPortPSCmd(ctx, beginPort, true)
 
 			time.Sleep(2 * time.Second)
-			result, _ := ctx.Execute(findProcessCmd, false)
-			if result != nil && result.GetStdout() != "" {
-				remainingPids := strings.Split(strings.TrimSpace(result.GetStdout()), "\n")
-				var validPids []string
-				for _, pid := range remainingPids {
-					pid = strings.TrimSpace(pid)
-					if pid != "" {
-						validPids = append(validPids, pid)
-					}
-				}
-				if len(validPids) > 0 {
-					ctx.Logger.Info("Found %d processes after cleanup, force killing...", len(validPids))
-					for _, pid := range validPids {
-						ctx.Logger.Info("Force killing PID %s", pid)
-						ctx.Execute(fmt.Sprintf("kill -9 %s 2>/dev/null", pid), false)
-					}
-					time.Sleep(2 * time.Second)
-				}
-			} else {
+			validPids := collectCleanPIDs(ctx, findProcessCmd, findByPortCmd)
+			if len(validPids) == 0 {
 				ctx.Logger.Info("No processes found, cleanup successful")
+				return nil
 			}
 
+			ctx.Logger.Info("Found %d processes after cleanup, force killing...", len(validPids))
+			for _, pid := range validPids {
+				ctx.Logger.Info("Force killing PID %s", pid)
+				ctx.Execute(fmt.Sprintf("kill -9 %s 2>/dev/null", pid), false)
+			}
+			time.Sleep(2 * time.Second)
+
+			var still []string
+			for _, pid := range collectCleanPIDs(ctx, findProcessCmd, findByPortCmd) {
+				alive, _ := ctx.Execute(fmt.Sprintf("kill -0 %s 2>/dev/null", pid), false)
+				if alive != nil && alive.GetExitCode() == 0 {
+					still = append(still, pid)
+				}
+			}
+			if len(still) > 0 {
+				return fmt.Errorf("cleanup incomplete: YashanDB processes still running after force kill: %s",
+					strings.Join(still, ","))
+			}
 			return nil
 		},
 
@@ -582,4 +572,78 @@ func StepCleanDB006FinalCheck() *runner.Step {
 			return nil
 		},
 	}
+}
+
+func reportCleanStopImpact(ctx *runner.StepContext) {
+	_, _, _, clusterName, osUser, err := effectiveCleanDBPaths(ctx)
+	if err != nil {
+		ctx.Logger.Info("Clean stop impact: path resolve deferred (%v)", err)
+		return
+	}
+	beginPort := ctx.GetParamInt("db_begin_port", 1688)
+	ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+		StepName: "Stop YashanDB Processes",
+		Host:     ctx.Executor.Host(),
+		Severity: runner.PrecheckSeverityWarn,
+		Code:     "PC.CLEAN.STOP_PROCESSES",
+		Message: fmt.Sprintf("apply will stop YashanDB processes for cluster=%s user=%s begin-port=%d (systemd/monit/yasom/yasagent/yasdb)",
+			clusterName, osUser, beginPort),
+		Remediation: "confirm this host should be wiped; use -s to limit phases if you only need a subset",
+	})
+}
+
+func reportCleanDirectoryImpact(ctx *runner.StepContext, home, data, logDir, stageDir string) {
+	ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+		StepName: "Remove YashanDB Directories",
+		Host:     ctx.Executor.Host(),
+		Severity: runner.PrecheckSeverityWarn,
+		Code:     "PC.CLEAN.REMOVE_DIRECTORIES",
+		Message: fmt.Sprintf("apply will delete directories: home=%s data=%s log=%s stage=%s",
+			home, data, logDir, stageDir),
+		Remediation: "back up any needed files under these paths before apply",
+	})
+}
+
+func reportCleanConfigImpact(ctx *runner.StepContext) {
+	_, data, _, clusterName, osUser, err := effectiveCleanDBPaths(ctx)
+	if err != nil {
+		ctx.Logger.Info("Clean config impact: path resolve deferred (%v)", err)
+		return
+	}
+	userHome, herr := commonos.GetUserHomeDir(ctx, osUser)
+	if herr != nil {
+		userHome = "/home/" + osUser
+	}
+	envFile := path.Join(userHome, ".yasboot", clusterName+".env")
+	homeLink := path.Join(userHome, ".yasboot", clusterName+"_yasdb_home")
+	ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+		StepName: "Remove YashanDB Configuration",
+		Host:     ctx.Executor.Host(),
+		Severity: runner.PrecheckSeverityWarn,
+		Code:     "PC.CLEAN.REMOVE_CONFIG",
+		Message: fmt.Sprintf("apply will remove %s, %s, and clean bashrc/env entries for cluster=%s data=%s",
+			envFile, homeLink, clusterName, data),
+		Remediation: "confirm cluster name/port match the instance you intend to wipe",
+	})
+}
+
+func reportCleanYACDiskImpact(ctx *runner.StepContext, cleanDisks string) {
+	msg := fmt.Sprintf("apply will dd-wipe YAC shared disk headers (mode=%s)", cleanDisks)
+	if cleanDisks == "auto" {
+		if paths, ok := ctx.Results["yac_disk_paths"].([]string); ok && len(paths) > 0 {
+			msg = fmt.Sprintf("apply will dd-wipe YAC disk headers: %s", strings.Join(paths, ", "))
+		} else {
+			msg = "apply will dd-wipe YAC disk headers from auto-discovered paths (run Query YAC Disk step first for the list)"
+		}
+	} else if cleanDisks != "" {
+		msg = fmt.Sprintf("apply will dd-wipe YAC disk headers: %s", cleanDisks)
+	}
+	ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+		StepName:    "Clean YAC Shared Disks",
+		Host:        ctx.Executor.Host(),
+		Severity:    runner.PrecheckSeverityWarn,
+		Code:        "PC.CLEAN.WIPE_YAC_DISKS",
+		Message:     msg,
+		Remediation: "DOUBLE-CHECK disk paths; header wipe is destructive and not easily reversible",
+	})
 }

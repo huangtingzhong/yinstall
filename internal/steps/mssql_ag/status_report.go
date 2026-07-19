@@ -15,7 +15,7 @@ func printAGStatusSummary(ctx *runner.StepContext) error {
 	if ctx.DryRun || ctx.Precheck {
 		return nil
 	}
-	const stepID = "A-015"
+	stepID := ctx.CurrentStepID
 	ag := commonmssql.AGName(ctx)
 	printSummaryNotice(ctx, stepID, fmt.Sprintf("======== MSSQL Always On Status (%s) ========", ag))
 

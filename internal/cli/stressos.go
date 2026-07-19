@@ -42,6 +42,14 @@ func (a *stressExecAdapter) Upload(localPath, remotePath string, uploadCtx *ssh.
 	return a.e.Upload(localPath, remotePath, uploadCtx)
 }
 
+// SSHExecutor 暴露底层传输，供 runner 挂接实时 debug 输出回调。
+func (a *stressExecAdapter) SSHExecutor() ssh.Executor {
+	if a == nil {
+		return nil
+	}
+	return a.e
+}
+
 // stressExecFactory 是 ExecutorAdapterFactory，供 RunPerHostStepsEx 使用。
 func stressExecFactory(e ssh.Executor) runner.Executor {
 	return &stressExecAdapter{e: e}
@@ -283,10 +291,10 @@ func runStressOS(cmd *cobra.Command, args []string) error {
 	var finalizeStep *runner.Step
 	var mainSteps []*runner.Step
 	for _, s := range steps {
-		switch s.ID {
-		case "S-01":
+		switch s.Name {
+		case "Check Connectivity":
 			connectivityStep = s
-		case "S-11":
+		case "Finalize stress report":
 			finalizeStep = s
 		default:
 			mainSteps = append(mainSteps, s)
@@ -336,13 +344,14 @@ func runStressOS(cmd *cobra.Command, args []string) error {
 			clientHosts = []string{hostInfos[1].Host}
 		}
 		iperfIdx := connResult.NextStepIndex + len(mainSteps)
+		iperfStepID := stresssteps.StepIDByName("Network benchmark (ping latency)")
 		srvCtx := &runner.StepContext{
 			Executor:      stressExecFactory(srvInfo.Executor),
 			Logger:        logger,
 			Params:        params,
 			Results:       sharedResults,
 			TargetHosts:   targetHosts,
-			CurrentStepID: "S-08",
+			CurrentStepID: iperfStepID,
 			StepIndex:     iperfIdx,
 			TotalSteps:    totalSteps,
 		}
@@ -359,7 +368,7 @@ func runStressOS(cmd *cobra.Command, args []string) error {
 				Params:        params,
 				Results:       sharedResults,
 				TargetHosts:   targetHosts,
-				CurrentStepID: "S-08",
+				CurrentStepID: iperfStepID,
 				StepIndex:     iperfIdx,
 				TotalSteps:    totalSteps,
 			})

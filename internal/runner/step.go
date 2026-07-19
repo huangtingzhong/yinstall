@@ -109,8 +109,19 @@ func (ctx *StepContext) IsForceStep() bool {
 	if ctx.ForceAll {
 		return true
 	}
+	return ctx.IsForceStepID(ctx.CurrentStepID)
+}
+
+// IsForceStepID reports whether -F/--force or -f/--force-steps includes stepID (any step, not only current).
+func (ctx *StepContext) IsForceStepID(stepID string) bool {
+	if ctx == nil || stepID == "" {
+		return false
+	}
+	if ctx.ForceAll {
+		return true
+	}
 	for _, id := range ctx.ForceSteps {
-		if id == ctx.CurrentStepID {
+		if id == stepID {
 			return true
 		}
 	}
@@ -121,6 +132,45 @@ func (ctx *StepContext) IsForceStep() bool {
 // 即使 IsForceStep() 为 true，用户/组删除也需要显式 --force-delete-user 才执行
 func (ctx *StepContext) IsForceDeleteUser() bool {
 	return ctx.IsForceStep() && ctx.ForceDeleteUser
+}
+
+func (ctx *StepContext) host() string {
+	if ctx != nil && ctx.Executor != nil {
+		return ctx.Executor.Host()
+	}
+	return ""
+}
+
+// ForceStepsHint returns CLI hint for forcing the current step.
+func (ctx *StepContext) ForceStepsHint() string {
+	if ctx == nil || ctx.CurrentStepID == "" {
+		return "--force-steps <step-id>"
+	}
+	return "--force-steps " + ctx.CurrentStepID
+}
+
+// ConsoleWithType logs a typed console line using ctx.CurrentStepID.
+func (ctx *StepContext) ConsoleWithType(stepName, phase, execType, msg string, dur time.Duration) {
+	if ctx == nil || ctx.Logger == nil {
+		return
+	}
+	ctx.Logger.ConsoleWithType(ctx.CurrentStepID, stepName, ctx.host(), phase, execType, msg, dur)
+}
+
+// LogCommandStart logs command start using ctx.CurrentStepID.
+func (ctx *StepContext) LogCommandStart(command string) {
+	if ctx == nil || ctx.Logger == nil {
+		return
+	}
+	ctx.Logger.LogCommandStart(ctx.host(), ctx.CurrentStepID, command)
+}
+
+// LogCommandResult logs command result using ctx.CurrentStepID.
+func (ctx *StepContext) LogCommandResult(stdout, stderr string, exitCode int, dur time.Duration) {
+	if ctx == nil || ctx.Logger == nil {
+		return
+	}
+	ctx.Logger.LogCommandResult(ctx.host(), ctx.CurrentStepID, stdout, stderr, exitCode, dur)
 }
 
 // UploadContext 构造文件上传日志上下文（进度写 debug，起止写 Info）。
@@ -413,21 +463,69 @@ func (ctx *StepContext) LogScriptPreview(scriptKind, label, body string) {
 	ctx.Logger.LogScriptPreview(host, ctx.CurrentStepID, scriptKind, label, body)
 }
 
-// Execute 在上下文中执行命令并记录日志
+// underlyingSSHExecutor 从 runner.Executor 解出 ssh.Executor（用于挂接实时输出回调）。
+func underlyingSSHExecutor(exec Executor) ssh.Executor {
+	if exec == nil {
+		return nil
+	}
+	type unwrapper interface {
+		SSHExecutor() ssh.Executor
+	}
+	if u, ok := exec.(unwrapper); ok {
+		return u.SSHExecutor()
+	}
+	return nil
+}
+
+// BindCommandDebugStream 挂接 Executor 行回调；成功则流式写 debug，结束后用 stream.End。
+// 未挂接（如 WinRM）由 finish 事后写 LogCommandResult。供 Execute / collect / stressos 共用。
+func BindCommandDebugStream(exec Executor, logger *logging.Logger, host, stepID string) (
+	finish func(result ExecResult, err error, dur time.Duration),
+) {
+	if logger == nil {
+		return func(ExecResult, error, time.Duration) {}
+	}
+	stream := logger.BeginCommandStream(host, stepID)
+	clear, attached := ssh.BindOutputLineHandler(underlyingSSHExecutor(exec), stream.OnLine)
+	if attached {
+		stream.MarkAttached()
+	}
+	return func(result ExecResult, err error, dur time.Duration) {
+		clear()
+		if stream.Attached() {
+			exit := -1
+			if result != nil {
+				exit = result.GetExitCode()
+				if dur == 0 {
+					dur = result.GetDuration()
+				}
+			}
+			stream.End(exit, dur)
+			return
+		}
+		if result != nil {
+			logger.LogCommandResult(host, stepID,
+				result.GetStdout(), result.GetStderr(),
+				result.GetExitCode(), dur)
+			return
+		}
+		if err != nil {
+			logger.LogCommandResult(host, stepID, "", err.Error(), -1, dur)
+		}
+	}
+}
+
+// Execute 在上下文中执行命令并记录日志（SSH/Local 实时写 debug；WinRM 事后整包）。
 func (ctx *StepContext) Execute(cmd string, sudo bool) (ExecResult, error) {
 	host := ctx.Executor.Host()
 	stepID := ctx.CurrentStepID
 
 	ctx.Logger.LogCommandStart(host, stepID, cmd)
+	finish := BindCommandDebugStream(ctx.Executor, ctx.Logger, host, stepID)
 
+	start := time.Now()
 	result, err := ctx.Executor.Execute(cmd, sudo)
-	if result != nil {
-		ctx.Logger.LogCommandResult(host, stepID,
-			result.GetStdout(), result.GetStderr(),
-			result.GetExitCode(), result.GetDuration())
-	} else if err != nil {
-		ctx.Logger.LogCommandResult(host, stepID, "", err.Error(), -1, 0)
-	}
+	finish(result, err, time.Since(start))
 	return result, err
 }
 

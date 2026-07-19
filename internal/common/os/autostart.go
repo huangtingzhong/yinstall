@@ -33,8 +33,8 @@ const (
 )
 
 // GenerateMonitScript 生成 yashan_monit.sh 脚本内容
-// 支持单实例和多实例场景
-func GenerateMonitScript(user string, ycsrootagentAutostart string) string {
+// homeDir 为产品用户真实家目录（经 getent），用于定位 env 文件。
+func GenerateMonitScript(user, homeDir, ycsrootagentAutostart string) string {
 	return fmt.Sprintf(`#!/bin/bash
 if [ $# -eq 0 ]; then
     echo "Usage: $0 <PORT> or $0 bashrc"
@@ -45,15 +45,16 @@ fi
 
 MONIT_AUTOSTART="true"                
 YCSROOTAGENT_AUTOSTART="%s"
-YASDB_USER=%s                              
+YASDB_USER=%s
+YASDB_HOME_DIR=%s
 INTERVAL=3                              
 PORT=$1
 
 # Determine environment file based on PORT argument
 if [ "$PORT" = "bashrc" ]; then
-    ENV_FILE="/home/${YASDB_USER}/.bashrc"
+    ENV_FILE="$YASDB_HOME_DIR/.bashrc"
 else
-    ENV_FILE="/home/${YASDB_USER}/.${PORT}"
+    ENV_FILE="$YASDB_HOME_DIR/.port${PORT}"
 fi
 
 if [ -f "$ENV_FILE" ]; then
@@ -101,9 +102,9 @@ while true; do
         if ! pgrep -a monit | grep "$YASDB_HOME" > /dev/null; then
             echo "$(date) monit abnormal, try restart..." 
             if [ "$PORT" = "bashrc" ]; then
-                su - $YASDB_USER -c "source /home/${YASDB_USER}/.bashrc && $YASDB_HOME/om/bin/monit -c $YASDB_HOME/om/monit/monitrc" &
+                su - $YASDB_USER -c "source $YASDB_HOME_DIR/.bashrc && $YASDB_HOME/om/bin/monit -c $YASDB_HOME/om/monit/monitrc" &
             else
-                su - $YASDB_USER -c "source /home/${YASDB_USER}/.${PORT} && $YASDB_HOME/om/bin/monit -c $YASDB_HOME/om/monit/monitrc" &
+                su - $YASDB_USER -c "source $YASDB_HOME_DIR/.port${PORT} && $YASDB_HOME/om/bin/monit -c $YASDB_HOME/om/monit/monitrc" &
             fi
         fi
     fi
@@ -112,16 +113,16 @@ while true; do
          if ! pgrep -a ycsrootagent | grep "$YASCS_HOME" > /dev/null; then
            echo "$(date) ycsrootagent abnormal, try restart..."
            if [ "$PORT" = "bashrc" ]; then
-               su - $YASDB_USER -c "source /home/${YASDB_USER}/.bashrc && sudo env LD_LIBRARY_PATH=$YASDB_HOME/lib $YASDB_HOME/bin/ycsrootagent start -H $YASCS_HOME" & 
+               su - $YASDB_USER -c "source $YASDB_HOME_DIR/.bashrc && sudo env LD_LIBRARY_PATH=$YASDB_HOME/lib $YASDB_HOME/bin/ycsrootagent start -H $YASCS_HOME" & 
            else
-               su - $YASDB_USER -c "source /home/${YASDB_USER}/.${PORT} && sudo env LD_LIBRARY_PATH=$YASDB_HOME/lib $YASDB_HOME/bin/ycsrootagent start -H $YASCS_HOME" & 
+               su - $YASDB_USER -c "source $YASDB_HOME_DIR/.port${PORT} && sudo env LD_LIBRARY_PATH=$YASDB_HOME/lib $YASDB_HOME/bin/ycsrootagent start -H $YASCS_HOME" & 
            fi
          fi
        fi
     fi
     sleep "$INTERVAL"
 done
-`, ycsrootagentAutostart, user)
+`, ycsrootagentAutostart, user, ShellSingleQuote(homeDir))
 }
 
 // GenerateServiceContent 生成 systemd 服务文件内容
@@ -143,10 +144,14 @@ WantedBy=multi-user.target
 `, clusterName, ScriptPath, serviceArg, serviceName)
 }
 
-// DetermineServiceName 根据 yasdb 进程数确定服务名称和参数
-// - 单实例: yashan_monit, bashrc
-// - 多实例: yashan_monit_<port>, <port>
+// DetermineServiceName 根据端口与 yasdb 进程数确定服务名称和参数。
+// - 非默认端口（!=1688）：一律 yashan_monit_<port> + port（与 DetermineEnvFile 的 .portN 对齐）
+// - 默认端口 1688 且单实例：yashan_monit + bashrc
+// - 默认端口 1688 且多实例：yashan_monit_1688 + 1688
 func DetermineServiceName(yasdbCount int, beginPort int) (serviceName string, serviceArg string) {
+	if beginPort != 0 && beginPort != 1688 {
+		return fmt.Sprintf("yashan_monit_%d", beginPort), fmt.Sprintf("%d", beginPort)
+	}
 	if yasdbCount <= 1 {
 		return "yashan_monit", "bashrc"
 	}
@@ -160,7 +165,11 @@ func CreateAutostartScript(ctx *runner.StepContext, cfg *AutostartConfig) error 
 		ycsrootagentAutostart = "true"
 	}
 
-	scriptContent := GenerateMonitScript(cfg.User, ycsrootagentAutostart)
+	homeDir, err := GetUserHomeDir(ctx, cfg.User)
+	if err != nil {
+		return fmt.Errorf("failed to get home directory for user %s: %w", cfg.User, err)
+	}
+	scriptContent := GenerateMonitScript(cfg.User, homeDir, ycsrootagentAutostart)
 
 	cmd := fmt.Sprintf("cat > %s << 'EOFSCRIPT'\n%s\nEOFSCRIPT", ScriptPath, scriptContent)
 	if _, err := ctx.Execute(cmd, true); err != nil {

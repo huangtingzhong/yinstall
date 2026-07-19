@@ -1,15 +1,18 @@
 package ssh
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/yinstall/internal/logging"
@@ -211,9 +214,50 @@ func isLocalHost(host string) bool {
 	return false
 }
 
+// OutputLineHandler 命令执行中实时回调一行输出（无尾部换行）。
+// stream 为 "stdout" 或 "stderr"。由 StepContext 挂接以写入 debug 流式日志。
+type OutputLineHandler func(stream, line string)
+
+// BindOutputLineHandler 若 e 支持则挂接行回调；返回 clear 与是否挂接成功。
+// WinRM 等整包执行器返回 attached=false，调用方应事后写 LogCommandResult。
+func BindOutputLineHandler(e Executor, h OutputLineHandler) (clear func(), attached bool) {
+	type setter interface {
+		SetOutputLineHandler(OutputLineHandler)
+	}
+	if e == nil {
+		return func() {}, false
+	}
+	if s, ok := e.(setter); ok {
+		s.SetOutputLineHandler(h)
+		return func() { s.SetOutputLineHandler(nil) }, true
+	}
+	return func() {}, false
+}
+
 // LocalExecutor 本机执行器
 type LocalExecutor struct {
-	host string
+	host       string
+	outMu      sync.Mutex
+	outHandler OutputLineHandler
+}
+
+// SetOutputLineHandler 设置/清除执行期 stdout/stderr 行回调。
+func (e *LocalExecutor) SetOutputLineHandler(h OutputLineHandler) {
+	if e == nil {
+		return
+	}
+	e.outMu.Lock()
+	e.outHandler = h
+	e.outMu.Unlock()
+}
+
+func (e *LocalExecutor) outputLineHandler() OutputLineHandler {
+	if e == nil {
+		return nil
+	}
+	e.outMu.Lock()
+	defer e.outMu.Unlock()
+	return e.outHandler
 }
 
 func (e *LocalExecutor) Host() string {
@@ -232,27 +276,13 @@ func (e *LocalExecutor) Execute(command string, sudo bool) (*ExecResult, error) 
 		Command:   command,
 		StartTime: time.Now(),
 	}
-
-	var cmd *exec.Cmd = localExecCommand(command, sudo)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
+	cmd := localExecCommand(command, sudo)
+	stdout, stderr, exitCode, _ := runCmdWithStream(cmd, e.outputLineHandler())
 	result.EndTime = time.Now()
 	result.Duration = result.EndTime.Sub(result.StartTime)
-	result.Stdout = stdout.String()
-	result.Stderr = stderr.String()
-
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			result.ExitCode = exitErr.ExitCode()
-		} else {
-			result.ExitCode = -1
-		}
-	}
-
+	result.Stdout = stdout
+	result.Stderr = stderr
+	result.ExitCode = exitCode
 	return result, nil
 }
 
@@ -263,32 +293,24 @@ func (e *LocalExecutor) ExecuteContext(ctx context.Context, command string, sudo
 		Command:   command,
 		StartTime: time.Now(),
 	}
-
-	var cmd *exec.Cmd = localExecCommandContext(ctx, command, sudo)
-
-	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
-
-	err := cmd.Run()
+	cmd := localExecCommandContext(ctx, command, sudo)
+	stdout, stderr, exitCode, runErr := runCmdWithStream(cmd, e.outputLineHandler())
 	result.EndTime = time.Now()
 	result.Duration = result.EndTime.Sub(result.StartTime)
-	result.Stdout = stdoutBuf.String()
-	result.Stderr = stderrBuf.String()
-
-	if err != nil {
-		if ctx.Err() != nil {
-			// context 超时或取消，统一返回 124（与 SSH session 超时一致）
-			result.ExitCode = 124
-			return result, fmt.Errorf("command timed out: %w", ctx.Err())
-		}
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			result.ExitCode = exitErr.ExitCode()
-		} else {
+	result.Stdout = stdout
+	result.Stderr = stderr
+	if ctx.Err() != nil {
+		result.ExitCode = 124
+		return result, fmt.Errorf("command timed out: %w", ctx.Err())
+	}
+	result.ExitCode = exitCode
+	if runErr != nil {
+		// 管道/启动失败：与旧 Run 行为接近，exit=-1 且仍返回 result
+		if result.ExitCode == 0 {
 			result.ExitCode = -1
 		}
+		return result, nil
 	}
-
 	return result, nil
 }
 
@@ -423,8 +445,29 @@ func powerShellLocalArgs(command string) ([]string, bool) {
 
 // SSHExecutor SSH 执行器
 type SSHExecutor struct {
-	client *ssh.Client
-	config Config
+	client     *ssh.Client
+	config     Config
+	outMu      sync.Mutex
+	outHandler OutputLineHandler
+}
+
+// SetOutputLineHandler 设置/清除执行期 stdout/stderr 行回调。
+func (e *SSHExecutor) SetOutputLineHandler(h OutputLineHandler) {
+	if e == nil {
+		return
+	}
+	e.outMu.Lock()
+	e.outHandler = h
+	e.outMu.Unlock()
+}
+
+func (e *SSHExecutor) outputLineHandler() OutputLineHandler {
+	if e == nil {
+		return nil
+	}
+	e.outMu.Lock()
+	defer e.outMu.Unlock()
+	return e.outHandler
 }
 
 func newSSHExecutor(cfg Config) (*SSHExecutor, error) {
@@ -524,9 +567,7 @@ func (e *SSHExecutor) Execute(command string, sudo bool) (*ExecResult, error) {
 		StartTime: time.Now(),
 	}
 
-	// 构建实际执行的命令
 	actualCmd := wrapSSHCommand(e.config, command, sudo)
-
 	session, err := e.client.NewSession()
 	if err != nil {
 		result.EndTime = time.Now()
@@ -537,24 +578,12 @@ func (e *SSHExecutor) Execute(command string, sudo bool) (*ExecResult, error) {
 	}
 	defer session.Close()
 
-	var stdout, stderr bytes.Buffer
-	session.Stdout = &stdout
-	session.Stderr = &stderr
-
-	err = session.Run(actualCmd)
+	stdout, stderr, exitCode, _ := runSSHSessionWithStream(session, actualCmd, e.outputLineHandler())
 	result.EndTime = time.Now()
 	result.Duration = result.EndTime.Sub(result.StartTime)
-	result.Stdout = stdout.String()
-	result.Stderr = stderr.String()
-
-	if err != nil {
-		if exitErr, ok := err.(*ssh.ExitError); ok {
-			result.ExitCode = exitErr.ExitStatus()
-		} else {
-			result.ExitCode = -1
-		}
-	}
-
+	result.Stdout = stdout
+	result.Stderr = stderr
+	result.ExitCode = exitCode
 	return result, nil
 }
 
@@ -568,7 +597,6 @@ func (e *SSHExecutor) ExecuteContext(ctx context.Context, command string, sudo b
 	}
 
 	actualCmd := wrapSSHCommand(e.config, command, sudo)
-
 	session, err := e.client.NewSession()
 	if err != nil {
 		result.EndTime = time.Now()
@@ -578,47 +606,202 @@ func (e *SSHExecutor) ExecuteContext(ctx context.Context, command string, sudo b
 		return result, fmt.Errorf("failed to create session: %w", err)
 	}
 
+	stdoutPipe, err := session.StdoutPipe()
+	if err != nil {
+		session.Close()
+		result.ExitCode = -1
+		result.Stderr = err.Error()
+		result.EndTime = time.Now()
+		result.Duration = result.EndTime.Sub(result.StartTime)
+		return result, fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderrPipe, err := session.StderrPipe()
+	if err != nil {
+		session.Close()
+		result.ExitCode = -1
+		result.Stderr = err.Error()
+		result.EndTime = time.Now()
+		result.Duration = result.EndTime.Sub(result.StartTime)
+		return result, fmt.Errorf("stderr pipe: %w", err)
+	}
+
+	handler := e.outputLineHandler()
 	var stdoutBuf, stderrBuf bytes.Buffer
-	session.Stdout = &stdoutBuf
-	session.Stderr = &stderrBuf
+	if err := session.Start(actualCmd); err != nil {
+		session.Close()
+		result.ExitCode = -1
+		result.Stderr = err.Error()
+		result.EndTime = time.Now()
+		result.Duration = result.EndTime.Sub(result.StartTime)
+		return result, err
+	}
 
-	type runResult struct{ code int }
-	ch := make(chan runResult, 1)
-
+	var wg sync.WaitGroup
+	wg.Add(2)
 	go func() {
-		runErr := session.Run(actualCmd)
-		code := 0
-		if runErr != nil {
-			if exitErr, ok := runErr.(*ssh.ExitError); ok {
-				code = exitErr.ExitStatus()
-			} else {
-				code = -1
-			}
-		}
-		ch <- runResult{code}
+		defer wg.Done()
+		_ = pumpOutputStream(stdoutPipe, &stdoutBuf, "stdout", handler)
+	}()
+	go func() {
+		defer wg.Done()
+		_ = pumpOutputStream(stderrPipe, &stderrBuf, "stderr", handler)
 	}()
 
+	type waitRes struct{ err error }
+	ch := make(chan waitRes, 1)
+	go func() {
+		ch <- waitRes{err: session.Wait()}
+	}()
+
+	var waitErr error
+	timedOut := false
 	select {
 	case res := <-ch:
-		session.Close()
-		result.EndTime = time.Now()
-		result.Duration = result.EndTime.Sub(result.StartTime)
-		result.Stdout = stdoutBuf.String()
-		result.Stderr = stderrBuf.String()
-		result.ExitCode = res.code
-		return result, nil
+		waitErr = res.err
 	case <-ctx.Done():
-		// 先 SIGKILL 让远端进程退出，再 Close session 解除 goroutine 的 session.Run 阻塞
+		timedOut = true
 		_ = session.Signal(ssh.SIGKILL)
 		session.Close()
-		<-ch // 等 goroutine 退出，避免 goroutine 泄漏
-		result.EndTime = time.Now()
-		result.Duration = result.EndTime.Sub(result.StartTime)
-		result.Stdout = stdoutBuf.String()
-		result.Stderr = stderrBuf.String()
-		result.ExitCode = 124 // 与 GNU timeout 退出码一致
+		waitErr = (<-ch).err
+	}
+	wg.Wait()
+	if !timedOut {
+		session.Close()
+	}
+
+	result.EndTime = time.Now()
+	result.Duration = result.EndTime.Sub(result.StartTime)
+	result.Stdout = stdoutBuf.String()
+	result.Stderr = stderrBuf.String()
+	if timedOut {
+		result.ExitCode = 124
 		return result, fmt.Errorf("command timed out: %w", ctx.Err())
 	}
+	result.ExitCode = exitCodeFromSSHWait(waitErr)
+	if waitErr != nil {
+		if _, ok := waitErr.(*ssh.ExitError); ok {
+			return result, nil
+		}
+		return result, waitErr
+	}
+	return result, nil
+}
+
+// pumpOutputStream 边读边写入 buf，并按行回调 handler（实时 debug）。
+func pumpOutputStream(r io.Reader, buf *bytes.Buffer, stream string, h OutputLineHandler) error {
+	br := bufio.NewReaderSize(r, 64*1024)
+	for {
+		line, err := br.ReadString('\n')
+		if len(line) > 0 {
+			_, _ = buf.WriteString(line)
+			if h != nil {
+				h(stream, strings.TrimRight(line, "\r\n"))
+			}
+		}
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
+}
+
+func exitCodeFromCmdWait(err error) int {
+	if err == nil {
+		return 0
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return exitErr.ExitCode()
+	}
+	return -1
+}
+
+func exitCodeFromSSHWait(err error) int {
+	if err == nil {
+		return 0
+	}
+	if exitErr, ok := err.(*ssh.ExitError); ok {
+		return exitErr.ExitStatus()
+	}
+	return -1
+}
+
+// runCmdWithStream 通过管道实时读取本地命令输出。
+func runCmdWithStream(cmd *exec.Cmd, h OutputLineHandler) (stdout, stderr string, exitCode int, err error) {
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", "", -1, err
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return "", "", -1, err
+	}
+	if err := cmd.Start(); err != nil {
+		return "", "", -1, err
+	}
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_ = pumpOutputStream(stdoutPipe, &stdoutBuf, "stdout", h)
+	}()
+	go func() {
+		defer wg.Done()
+		_ = pumpOutputStream(stderrPipe, &stderrBuf, "stderr", h)
+	}()
+
+	waitErr := cmd.Wait()
+	wg.Wait()
+	return stdoutBuf.String(), stderrBuf.String(), exitCodeFromCmdWait(waitErr), func() error {
+		if waitErr == nil {
+			return nil
+		}
+		if _, ok := waitErr.(*exec.ExitError); ok {
+			return nil // 与旧行为一致：非零退出不作为 error 返回
+		}
+		return waitErr
+	}()
+}
+
+// runSSHSessionWithStream Start + 并发读管线 + Wait；避免 SSH 缓冲死锁并支持实时日志。
+func runSSHSessionWithStream(session *ssh.Session, actualCmd string, h OutputLineHandler) (stdout, stderr string, exitCode int, err error) {
+	stdoutPipe, err := session.StdoutPipe()
+	if err != nil {
+		return "", "", -1, fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderrPipe, err := session.StderrPipe()
+	if err != nil {
+		return "", "", -1, fmt.Errorf("stderr pipe: %w", err)
+	}
+	if err := session.Start(actualCmd); err != nil {
+		return "", "", -1, err
+	}
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_ = pumpOutputStream(stdoutPipe, &stdoutBuf, "stdout", h)
+	}()
+	go func() {
+		defer wg.Done()
+		_ = pumpOutputStream(stderrPipe, &stderrBuf, "stderr", h)
+	}()
+
+	waitErr := session.Wait()
+	wg.Wait()
+	code := exitCodeFromSSHWait(waitErr)
+	if waitErr != nil {
+		if _, ok := waitErr.(*ssh.ExitError); ok {
+			return stdoutBuf.String(), stderrBuf.String(), code, nil
+		}
+		return stdoutBuf.String(), stderrBuf.String(), code, waitErr
+	}
+	return stdoutBuf.String(), stderrBuf.String(), code, nil
 }
 
 func (e *SSHExecutor) ExecuteScript(script string, sudo bool) (*ExecResult, error) {
@@ -747,7 +930,7 @@ func WrapConnectErrorAfterRetries(info ConnectAttemptInfo, attempts int, err err
 }
 
 // LogConnectStart 在 SSH 建连前写入 debug（仅 debug 文件，不进终端）。
-// 有密码时以明文记录，便于核对 CLI 传入值（不经 --log-redact 脱敏）。
+// 有密码时以明文记录，便于核对 CLI 传入值。
 func LogConnectStart(logger *logging.Logger, info ConnectAttemptInfo, stepID string, attempt, maxAttempts int) {
 	if logger == nil {
 		return

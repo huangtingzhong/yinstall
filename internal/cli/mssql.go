@@ -31,6 +31,7 @@ Mirror/AG stages (--stage): all/a (install replica + HA), software/s (install on
 }
 
 func init() {
+	mssqlCmd.Hidden = true // 不对外开放；命令仍可用，但不出现在 yinstall -h
 	mssqlCmd.AddCommand(mssqlInstallCmd)
 	mssqlCmd.AddCommand(mssqlMirrorCmd)
 	mssqlCmd.AddCommand(mssqlAGCmd)

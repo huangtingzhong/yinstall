@@ -106,7 +106,7 @@ func stressSourceBuildTimeout(ctx *runner.StepContext) time.Duration {
 
 // stressLogPhase 写入结构化 debug 里程碑（仅 debug 文件，不进终端）。
 func stressLogPhase(ctx *runner.StepContext, phase, msg string) {
-	ctx.LogPhase(phase, msg)
+	ctx.LogPhase(phase, runner.StepMsg(ctx, msg))
 }
 
 // stressSysbenchSummary 从 sysbench 输出提取关键指标行（events/s、total time、latency）。
@@ -194,7 +194,7 @@ type contextualExecutor interface {
 }
 
 // stressExecute 执行远端命令；timeout>0 时通过 SSH session 超时控制最长时间。
-// 始终写入 LogCommandStart/LogCommandResult（与 ctx.Execute 一致），避免长耗时压测时 debug 无命令记录。
+// SSH/Local 实时写 debug；未挂接流式时事后 LogCommandResult。
 func stressExecute(ctx *runner.StepContext, cmd string, sudo bool, timeout time.Duration) (runner.ExecResult, error) {
 	if ctx == nil || ctx.Executor == nil {
 		return nil, fmt.Errorf("executor not available")
@@ -204,6 +204,7 @@ func stressExecute(ctx *runner.StepContext, cmd string, sudo bool, timeout time.
 	if ctx.Logger != nil {
 		ctx.Logger.LogCommandStart(host, stepID, cmd)
 	}
+	finish := runner.BindCommandDebugStream(ctx.Executor, ctx.Logger, host, stepID)
 	start := time.Now()
 
 	var result runner.ExecResult
@@ -220,18 +221,9 @@ func stressExecute(ctx *runner.StepContext, cmd string, sudo bool, timeout time.
 		result, err = ctx.Executor.Execute(cmd, sudo)
 	}
 
-	if ctx.Logger != nil {
-		dur := time.Since(start)
-		if result != nil {
-			ctx.Logger.LogCommandResult(host, stepID,
-				result.GetStdout(), result.GetStderr(), result.GetExitCode(), dur)
-		} else if err != nil {
-			ctx.Logger.LogCommandResult(host, stepID, "", err.Error(), -1, dur)
-		}
-	}
+	finish(result, err, time.Since(start))
 	if result != nil && timeout > 0 && isStressTimeoutExit(result.GetExitCode()) {
-		appendWarning(ctx, ctx.CurrentStepID,
-			fmt.Sprintf("command timed out after %ds: %s", int(timeout.Seconds()), truncateCmdForLog(cmd)))
+		appendWarning(ctx, fmt.Sprintf("command timed out after %ds: %s", int(timeout.Seconds()), truncateCmdForLog(cmd)))
 	}
 	return result, err
 }
@@ -465,7 +457,8 @@ const (
 )
 
 // appendError 向 ctx.Results[stress_errors] 追加一条错误记录。
-func appendError(ctx *runner.StepContext, stepID, msg string) {
+func appendError(ctx *runner.StepContext, msg string) {
+	stepID := ctx.CurrentStepID
 	entry := map[string]string{"step": stepID, "level": "error", "message": msg}
 	existing, _ := ctx.Results[keyStressErrors].([]map[string]string)
 	ctx.Results[keyStressErrors] = append(existing, entry)
@@ -473,7 +466,8 @@ func appendError(ctx *runner.StepContext, stepID, msg string) {
 }
 
 // appendWarning 向 ctx.Results[stress_warnings] 追加一条警告记录。
-func appendWarning(ctx *runner.StepContext, stepID, msg string) {
+func appendWarning(ctx *runner.StepContext, msg string) {
+	stepID := ctx.CurrentStepID
 	entry := map[string]string{"step": stepID, "level": "warning", "message": msg}
 	existing, _ := ctx.Results[keyStressWarnings].([]map[string]string)
 	ctx.Results[keyStressWarnings] = append(existing, entry)

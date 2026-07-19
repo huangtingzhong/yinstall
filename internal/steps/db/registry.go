@@ -2,51 +2,64 @@ package db
 
 import "github.com/yinstall/internal/runner"
 
-// GetAllSteps 返回全部 DB 安装 steps（顺序即默认执行顺序；C-001～C-034 连续编号）
+// GetAllSteps 返回全部 DB 安装 steps（顺序即 registry 顺序；ID 由 BuildSteps 自动赋 C-001..C-NNN）。
 func GetAllSteps() []*runner.Step {
-	return []*runner.Step{
-		// 前置：连通性与 YAC 条件（C-001 在 db.go 里作为全局 precheck 执行）
-		StepC001Check(),
-		StepC002PortCheck(),
-		StepC003HomeCheck(),
+	return runner.BuildSteps(runner.StepSpec{
+		Prefix: "C",
+		Entries: []runner.StepEntry{
+			{New: stepCheck},
+			{New: stepPortCheck},
+			{New: stepHomeCheck},
 
-		StepC004CreateInstallDir(),
-		StepC005CreateDataDirs(),
-		StepC006SetDirOwnership(),
+			{New: stepCreateInstallDir},
+			{New: stepCreateDataDirs},
+			{New: stepSetDirOwnership},
 
-		StepC007ExtractPackage(),
-		StepC008CleanStaleBashrc(),
+			{New: stepExtractPackage},
+			{New: stepCleanStaleBashrc},
 
-		StepC009VIPCheck(),
-		StepC010WriteHosts(),
-		StepC011ScanDNS(),
-		StepC012DiskCheck(),
-		StepC013ScanNameCheck(),
+			{New: stepVipCheck},
+			{New: stepWriteHosts},
+			{New: stepScandnsCheck},
+			{New: stepDiskCheck},
+			{New: stepScannameCheck},
 
-		StepC014GenConfig(),
-		StepC015SetCharacterSet(),
-		StepC016DisableArchivelog(),
-		StepC017ConfigureRedo(),
-		StepC018SetNativeType(),
-		StepC019TuneYFSParams(),
+			{New: stepGenConfig},
+			{New: StepSetDBTimezone},
+			{New: stepSetCharacterSet},
+			{New: stepDisableArchivelog},
+			{New: stepConfigureRedo},
+			{New: stepSetNativeType},
+			{New: stepTuneYfsParams},
 
-		StepC020InstallSoftware(),
-		StepC021DeployDatabase(),
-		StepC022CreateArchDG(),
+			{New: stepInstallSoftware},
+			{New: stepDeployDatabase},
+			{New: stepCreateArchdg},
 
-		StepC023SetEnvVars(),
-		StepC024CreatePluggableDatabases(),
-		StepC025ConfigureDefaultProfile(),
-		StepC026ApplySpfileParams(),
-		StepC027ConfigureTPCC(),
-		StepC028ConfigureUnifiedAudit(),
-		StepC029ExecuteCustomSQL(),
-		StepC030RestartDatabase(),
-		StepC031VerifyInstall(),
+			{New: stepSetEnvVars},
+			{New: stepCreatePluggableDatabases},
+			{New: stepConfigureDefaultProfile},
+			{New: stepApplySpfileParams},
+			{New: stepConfigureTpcc},
+			{New: stepConfigureUnifiedAudit},
+			{New: stepExecuteCustomSql},
+			{New: stepRestartDatabase},
+			{New: stepVerifyInstall},
 
-		StepC032ConfigAutostartScript(),
-		StepC033ConfigAutostartService(),
+			{New: stepConfigAutostartScript},
+			{New: stepConfigAutostartService},
 
-		StepC034ShowClusterStatus(),
-	}
+			{New: stepShowClusterStatus},
+		},
+	})
+}
+
+// FirstStepID returns C-001 (or first registry step ID).
+func FirstStepID() string {
+	return runner.FirstStepID(GetAllSteps(), "C")
+}
+
+// StepIDByName returns the registry ID for a step Name.
+func StepIDByName(name string) string {
+	return runner.StepIDByName(GetAllSteps(), name)
 }

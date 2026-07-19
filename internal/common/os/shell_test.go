@@ -8,7 +8,7 @@ import (
 
 // 模拟 C-014：genCmd 内 -p 密码，再经 sudo bash -lc 外层 ShellSingleQuote。
 func wrapAsBashLc(inner string) string {
-	return fmt.Sprintf("sudo -n -iu yashan bash -lc %s", ShellSingleQuote(inner))
+	return fmt.Sprintf("sudo -n -u yashan bash -lc %s", ShellSingleQuote("cd ~ && "+inner))
 }
 
 func TestYasbootPasswordQuotingForBashLc(t *testing.T) {

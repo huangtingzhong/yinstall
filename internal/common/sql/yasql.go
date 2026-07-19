@@ -378,29 +378,6 @@ func YasqlConnectHost(ctx *runner.StepContext) string {
 	return ""
 }
 
-// WrapSQLForPDBContainer prefixes SQL with ALTER SESSION SET CONTAINER for execution in a PDB.
-//
-// Deprecated: YashanDB 不支持 ALTER SESSION SET CONTAINER；请用 ExecuteSQLAsSysdbaInPDBCtx（TCP 连 PDB）。
-func WrapSQLForPDBContainer(pdbName, sql string) string {
-	id := strings.TrimSpace(pdbName)
-	body := strings.TrimSpace(sql)
-	if body != "" && !strings.HasSuffix(body, ";") {
-		body += ";"
-	}
-	if body == "" {
-		return fmt.Sprintf("ALTER SESSION SET CONTAINER = %s;", sqlPDBIdentifier(id))
-	}
-	return fmt.Sprintf("ALTER SESSION SET CONTAINER = %s;\n%s", sqlPDBIdentifier(id), body)
-}
-
-func sqlPDBIdentifier(name string) string {
-	name = strings.TrimSpace(name)
-	if matched, _ := regexp.MatchString(`^[A-Za-z_][A-Za-z0-9_$#]*$`, name); matched {
-		return name
-	}
-	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
-}
-
 // ExecuteSQLAsSysdbaInPDBCtx runs SQL in the given PDB via sys@host:port/pdbName TCP 连接。
 func ExecuteSQLAsSysdbaInPDBCtx(ctx *runner.StepContext, osUser, envFile, clusterName, pdbName, sql string, showOutput bool) (*YasqlResult, error) {
 	if ctx == nil {

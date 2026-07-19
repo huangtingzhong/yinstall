@@ -14,12 +14,15 @@ import (
 
 // GetMysqlCleanSteps returns MySQL cleanup steps.
 func GetMysqlCleanSteps() []*runner.Step {
-	return []*runner.Step{
-		StepCleanMysql001StopService(),
-		StepCleanMysql002RemoveUnit(),
-		StepCleanMysql003RemoveDirectories(),
-		StepCleanMysql004FinalCheck(),
-	}
+	return runner.BuildSteps(runner.StepSpec{
+		Prefix: "CLEAN-MYSQL",
+		Entries: []runner.StepEntry{
+			{New: StepCleanMysql001StopService},
+			{New: StepCleanMysql002RemoveUnit},
+			{New: StepCleanMysql003RemoveDirectories},
+			{New: StepCleanMysql004FinalCheck},
+		},
+	})
 }
 
 func cleanUseSudo(ctx *runner.StepContext) bool {
@@ -277,7 +280,6 @@ func ensureMysqlCleanPlatform(ctx *runner.StepContext) {
 // StepCleanMysql001StopService stops mysqld via systemd or process kill.
 func StepCleanMysql001StopService() *runner.Step {
 	return &runner.Step{
-		ID:          "CLEAN-MYSQL-001",
 		Name:        "Stop MySQL Service",
 		Description: "Stop MySQL systemd service or mysqld processes",
 		Tags:        []string{"clean", "mysql"},
@@ -304,7 +306,6 @@ func StepCleanMysql001StopService() *runner.Step {
 // StepCleanMysql002RemoveUnit removes systemd unit file.
 func StepCleanMysql002RemoveUnit() *runner.Step {
 	return &runner.Step{
-		ID:          "CLEAN-MYSQL-002",
 		Name:        "Remove MySQL Unit",
 		Description: "Remove mysqld systemd unit file",
 		Tags:        []string{"clean", "mysql"},
@@ -347,7 +348,6 @@ func StepCleanMysql002RemoveUnit() *runner.Step {
 // StepCleanMysql003RemoveDirectories removes MySQL home/data/other paths.
 func StepCleanMysql003RemoveDirectories() *runner.Step {
 	return &runner.Step{
-		ID:          "CLEAN-MYSQL-003",
 		Name:        "Remove MySQL Directories",
 		Description: "Remove MySQL base/data/other directories",
 		Tags:        []string{"clean", "mysql"},
@@ -397,7 +397,6 @@ func StepCleanMysql003RemoveDirectories() *runner.Step {
 // StepCleanMysql004FinalCheck verifies mysqld stopped and dirs removed.
 func StepCleanMysql004FinalCheck() *runner.Step {
 	return &runner.Step{
-		ID:          "CLEAN-MYSQL-004",
 		Name:        "MySQL Cleanup Final Check",
 		Description: "Verify MySQL processes stopped",
 		Tags:        []string{"clean", "mysql"},
@@ -428,7 +427,6 @@ func StepCleanMysql004FinalCheck() *runner.Step {
 // StepCleanMySQL legacy single-step alias.
 func StepCleanMySQL() *runner.Step {
 	return &runner.Step{
-		ID:          "CLEAN-MYSQL",
 		Name:        "Clean MySQL",
 		Description: "Clean MySQL installation (all phases)",
 		Tags:        []string{"clean", "mysql"},

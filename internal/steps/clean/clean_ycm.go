@@ -13,43 +13,43 @@ import (
 // StepCleanYCM Clean YCM installation
 func StepCleanYCM() *runner.Step {
 	return &runner.Step{
-		ID:          "CLEAN-YCM",
 		Name:        "Clean YCM",
 		Description: "Clean YCM installation: systemd autostart, processes, and directories",
 		Tags:        []string{"clean", "ycm"},
 		Optional:    false,
 
 		PreCheck: func(ctx *runner.StepContext) error {
-			ycmHome := ctx.GetParamString("ycm_home", "/opt/ycm")
+			installDir, ycmHome, deletePath := ycmCleanPaths(ctx)
 
 			svc := ycmsteps.ServiceNameFromContext(ctx)
 
 			ctx.Logger.Info("YCM cleanup parameters:")
+			ctx.Logger.Info("  YCM_INSTALL_DIR: %s", installDir)
 			ctx.Logger.Info("  YCM_HOME: %s", ycmHome)
+			ctx.Logger.Info("  CLEAN_TARGET: %s", deletePath)
 			ctx.Logger.Info("  systemd unit: %s", svc)
 
-			if err := commonos.ValidateDeletePath(ycmHome); err != nil {
-				return fmt.Errorf("invalid YCM_HOME delete path %q: %w", ycmHome, err)
+			if err := commonos.ValidateDeletePath(deletePath); err != nil {
+				return fmt.Errorf("invalid YCM clean delete path %q: %w", deletePath, err)
 			}
 
-			// Check if directory exists
-			ctx.Logger.Info("Checking if YCM_HOME directory exists...")
-			result, _ := ctx.Execute(fmt.Sprintf("test -d %s", commonos.ShellSingleQuote(ycmHome)), false)
+			ctx.Logger.Info("Checking if YCM clean target exists...")
+			result, _ := ctx.Execute(fmt.Sprintf("test -e %s", commonos.ShellSingleQuote(deletePath)), false)
 			if result == nil || result.GetExitCode() != 0 {
-				ctx.Logger.Info("YCM_HOME directory does not exist (%s), skipping cleanup", ycmHome)
-				return fmt.Errorf("skip: YCM_HOME directory does not exist")
+				ctx.Logger.Info("YCM clean target does not exist (%s), skipping cleanup", deletePath)
+				return fmt.Errorf("skip: YCM clean target does not exist")
 			}
-			ctx.Logger.Info("[OK] YCM_HOME directory exists")
+			ctx.Logger.Info("[OK] YCM clean target exists")
 
 			return nil
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			ycmHome := ctx.GetParamString("ycm_home", "/opt/ycm")
-			if err := commonos.ValidateDeletePath(ycmHome); err != nil {
-				return fmt.Errorf("invalid YCM_HOME delete path %q: %w", ycmHome, err)
+			_, ycmHome, deletePath := ycmCleanPaths(ctx)
+			if err := commonos.ValidateDeletePath(deletePath); err != nil {
+				return fmt.Errorf("invalid YCM clean delete path %q: %w", deletePath, err)
 			}
-			ycmQ := commonos.ShellSingleQuote(ycmHome)
+			deleteQ := commonos.ShellSingleQuote(deletePath)
 
 			ctx.Logger.Info("Starting YCM cleanup process")
 
@@ -67,7 +67,7 @@ func StepCleanYCM() *runner.Step {
 			// 1. Find all YCM processes
 			ctx.Logger.Info("Step 1: Finding YCM processes")
 			// grep -F + PathLiteralPrefixForPS：避免 /opt/ycm 匹配 /opt/ycm2、/data123 匹配 /data1234 等前缀歧义
-			ycmPat := PathLiteralPrefixForPS(ycmHome)
+			ycmPat := PathLiteralPrefixForPS(deletePath)
 			var findProcessCmd string
 			if ycmPat == "" {
 				findProcessCmd = `false`
@@ -123,14 +123,14 @@ func StepCleanYCM() *runner.Step {
 				}
 			}
 
-			// 4. Remove directory
-			ctx.Logger.Info("Step 4: Removing YCM directory")
-			ctx.Logger.Info("Removing YCM_HOME: %s", ycmHome)
-			result, err := ctx.Execute(fmt.Sprintf("rm -rf %s", ycmQ), true)
+			// 4. Remove directory tree
+			ctx.Logger.Info("Step 4: Removing YCM directory tree")
+			ctx.Logger.Info("Removing CLEAN_TARGET: %s (ycm_home=%s)", deletePath, ycmHome)
+			result, err := ctx.Execute(fmt.Sprintf("rm -rf %s", deleteQ), true)
 			if err != nil || (result != nil && result.GetExitCode() != 0) {
-				ctx.Logger.Warn("Failed to remove YCM_HOME: %v", err)
+				ctx.Logger.Warn("Failed to remove YCM clean target: %v", err)
 			} else {
-				ctx.Logger.Info("YCM_HOME removed successfully")
+				ctx.Logger.Info("YCM clean target removed successfully")
 			}
 
 			ctx.Logger.Info("YCM cleanup completed")
@@ -138,7 +138,7 @@ func StepCleanYCM() *runner.Step {
 		},
 
 		PostCheck: func(ctx *runner.StepContext) error {
-			ycmHome := ctx.GetParamString("ycm_home", "")
+			_, _, deletePath := ycmCleanPaths(ctx)
 
 			ctx.Logger.Info("Verifying cleanup results")
 
@@ -163,7 +163,7 @@ func StepCleanYCM() *runner.Step {
 			}
 
 			// 1. Check if processes still exist
-			ycmPat := PathLiteralPrefixForPS(ycmHome)
+			ycmPat := PathLiteralPrefixForPS(deletePath)
 			var findProcessCmd string
 			if ycmPat == "" {
 				findProcessCmd = `false`
@@ -182,15 +182,27 @@ func StepCleanYCM() *runner.Step {
 			}
 
 			// 2. Check if directory still exists
-			result, _ = ctx.Execute(fmt.Sprintf("test -d %s", commonos.ShellSingleQuote(ycmHome)), false)
+			result, _ = ctx.Execute(fmt.Sprintf("test -e %s", commonos.ShellSingleQuote(deletePath)), false)
 			if result != nil && result.GetExitCode() == 0 {
-				ctx.Logger.Warn("WARNING: YCM_HOME still exists: %s", ycmHome)
+				ctx.Logger.Warn("WARNING: YCM clean target still exists: %s", deletePath)
 			} else {
-				ctx.Logger.Info("[OK] YCM_HOME removed successfully")
+				ctx.Logger.Info("[OK] YCM clean target removed successfully")
 			}
 
 			ctx.Logger.Info("Cleanup verification completed")
 			return nil
 		},
 	}
+}
+
+func ycmCleanPaths(ctx *runner.StepContext) (installDir, ycmHome, deletePath string) {
+	ycmHome = ctx.GetParamString("ycm_home", "/opt/ycm")
+	installDir = strings.TrimSpace(ctx.GetParamString("ycm_install_dir", ""))
+	if installDir == "" {
+		installDir = ycmsteps.InstallDirFromYCMHome(ycmHome)
+	}
+	deletePath = ycmsteps.YCMCleanDeletePath(installDir, ycmHome,
+		ctx.GetParamBool("ycm_home_explicit", false),
+		ctx.GetParamBool("ycm_install_dir_explicit", false))
+	return installDir, ycmHome, deletePath
 }

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/yinstall/internal/logging"
@@ -42,7 +43,9 @@ var (
 	// 归档/输出（collect、stressos、os/db 安装后挂钩共用）
 	outputDir        string // -o / --output
 	archiveOnSuccess bool   // -a / --archive
-	logRedact        bool   // --log-redact：日志中脱敏密码
+
+	// 当前 OM (yasom) 地址；短参 -M，长参 --om（已移除旧别名 --om-ip）
+	globalOmIP string
 )
 
 // AppVersion 在运行时可被 cmd/yinstall/main.go 的 init() 通过构建时注入的 Version 变量覆盖
@@ -66,7 +69,6 @@ A CLI tool for automating YashanDB installation, including:
 Use  yinstall <command> -l  to print the step catalog (IDs, order, descriptions) for that command.`,
 	Version: AppVersion,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		logging.SetRedactSensitive(logRedact)
 		if err := validatePort("--ssh-port", sshPort); err != nil {
 			return err
 		}
@@ -108,7 +110,6 @@ func init() {
 	rootCmd.PersistentFlags().StringSliceVarP(&forceSteps, "force-steps", "f", nil, "Force execute specific steps (e.g. -f B-002,B-003)")
 	rootCmd.PersistentFlags().BoolVar(&forceDeleteUser, "force-delete-user", false, "Allow -F/--force or -f/--force-steps to delete and recreate existing users and groups (dangerous)")
 	rootCmd.PersistentFlags().StringVar(&logDir, "log-dir", defaultLogDir(), "Log directory")
-	rootCmd.PersistentFlags().BoolVar(&logRedact, "log-redact", false, "Redact passwords/secrets in session and debug logs (default: show plaintext)")
 	rootCmd.PersistentFlags().BoolVarP(&listSteps, "list-steps", "l", false, "List step catalog for the subcommand (IDs, order, descriptions) and exit")
 
 	// SSH 参数
@@ -120,10 +121,11 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&sshPassword, "ssh-password", "P", "", "SSH password")
 	rootCmd.PersistentFlags().StringVar(&sshKeyPath, "ssh-key-path", defaultSSHKeyPath(), sshKeyPathFlagUsage())
 	rootCmd.PersistentFlags().BoolVar(&useSudo, "sudo", true, "Use sudo for privileged operations")
+	rootCmd.PersistentFlags().StringVarP(&globalOmIP, "om", "M", "", "Current OM (yasom) host IP (standby/om/clean; empty = discover from om_addr when possible)")
 
-	// 软件目录参数
-	rootCmd.PersistentFlags().StringSliceVarP(&localSoftwareDirs, "local-software-dirs", "L", defaultLocalSoftwareDirs(), "Local software directories (control plane)")
-	rootCmd.PersistentFlags().StringVarP(&remoteSoftwareDir, "remote-software-dir", "R", "/data/yashan/soft", "Remote software directory (target host)")
+	// 软件目录参数：-L 默认含 ./software、./pkg、当前目录、家目录等；-R 上传落点，查找时另扫 SSH 用户 $HOME
+	rootCmd.PersistentFlags().StringSliceVarP(&localSoftwareDirs, "local-software-dirs", "L", defaultLocalSoftwareDirs(), "Local software dirs (default: ./software, ./pkg, cwd, $HOME, and ~/Downloads/yashan or ~/Downloads/oracle if present)")
+	rootCmd.PersistentFlags().StringVarP(&remoteSoftwareDir, "remote-software-dir", "R", "/data/yashan/soft", "Remote software dir for upload/lookup (also searches SSH login user $HOME)")
 
 	rootCmd.PersistentFlags().StringVarP(&outputDir, "output", "o", "",
 		"Local output directory for collect/stress archives and install post-success archive (default: ./output/<kind>/<timestamp>)")
@@ -136,6 +138,7 @@ func init() {
 	rootCmd.AddCommand(mysqlCmd)
 	rootCmd.AddCommand(mssqlCmd)
 	rootCmd.AddCommand(standbyCmd)
+	rootCmd.AddCommand(omCmd)
 	rootCmd.AddCommand(ycmCmd)
 	rootCmd.AddCommand(ympCmd)
 	rootCmd.AddCommand(NewCleanCommand())
@@ -168,28 +171,43 @@ func sshKeyPathFlagUsage() string {
 	}
 }
 
-// defaultLocalSoftwareDirs 返回默认本地软件目录列表。
-// 除固定的 ./software 和 ./pkg 外，还会加入当前用户家目录下的
-// Downloads/yashan 目录（跨平台：Windows 为 Downloads\yashan）。
+// DefaultLocalSoftwareDirs 返回 -L 未指定时的默认本地软件目录（供测试与调用方复用）。
+func DefaultLocalSoftwareDirs() []string {
+	return defaultLocalSoftwareDirs()
+}
+
+// defaultLocalSoftwareDirs 返回默认本地软件目录列表（控制端）。
+// 顺序：./software、./pkg、工具当前工作目录（.）、用户家目录、
+// ~/Downloads/yashan 与 ~/Downloads/oracle（目录存在时）。
 func defaultLocalSoftwareDirs() []string {
-	dirs := []string{"./software", "./pkg"}
+	dirs := []string{"./software", "./pkg", "."}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return dirs
+		return uniquePreserveOrder(dirs)
 	}
-	var downloadsYashan string
-	if runtime.GOOS == "windows" {
-		// Windows：C:\Users\<user>\Downloads\yashan
-		downloadsYashan = filepath.Join(home, "Downloads", "yashan")
-	} else {
-		// macOS / Linux：~/Downloads/yashan
-		downloadsYashan = filepath.Join(home, "Downloads", "yashan")
+	dirs = append(dirs, home)
+	for _, name := range []string{"yashan", "oracle"} {
+		p := filepath.Join(home, "Downloads", name)
+		if info, err := os.Stat(p); err == nil && info.IsDir() {
+			dirs = append(dirs, p)
+		}
 	}
-	// 仅当目录存在时才加入，避免无效路径干扰查找
-	if info, err := os.Stat(downloadsYashan); err == nil && info.IsDir() {
-		dirs = append(dirs, downloadsYashan)
+	return uniquePreserveOrder(dirs)
+}
+
+// uniquePreserveOrder 去重并保持顺序。
+func uniquePreserveOrder(dirs []string) []string {
+	seen := make(map[string]bool, len(dirs))
+	out := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		d = strings.TrimSpace(d)
+		if d == "" || seen[d] {
+			continue
+		}
+		seen[d] = true
+		out = append(out, d)
 	}
-	return dirs
+	return out
 }
 
 // GetGlobalFlags 获取全局参数
@@ -219,6 +237,7 @@ type GlobalFlags struct {
 	ListSteps         bool
 	Output            string // --output / -o
 	ArchiveOnSuccess  bool   // --archive / -a
+	OmIP              string // -M/--om：当前 OM (yasom) 地址
 }
 
 // applyInstallArchiveDefault 在 os/db 子命令中，用户未显式传 -a/--archive 时默认开启安装后归档。
@@ -257,7 +276,21 @@ func GetGlobalFlags() GlobalFlags {
 		ListSteps:         listSteps,
 		Output:            outputDir,
 		ArchiveOnSuccess:  archiveOnSuccess,
+		OmIP:              strings.TrimSpace(globalOmIP),
 	}
+}
+
+// ResolveGlobalOmIP 返回全局 -M/--om；若为空则依次尝试 extra（如 --om-current、targets[0]）。
+func ResolveGlobalOmIP(extra ...string) string {
+	if ip := strings.TrimSpace(globalOmIP); ip != "" {
+		return ip
+	}
+	for _, e := range extra {
+		if ip := strings.TrimSpace(e); ip != "" {
+			return ip
+		}
+	}
+	return ""
 }
 
 func PrintError(format string, args ...interface{}) {

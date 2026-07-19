@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/logging"
 	"github.com/yinstall/internal/runner"
 	"github.com/yinstall/internal/ssh"
@@ -46,7 +47,7 @@ func RunConnectivityPhase(
 	res := &ConnectivityResult{NextStepIndex: stepIndex}
 
 	if connectivityStep == nil {
-		// 无连通步：只建连，不执行 RunStep
+		// 无连通步：只建连，并探测 OSInfo 供装包/ISO 选择使用
 		for _, target := range targets {
 			executor, err := createExecutor(target, flags, logger, "")
 			if err != nil {
@@ -56,7 +57,15 @@ func RunConnectivityPhase(
 			if platform == "" {
 				platform = "linux"
 			}
-			res.HostInfos = append(res.HostInfos, &HostInfo{Host: target, Executor: executor, TargetPlatform: platform})
+			var osInfo *runner.OSInfo
+			if platform == "linux" {
+				probeCtx := &runner.StepContext{
+					Executor: &runnerExecAdapter{e: executor},
+					Logger:   logger,
+				}
+				osInfo = commonos.DetectOSInfo(probeCtx)
+			}
+			res.HostInfos = append(res.HostInfos, &HostInfo{Host: target, Executor: executor, OSInfo: osInfo, TargetPlatform: platform})
 		}
 		return res, nil
 	}

@@ -18,8 +18,11 @@ const (
 	resultKeyCleanSourcedYascs   = "clean_sourced_yascs_home"
 	resultKeyCleanSourcedCluster = "clean_sourced_cluster"
 	resultKeyCleanEnvValidated   = "clean_env_validated"
-	// resultKeyCleanAltYasdbHome：YAC 时 env 指向 ~/.yasboot/...，实际软件树常在 /data/.../yasdb_home
+	resultKeyCleanDBStageDir     = "clean_db_stage_dir"
+	// resultKeyCleanAltYasdbHome：CLI/安装根目录（与 source 的 YASDB_HOME 不同时双删）
 	resultKeyCleanAltYasdbHome = "clean_alt_yasdb_home"
+	// resultKeyCleanYasbootHomeLink：~/.yasboot/<cluster>_yasdb_home 符号链接路径（删树时一并移除）
+	resultKeyCleanYasbootHomeLink = "clean_yasboot_home_link"
 )
 
 // sourcedDBEnv 为 source env 后读取到的关键变量（不含密码）。
@@ -55,9 +58,10 @@ func resolveCleanEnvFile(ctx *runner.StepContext) (string, error) {
 }
 
 // readSourcedDBEnvVars 以产品用户 source env 后打印 YASDB_HOME/YASDB_DATA/YASCS_HOME。
+// 使用 Quiet 版：source 失败时由 prepareCleanDBEnv 回退 CLI 路径，避免刷 Error Exit。
 func readSourcedDBEnvVars(ctx *runner.StepContext, osUser, envFile string) (*sourcedDBEnv, error) {
 	cmd := `printf 'YASDB_HOME=%s\nYASDB_DATA=%s\nYASCS_HOME=%s\n' "${YASDB_HOME:-}" "${YASDB_DATA:-}" "${YASCS_HOME:-}"`
-	result, err := commonos.ExecuteAsUserWithEnvCheck(ctx, osUser, envFile, cmd, false)
+	result, err := commonos.ExecuteAsUserWithEnvCheckQuiet(ctx, osUser, envFile, cmd, false)
 	if err != nil {
 		return nil, err
 	}
@@ -92,17 +96,56 @@ func readSourcedDBEnvVars(ctx *runner.StepContext, osUser, envFile string) (*sou
 	return vars, nil
 }
 
-// envPathMatchesParam 校验 source 后的路径与 CLI 参数一致：相等或 sourced 为 param 子路径。
-func envPathMatchesParam(sourced, param, label string) error {
-	sourced = path.Clean(strings.ReplaceAll(strings.TrimSpace(sourced), `\`, `/`))
-	param = path.Clean(strings.ReplaceAll(strings.TrimSpace(param), `\`, `/`))
-	if sourced == "" || param == "" {
-		return fmt.Errorf("%s: empty path (sourced=%q param=%q)", label, sourced, param)
-	}
-	if sourced == param || commonos.DeletePathUnder(sourced, param) {
+// envPathMatchesParam 校验两路径在字面量上兼容：相等，或 a 在 b 下，或 b 在 a 下。
+func envPathMatchesParam(a, b, label string) error {
+	if PathsCompatibleLiterals(a, b) {
 		return nil
 	}
-	return fmt.Errorf("%s mismatch: sourced %q is not equal to nor under CLI param %q", label, sourced, param)
+	a = path.Clean(strings.ReplaceAll(strings.TrimSpace(a), `\`, `/`))
+	b = path.Clean(strings.ReplaceAll(strings.TrimSpace(b), `\`, `/`))
+	if a == "" || b == "" {
+		return fmt.Errorf("%s: empty path (a=%q b=%q)", label, a, b)
+	}
+	return fmt.Errorf("%s mismatch: %q is not equal to nor under %q", label, a, b)
+}
+
+// resolveRemoteRealPath 在远端解析符号链接真实路径；失败时返回清理后的原路径。
+func resolveRemoteRealPath(ctx *runner.StepContext, p string) string {
+	p = path.Clean(strings.ReplaceAll(strings.TrimSpace(p), `\`, `/`))
+	if p == "" || p == "." || p == "/" {
+		return p
+	}
+	q := commonos.ShellSingleQuote(p)
+	cmd := fmt.Sprintf("readlink -f %s 2>/dev/null || realpath %s 2>/dev/null || printf '%%s' %s", q, q, q)
+	result, _ := ctx.Execute(cmd, false)
+	if result == nil || result.GetExitCode() != 0 {
+		return p
+	}
+	out := path.Clean(strings.ReplaceAll(strings.TrimSpace(result.GetStdout()), `\`, `/`))
+	if out == "" || out == "." {
+		return p
+	}
+	return out
+}
+
+// envPathsCompatible 字面量或 resolve 后兼容则通过。
+func envPathsCompatible(ctx *runner.StepContext, sourced, param, label string) (resolvedSourced, resolvedParam string, err error) {
+	resolvedSourced = resolveRemoteRealPath(ctx, sourced)
+	resolvedParam = resolveRemoteRealPath(ctx, param)
+	if envPathMatchesParam(sourced, param, label) == nil {
+		return resolvedSourced, resolvedParam, nil
+	}
+	if envPathMatchesParam(resolvedSourced, resolvedParam, label) == nil {
+		return resolvedSourced, resolvedParam, nil
+	}
+	if envPathMatchesParam(resolvedSourced, param, label) == nil {
+		return resolvedSourced, resolvedParam, nil
+	}
+	if envPathMatchesParam(sourced, resolvedParam, label) == nil {
+		return resolvedSourced, resolvedParam, nil
+	}
+	return resolvedSourced, resolvedParam, fmt.Errorf("%s mismatch: sourced %q (resolved %q) != CLI %q (resolved %q)",
+		label, sourced, resolvedSourced, param, resolvedParam)
 }
 
 func validateSourcedEnvAgainstParams(ctx *runner.StepContext, envFile string, vars *sourcedDBEnv) error {
@@ -115,23 +158,42 @@ func validateSourcedEnvAgainstParams(ctx *runner.StepContext, envFile string, va
 	paramCluster := ctx.GetParamString("db_cluster_name", "yashandb")
 	cleanYAC := ctx.GetParamString("clean_yac_disks", "") != ""
 
-	if err := envPathMatchesParam(vars.YASDBHome, paramHome, "YASDB_HOME"); err != nil {
-		// YAC：source 的 YASDB_HOME 常为 ~/.yasboot/<cluster>_yasdb_home，与 CLI 默认 /data/.../yasdb_home 并存
-		if strings.Contains(vars.YASDBHome, "/.yasboot/") && strings.Contains(paramHome, "yasdb_home") {
-			paramQ := commonos.ShellSingleQuote(paramHome)
-			result, _ := ctx.Execute(fmt.Sprintf("test -d %s", paramQ), false)
-			if result != nil && result.GetExitCode() == 0 {
-				ctx.Results[resultKeyCleanAltYasdbHome] = paramHome
-				ctx.Logger.Warn("YAC layout: env YASDB_HOME=%s; install tree at %s (both targeted for cleanup)", vars.YASDBHome, paramHome)
-			} else {
-				return err
-			}
-		} else {
-			return err
+	resolvedHome, resolvedParamHome, err := envPathsCompatible(ctx, vars.YASDBHome, paramHome, "YASDB_HOME")
+	if err != nil {
+		return err
+	}
+	// ~/.yasboot 链接与真实安装树并存：进程匹配用真实路径，删树时双删链接与安装根
+	if strings.Contains(vars.YASDBHome, "/.yasboot/") {
+		ctx.Results[resultKeyCleanYasbootHomeLink] = path.Clean(strings.ReplaceAll(vars.YASDBHome, `\`, `/`))
+		installRoot := resolvedHome
+		if reVersionLeaf.MatchString(path.Base(resolvedHome)) {
+			installRoot = path.Dir(resolvedHome)
+		}
+		// CLI 显式安装根优先（含自定义 cust_home）；否则用 resolve 推导的安装根
+		altHome := strings.TrimSpace(paramHome)
+		if altHome == "" || strings.Contains(altHome, "/.yasboot/") {
+			altHome = installRoot
+		}
+		if altHome != "" && altHome != resolvedHome {
+			ctx.Results[resultKeyCleanAltYasdbHome] = altHome
+			ctx.Logger.Warn("env YASDB_HOME=%s resolves to %s; install tree %s also targeted for cleanup",
+				vars.YASDBHome, resolvedHome, altHome)
+		}
+	} else if resolvedParamHome != "" && resolvedHome != "" && resolvedHome != resolvedParamHome {
+		if commonos.DeletePathUnder(resolvedHome, resolvedParamHome) || commonos.DeletePathUnder(resolvedParamHome, resolvedHome) {
+			ctx.Results[resultKeyCleanAltYasdbHome] = paramHome
 		}
 	}
-	if err := envPathMatchesParam(vars.YASDBData, paramData, "YASDB_DATA"); err != nil {
+	if resolvedHome != "" {
+		vars.YASDBHome = resolvedHome
+	}
+
+	resolvedData, _, err := envPathsCompatible(ctx, vars.YASDBData, paramData, "YASDB_DATA")
+	if err != nil {
 		return err
+	}
+	if resolvedData != "" {
+		vars.YASDBData = resolvedData
 	}
 
 	// 日志目录：与 DATA 同属安装根（如 /data/yashan/log 与 /data/yashan/yasdb_data）
@@ -197,20 +259,35 @@ func isYACFromSourced(vars *sourcedDBEnv) bool {
 }
 
 // prepareCleanDBEnv 解析 env 文件、source 并校验与 CLI 参数一致；结果写入 ctx.Results。
+// env 缺失且 --force-clean-primary / --skip-cluster-detach 时回退 CLI 推断路径，继续本机擦除。
 func prepareCleanDBEnv(ctx *runner.StepContext) error {
 	if v, ok := ctx.Results[resultKeyCleanEnvValidated].(bool); ok && v {
 		return nil
+	}
+	if ctx.Results == nil {
+		ctx.Results = make(map[string]interface{})
 	}
 
 	osUser := ctx.GetParamString("os_user", "yashan")
 	envFile, err := resolveCleanEnvFile(ctx)
 	if err != nil {
+		if allowCleanWithoutEnvFile(ctx) {
+			ctx.Logger.Warn("yasboot env file missing (%v); using CLI yasdb paths for local wipe", err)
+			applyCleanCLIPathFallback(ctx, "")
+			return nil
+		}
 		return fmt.Errorf("resolve env file: %w", err)
 	}
 
 	vars, err := readSourcedDBEnvVars(ctx, osUser, envFile)
 	if err != nil {
-		return fmt.Errorf("read sourced env from %s: %w", envFile, err)
+		// node remove 可能已删掉 .yasboot/<cluster>_yasdb_home，.bashrc 再 source 会失败；回退 CLI 路径继续本机清理
+		ctx.Logger.Warn("sourced env unavailable from %s (%v); falling back to CLI yasdb paths", envFile, err)
+		vars = &sourcedDBEnv{
+			YASDBHome: ctx.GetParamString("yasdb_home", "/data/yashan/yasdb_home"),
+			YASDBData: ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data"),
+			Cluster:   ctx.GetParamString("db_cluster_name", "yashandb"),
+		}
 	}
 	if err := validateSourcedEnvAgainstParams(ctx, envFile, vars); err != nil {
 		return err
@@ -227,6 +304,23 @@ func prepareCleanDBEnv(ctx *runner.StepContext) error {
 	}
 	ctx.Results[resultKeyCleanEnvValidated] = true
 	return nil
+}
+
+func allowCleanWithoutEnvFile(ctx *runner.StepContext) bool {
+	return ctx.GetParamBool("force_clean_primary", false) || ctx.GetParamBool("skip_cluster_detach", false)
+}
+
+func applyCleanCLIPathFallback(ctx *runner.StepContext, envFile string) {
+	home := ctx.GetParamString("yasdb_home", "/data/yashan/yasdb_home")
+	data := ctx.GetParamString("yasdb_data", "/data/yashan/yasdb_data")
+	cluster := ctx.GetParamString("db_cluster_name", "yashandb")
+	if envFile != "" {
+		ctx.Results[resultKeyCleanEnvFile] = envFile
+	}
+	ctx.Results[resultKeyCleanSourcedHome] = home
+	ctx.Results[resultKeyCleanSourcedData] = data
+	ctx.Results[resultKeyCleanSourcedCluster] = cluster
+	ctx.Results[resultKeyCleanEnvValidated] = true
 }
 
 // effectiveCleanDBPaths 返回经 source 校验后的路径（优先 sourced，供进程匹配与删目录）。
@@ -249,6 +343,27 @@ func effectiveCleanDBPaths(ctx *runner.StepContext) (home, data, log, cluster, o
 		cluster = v
 	}
 	return home, data, log, cluster, osUser, nil
+}
+
+// resolveCleanDBStageDir resolves db_stage_dir via getent (same rules as yinstall db C-004/C-007).
+func resolveCleanDBStageDir(ctx *runner.StepContext) (string, error) {
+	if v, ok := ctx.Results[resultKeyCleanDBStageDir].(string); ok && strings.TrimSpace(v) != "" {
+		return strings.TrimSpace(v), nil
+	}
+	if err := commonos.ResolveStageDirParam(ctx); err != nil {
+		return "", err
+	}
+	stage := strings.TrimSpace(ctx.GetParamString("db_stage_dir", ""))
+	if stage == "" {
+		user := ctx.GetParamString("os_user", "yashan")
+		port := ctx.GetParamInt("db_begin_port", commonos.DefaultDBBeginPort)
+		stage = commonos.ConventionStageDir(user, port)
+	}
+	if ctx.Results == nil {
+		ctx.Results = make(map[string]interface{})
+	}
+	ctx.Results[resultKeyCleanDBStageDir] = stage
+	return stage, nil
 }
 
 // runYcsctlQueryDisk 在 source env 后执行 ycsctl query disk。

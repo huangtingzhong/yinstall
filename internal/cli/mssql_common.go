@@ -191,9 +191,16 @@ func buildMssqlParams(flags GlobalFlags) map[string]interface{} {
 	return p
 }
 
+// connectivityStepForMssql 返回带 B-001 ID 的连通性步骤，供 split/phase _runner 识别。
+func connectivityStepForMssql() *runner.Step {
+	s := runner.CloneStep(ossteps.StepCheckConnectivity())
+	s.ID = ossteps.FirstStepID()
+	return s
+}
+
 func buildMssqlAllSteps(skipOS bool, profile commonwin.Profile) []*runner.Step {
 	var all []*runner.Step
-	all = append(all, ossteps.StepB001CheckConnectivity())
+	all = append(all, connectivityStepForMssql())
 	if !skipOS {
 		all = append(all, winsteps.GetPreInstanceSteps(profile)...)
 	}
@@ -233,7 +240,7 @@ func splitMssqlSteps(steps []*runner.Step) mssqlStepGroups {
 			continue
 		}
 		switch {
-		case s.ID == "B-001":
+		case s.ID == ossteps.FirstStepID():
 			g.b001 = s
 		case s.ID == "MS-001":
 			g.ms001 = s

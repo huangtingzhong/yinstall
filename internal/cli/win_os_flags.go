@@ -42,7 +42,7 @@ func registerWinOSExtensionFlags(cmd *cobra.Command, cfg registerWinOSFlagsConfi
 }
 
 func registerWinOSCommonFlags(cmd *cobra.Command, cfg registerWinOSFlagsConfig) {
-	cmd.Flags().StringVar(&osTimezone, "os-timezone", "China Standard Time", "Windows timezone ID for W-003"+cfg.suffix(""))
+	cmd.Flags().StringVar(&osTimezone, "os-timezone", "", "Windows timezone ID for W-003 (empty=China Standard Time)"+cfg.suffix(""))
 	cmd.Flags().StringVar(&osNTPServer, "os-ntp-server", "", "NTP server for w32tm (empty=skip manual peer)"+cfg.suffix(""))
 	cmd.Flags().StringVar(&osFirewallMode, "os-firewall-mode", "open-ports", "Firewall: keep|disable|open-ports|disable-lab"+cfg.suffix(""))
 	cmd.Flags().StringVar(&osFirewallPorts, "os-firewall-ports", "", "Extra TCP ports to open (comma-separated)"+cfg.suffix(""))

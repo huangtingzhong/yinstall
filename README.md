@@ -82,6 +82,30 @@ yinstall collect -t 10.10.10.130 --profile full -o ./output/collect
 yinstall stressos -t 10.10.10.130 --cpu --mem --io -o ./output/stress
 ```
 
+### YAC 主库扩 CE 备（`--yac`）
+
+主库为 CE/YAC 时加 `--yac`，走 `config group gen -t ce` + `group add`（不是 SE 的 `node add`）。必填：`--yac-inter-cidr`、`--yac-systemdg`、`--yac-datadg`、`--yac-vips`（数量=备节点数）、`--db-admin-password`。`--yac-public-network` 可省略（E-002 可从主库 toml 继承）。
+
+`--yac-systemdg` / `--yac-datadg` 为逗号分隔盘路径（如 `/dev/yfs/sys1,/dev/yfs/sys2`）；仍兼容旧 `role:/dev/...`。产品安装后 YFS 组名固定为 `SYSTEM` / `DG0`，工具不支持改名。
+
+**生产注意**：CE 路径默认仍会写主库 `REPLICATION_ADDR` 到 **SPFILE**，但**不会**自动重启（`--standby-restart-primary` 默认 `false`）。落盘后需在维护窗口 `cluster stop/start`，再重跑 `yinstall standby`；实验/维护窗口可显式 `--standby-restart-primary` 让工具顺带重启。
+
+```bash
+yinstall standby \
+  -t 10.10.10.182,10.10.10.183 \
+  --primary-ip 10.10.10.172 \
+  --yac \
+  --yac-inter-cidr 10.10.234.0/24 \
+  --yac-systemdg '/dev/yfs/sys1,/dev/yfs/sys2,/dev/yfs/sys3' \
+  --yac-datadg '/dev/yfs/data1,/dev/yfs/data2' \
+  --yac-vips 10.10.10.184/24,10.10.10.185/24 \
+  --db-admin-password 'YourSysPassword' \
+  --os-user yashan --os-user-password '...' \
+  --precheck
+```
+
+失败时默认**报错并打印清理方案**；加 `--standby-cleanup-on-failure`（或全局 `-F`）才会自动安全清理（仅本次新增/失败 group，保护已有 open 备组与 ceg1）。E-014 按本次 `--targets` IP（及新 group 名）等待，不靠全集群 standby 计数。扩前会探测已有 ceg 并打印 expected next group。E-011 生成前备份并修补 `hosts_add.toml` / `<cluster>_add.toml`；探测主库 datafile/redo/arch 后：备侧 **data 盘组名对齐主库众数组**（CE 不支持把主 data 组改成异名再靠 CONVERT 建库）；主库若有额外 data 组则自动写 `DB_FILE_NAME_CONVERT` 映到众数组；redo 落点按 REDO→ARCH→data 回退并必要时写 `REDO_FILE_NAME_CONVERT`；同时写 `ARCHIVE_LOCAL_DEST`（探测 SQL 失败则硬失败）。运维细节见本地 `docs/plans/2026-07-18-yac-to-yac-standby.md`。
+
 ---
 
 ## 执行模型
@@ -108,14 +132,13 @@ yinstall stressos -t 10.10.10.130 --cpu --mem --io -o ./output/stress
 | `--ssh-user` | `-u` | SSH 用户（默认 `root`） |
 | `--ssh-password` | `-P` | SSH 密码（未指定时可尝试密钥） |
 | `--ssh-key-path` | | 私钥路径（默认 `~/.ssh/id_rsa`） |
-| `--local-software-dirs` | `-L` | 控制端软件目录（默认 `./software,./pkg` 等） |
-| `--remote-software-dir` | `-R` | 目标机软件目录（默认 `/data/yashan/soft`） |
+| `--local-software-dirs` | `-L` | 控制端软件目录（默认 `./software`、`./pkg`、当前目录 `.`、`$HOME`，及存在时的 `~/Downloads/yashan`、`~/Downloads/oracle`） |
+| `--remote-software-dir` | `-R` | 目标机软件目录（默认 `/data/yashan/soft`；查找/上传时另扫描 SSH 登录用户 `$HOME`） |
 | `--include-steps` | `-s` | 只执行指定步骤 |
 | `--exclude-steps` | `-e` | 排除步骤 |
 | `--list-steps` | `-l` | 打印步骤列表后退出 |
 | `--output` | `-o` | collect/stress 归档目录 |
 | `--archive` | `-a` | 安装成功后自动 collect（os/db 默认开启） |
-| `--log-redact` | | 日志中脱敏密码 |
 
 完整参数以 `yinstall <command> --help` 为准。
 
@@ -158,7 +181,7 @@ go vet ./...
 go test ./... -count=1
 ```
 
-测试机参考（内网）：单机 `10.10.10.130`；YAC `10.10.10.125`、`10.10.10.126`。
+测试机参考（内网）：Linux 单机 `10.10.10.130` (aarch64)；YAC `10.10.10.125`、`10.10.10.126`；Windows `10.10.10.185` (x86_64)。
 
 ---
 

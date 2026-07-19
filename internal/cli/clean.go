@@ -9,9 +9,11 @@ import (
 	"github.com/spf13/cobra"
 	commonmssql "github.com/yinstall/internal/common/mssql"
 	commonmysql "github.com/yinstall/internal/common/mysql"
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 	"github.com/yinstall/internal/ssh"
 	"github.com/yinstall/internal/steps/clean"
+	ycmsteps "github.com/yinstall/internal/steps/ycm"
 )
 
 // NewCleanCommand 创建 clean 子命令。
@@ -24,11 +26,17 @@ func NewCleanCommand() *cobra.Command {
 		clusterName            string
 		osUser                 string
 		ycmHome                string
+		ycmInstallDir          string
 		ympHome                string
 		ympUser                string
 		cleanYACDisks          string
 		cleanEnvFile           string
+		dbCleanAdminPassword   string
+		skipClusterDetach      bool
+		forceCleanPrimary      bool
+		dbCleanPrimaryIP       string
 		dbCleanPort            int
+		dbCleanStageDir        string
 		mysqlCleanPort         int
 		mysqlCleanBase         string
 		mysqlCleanPackage      string
@@ -58,7 +66,11 @@ func NewCleanCommand() *cobra.Command {
 
 Supported cleanup types:
   - db:  Clean YashanDB installation (default). Paths align with yinstall db: non-default --db-port infers *_<port> dirs when paths not overridden.
-  - ycm: Clean YCM installation. Non-default --ycm-port infers /opt/ycm_<port> when --ycm-home not set (same idea as db port suffix).
+        For a standby target, the default flow first runs yasboot node remove --purge (requires --db-admin-password), then local wipe.
+        Detach prefers the target host; if local env is missing, falls back to SSH OM (global -M/--om or om_addr) using global -u/-p/--ssh-port.
+        If detach cannot run, the step fails (avoids ghost hosts) unless --skip-cluster-detach.
+        Use --skip-cluster-detach for local-only wipe; primary targets require --force-clean-primary.
+  - ycm: Clean YCM installation. Non-default --ycm-port infers /opt/ycm_<port>/ycm when --ycm-home and --ycm-install-dir not set.
   - ymp: Clean YMP installation. Non-default --ymp-port infers /opt/ymp_<port> when --ymp-home not set.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -143,11 +155,15 @@ Supported cleanup types:
 				applyMssqlRemoteSoftwareDefaults(cmd, &globalFlags)
 			}
 
-			applyCleanPathInference(cmd, cleanType,
-				dbCleanPort, &yasdbHome, &yasdbData, &yasdbLog, &clusterName,
-				ycmCleanPort, &ycmHome,
-				ympCleanPort, &ympHome,
-			)
+			if cleanType == "db" {
+				applyCleanDBUserPathDefaults(cmd, osUser, dbCleanPort, &dbCleanStageDir, &yasdbHome, &yasdbData, &yasdbLog, &clusterName)
+			} else {
+				applyCleanPathInference(cmd, cleanType,
+					dbCleanPort, &yasdbHome, &yasdbData, &yasdbLog, &clusterName,
+					ycmCleanPort, &ycmHome, &ycmInstallDir,
+					ympCleanPort, &ympHome,
+				)
+			}
 
 			// 初始化 cleanup 日志（建连前，与 db/os 一致以便记录 SSH 重试）
 			rid := fmt.Sprintf("clean-%s-%s", cleanType, time.Now().Format("20060102-150405"))
@@ -212,7 +228,10 @@ Supported cleanup types:
 			params["ycm_home"] = ycmHome
 			if cleanType == "ycm" {
 				params["ycm_port"] = ycmCleanPort
+				params["ycm_install_dir"] = ycmInstallDir
 				params["ycm_service_name"] = ycmCleanServiceName
+				params["ycm_home_explicit"] = cmd.Flags().Changed("ycm-home")
+				params["ycm_install_dir_explicit"] = cmd.Flags().Changed("ycm-install-dir")
 			}
 			params["ymp_home"] = ympHome
 			params["ymp_user"] = ympUser
@@ -220,6 +239,17 @@ Supported cleanup types:
 			if cleanType == "db" {
 				params["yac_mode"] = yacMode
 				params["db_begin_port"] = dbCleanPort
+				params["db_stage_dir"] = dbCleanStageDir
+				params["db_admin_password"] = dbCleanAdminPassword
+				params["skip_cluster_detach"] = skipClusterDetach
+				params["force_clean_primary"] = forceCleanPrimary
+				params["om_ip"] = strings.TrimSpace(globalFlags.OmIP)
+				params["primary_ip"] = strings.TrimSpace(dbCleanPrimaryIP)
+				params["ssh_user"] = globalFlags.SSHUser
+				params["ssh_password"] = globalFlags.SSHPassword
+				params["ssh_port"] = globalFlags.SSHPort
+				params["ssh_key_path"] = globalFlags.SSHKeyPath
+				params["ssh_auth"] = globalFlags.SSHAuth
 				if strings.TrimSpace(cleanEnvFile) != "" {
 					params["clean_env_file"] = cleanEnvFile
 				}
@@ -298,17 +328,23 @@ Supported cleanup types:
 	cmd.Flags().StringVar(&yasdbHome, "yasdb-home", "/data/yashan/yasdb_home", "YashanDB installation directory (for DB cleanup)")
 	cmd.Flags().StringVar(&yasdbData, "yasdb-data", "/data/yashan/yasdb_data", "YashanDB data directory (for DB cleanup)")
 	cmd.Flags().StringVar(&yasdbLog, "yasdb-log", "/data/yashan/log", "YashanDB log directory (for DB cleanup)")
+	cmd.Flags().StringVar(&dbCleanStageDir, "db-stage-dir", "/home/yashan/install", "DB package stage directory (for DB cleanup; auto-appends _<port> for non-default ports)")
 	cmd.Flags().StringVar(&clusterName, "cluster-name", "yashandb", "YashanDB cluster name (for DB cleanup)")
 	cmd.Flags().MarkHidden("cluster-name")
 	cmd.Flags().StringVar(&osUser, "os-user", "yashan", "OS user for YashanDB installation (for DB cleanup)")
 	cmd.Flags().StringVar(&cleanEnvFile, "env-file", "", "Explicit path to YashanDB env file on remote host (auto-discovered if omitted; sourced before DB commands)")
+	cmd.Flags().StringVar(&dbCleanAdminPassword, "db-admin-password", "", "SYS password for yasboot node remove when cleaning a standby (required unless --skip-cluster-detach)")
+	cmd.Flags().BoolVar(&skipClusterDetach, "skip-cluster-detach", false, "Skip yasboot node/host remove; only local process/dir wipe (legacy behavior)")
+	cmd.Flags().BoolVar(&forceCleanPrimary, "force-clean-primary", false, "Allow cleaning a primary target (skips node remove; local wipe only — dangerous). If yasboot env/OM is missing, detach is skipped and local wipe continues")
+	cmd.Flags().StringVar(&dbCleanPrimaryIP, "primary-ip", "", "Optional primary IP hint for detach logs/validation (not required; status auto-detects)")
 	cmd.Flags().StringVar(&cleanYACDisks, "clean-yac-disks", "", "Clean YAC shared disks: 'auto' to query via ycsctl, or comma-separated paths like '/dev/mapper/sys1,/dev/mapper/sys2'")
 	registerYACModeFlag(cmd)
 	cmd.Flags().IntVar(&dbCleanPort, "db-port", 1688, "Database begin port (for DB cleanup): like yinstall db, non-default port infers yasdb_home/data/log_* and cluster name unless paths explicitly set")
 
 	// YCM 专用 flags
-	cmd.Flags().StringVar(&ycmHome, "ycm-home", "/opt/ycm", "YCM installation directory (for YCM cleanup, default: /opt/ycm)")
-	cmd.Flags().IntVar(&ycmCleanPort, "ycm-port", 9060, "YCM web port: when not default (9060) and --ycm-home unchanged, infer /opt/ycm_<port>")
+	cmd.Flags().StringVar(&ycmHome, "ycm-home", "/opt/ycm", "YCM home directory ({install_dir}/ycm; for YCM cleanup, default: /opt/ycm)")
+	cmd.Flags().StringVar(&ycmInstallDir, "ycm-install-dir", "/opt", "YCM package extract/install root (for YCM cleanup; ycm_home defaults to {dir}/ycm)")
+	cmd.Flags().IntVar(&ycmCleanPort, "ycm-port", 9060, "YCM web port: when not default (9060) and --ycm-home/--ycm-install-dir unchanged, infer /opt/ycm_<port>/ycm")
 	cmd.Flags().StringVar(&ycmCleanServiceName, "ycm-service-name", "", "systemd unit to remove (default: derived from --ycm-port and --ycm-home)")
 
 	// YMP 专用 flags
@@ -375,11 +411,11 @@ func inferCleanTargetPlatform(cleanType string, flags GlobalFlags) string {
 }
 
 // applyCleanPathInference 与 yinstall db 一致：非默认端口且未显式覆盖 flag 时，推断 home/data/log/cluster 路径。
-// YCM：非默认 YCM Web 端口且未指定 --ycm-home 时推断 /opt/ycm_<port>。YMP：非默认 YMP 端口时推断 /opt/ymp_<port>。
+// YCM：与 yinstall ycm 共用 ResolveInstallLayout。YMP：非默认 YMP 端口时推断 /opt/ymp_<port>。
 func applyCleanPathInference(cmd *cobra.Command, cleanType string,
 	dbPort int,
 	yasdbHome, yasdbData, yasdbLog, clusterName *string,
-	ycmPort int, ycmHome *string,
+	ycmPort int, ycmHome, ycmInstallDir *string,
 	ympPort int, ympHome *string,
 ) {
 	switch cleanType {
@@ -395,13 +431,19 @@ func applyCleanPathInference(cmd *cobra.Command, cleanType string,
 				*yasdbLog = fmt.Sprintf("/data/yashan/log_%d", dbPort)
 			}
 			if !cmd.Flags().Changed("cluster-name") {
-				*clusterName = fmt.Sprintf("yashandb_%d", dbPort)
+				*clusterName = commonos.DefaultDBClusterName(dbPort)
 			}
 		}
 	case "ycm":
-		if ycmPort != 9060 && !cmd.Flags().Changed("ycm-home") {
-			*ycmHome = fmt.Sprintf("/opt/ycm_%d", ycmPort)
-		}
+		layout := ycmsteps.ResolveInstallLayout(ycmsteps.InstallLayoutInput{
+			WebPort:            ycmPort,
+			InstallDir:         *ycmInstallDir,
+			InstallDirExplicit: cmd.Flags().Changed("ycm-install-dir"),
+			YCMHome:            *ycmHome,
+			YCMHomeExplicit:    cmd.Flags().Changed("ycm-home"),
+		})
+		*ycmHome = layout.YCMHome
+		*ycmInstallDir = layout.InstallDir
 	case "ymp":
 		if ympPort != 8090 && !cmd.Flags().Changed("ymp-home") {
 			*ympHome = fmt.Sprintf("/opt/ymp_%d", ympPort)

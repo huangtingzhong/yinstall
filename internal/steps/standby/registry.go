@@ -1,35 +1,45 @@
-// registry.go - 备库扩容步骤注册
-// 本文件注册所有备库扩容相关的步骤
-
 package standby
 
 import "github.com/yinstall/internal/runner"
 
-// GetAllSteps 返回所有备库扩容步骤
+// GetAllSteps 返回所有备库扩容步骤（ID 由 BuildSteps 自动赋 E-001..E-NNN）。
 func GetAllSteps() []*runner.Step {
-	return []*runner.Step{
-		StepE001CheckPrimaryConnectivity(),
-		StepE002CheckPrimaryStatus(),
-		StepE003CheckArchiveMode(),
-		StepE004CheckReplicationAddr(),
+	return runner.BuildSteps(runner.StepSpec{
+		Prefix: "E",
+		Entries: []runner.StepEntry{
+			{New: stepCheckPrimaryConnectivity},
+			{New: stepCheckPrimaryStatus},
+			{New: stepCheckArchiveMode},
+			{New: stepCheckReplicationAddr},
 
-		StepE005CheckStandbyConnectivity(),
-		StepE006CheckStandbyBeginPort(),
-		StepE007CheckStandbyExpansionPaths(),
-		StepE008CheckArchiveDest(),
-		StepE009CheckNetworkConnectivity(),
-		StepE010CheckAndCleanupExistingNodes(),
+			{New: stepCheckStandbyConnectivity},
+			{New: stepCheckStandbyBeginPort},
+			{New: stepCheckStandbyExpansionPaths},
+			{New: stepCheckArchiveDest},
+			{New: stepCheckNetworkConnectivity},
+			{New: stepCheckAndCleanupExistingNodes},
 
-		StepE011GenExpansionConfig(),
-		StepE012InstallSoftware(),
-		StepE013AddStandbyInstance(),
-		StepE014CheckSyncStatus(),
+			{New: stepGenExpansionConfig},
+			{New: stepInstallSoftware},
+			{New: stepAddStandbyInstance},
+			{New: stepCheckSyncStatus},
 
-		StepE015ConfigEnvVars(),
-		StepE016ConfigAutostart(),
-		StepE017VerifyExpansion(),
+			{New: stepConfigEnvVars},
+			{New: stepConfigAutostart},
+			{New: stepVerifyExpansion},
 
-		StepE018CleanupFailedExpansion(),
-		StepE019ShowClusterStatus(),
-	}
+			{New: stepCleanupFailedExpansion},
+			{New: stepShowClusterStatus},
+		},
+	})
+}
+
+// FirstStepID returns E-001 (or first registry step ID).
+func FirstStepID() string {
+	return runner.FirstStepID(GetAllSteps(), "E")
+}
+
+// StepIDByName returns the registry ID for a step Name.
+func StepIDByName(name string) string {
+	return runner.StepIDByName(GetAllSteps(), name)
 }

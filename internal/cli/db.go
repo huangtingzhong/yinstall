@@ -6,9 +6,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 	dbsteps "github.com/yinstall/internal/steps/db"
+	omsteps "github.com/yinstall/internal/steps/om"
 	ossteps "github.com/yinstall/internal/steps/os"
+	standbysteps "github.com/yinstall/internal/steps/standby"
 )
 
 var (
@@ -34,6 +37,8 @@ var (
 	dbTPCC                   bool   // TPCC 参数优化
 	dbUnifiedAudit           bool   // 统一审计与清理策略
 	dbSpfileParams           string // 自定义 SPFILE 参数 name=value|...
+	dbTimezone               string // 集群 TOML TIME_ZONE（空=从 OS 时区推导）
+	dbReplicaCIDR            string // 主备复制网段 → yasboot --replica-cidr；空=公网默认
 	dbYasbootGenExtraArgs    string // 追加到 yasboot package se/ce gen 的额外参数
 	dbYasbootDeployExtraArgs string // 追加到 yasboot cluster deploy 的额外参数
 
@@ -43,6 +48,10 @@ var (
 
 	// 是否跳过 OS 基线配置
 	dbSkipOS bool
+
+	// YAC 装库后部署备 OM（复用 standby/om 的 runOMDeploySecondarySteps；默认 true）
+	dbOmSecondary      bool
+	dbOmSecondaryScope string
 
 	// YAC 网络参数
 	yacInterCIDR     string
@@ -78,7 +87,8 @@ var dbCmd = &cobra.Command{
   - Install software
   - Create database
   - Configure environment variables
-  - Verify installation`,
+  - Verify installation
+  - YAC only (default): deploy secondary yasom on other --targets (--om-secondary; same path as standby/om secondary)`,
 	RunE:         runDB,
 	SilenceUsage: true, // 报错时不显示帮助信息
 }
@@ -95,7 +105,8 @@ func init() {
 	dbCmd.Flags().StringVar(&dbClusterName, "db-cluster-name", "yashandb", "Cluster name")
 	dbCmd.Flags().IntVar(&dbPort, "db-port", 1688, "Database begin port (yasboot --begin-port)")
 	dbCmd.Flags().IntVar(&dbMemoryPercent, "db-memory-percent", 50, "Memory percentage (0-100)")
-	dbCmd.Flags().StringVar(&dbCharacterSet, "db-character-set", "utf8", "Character set: UTF8, GBK, ASCII, GB18030, BINARY, LATIN1, UTF8MB3, UTF8MB4 (case-insensitive)")
+	dbCmd.Flags().StringVar(&dbCharacterSet, "db-character-set", "utf8", "Character set: UTF8, GBK, ASCII, GB18030, BINARY, UTF8MB3 (case-insensitive; LATIN1/UTF8MB4 not supported on 23.5.x)")
+	dbCmd.Flags().StringVar(&dbTimezone, "db-timezone", "", "Database TIME_ZONE in yashandb.toml (e.g. +08:00 or IANA); empty=read OS timezone via timedatectl (required if timedatectl unavailable)")
 	dbCmd.Flags().BoolVar(&dbUseNativeType, "db-use-native-type", false, "Set USE_NATIVE_TYPE in cluster TOML (native column types when true) (default: false)")
 	dbCmd.Flags().StringVar(&dbMode, "db-mode", "", "Standalone only: empty (default) or mysql (passes --mode mysql to yasboot package se gen; not supported for YAC/ce gen)")
 	dbCmd.Flags().StringVar(&dbSysPassword, "db-sys-password", "Yashan1!", "Database SYS password")
@@ -107,25 +118,24 @@ func init() {
 	dbCmd.Flags().StringVar(&dbDepsPackage, "db-deps-package", "", "SSL deps package path (optional)")
 	dbCmd.Flags().IntVar(&dbNodes, "db-nodes", 0, "Number of nodes (auto-detected from targets)")
 	dbCmd.Flags().IntVar(&dbRedoFileNum, "db-redo-file-num", 6, "REDO file number (default: 6)")
-	dbCmd.Flags().StringVar(&dbRedoFileSize, "db-redo-file-size", "128", "REDO file size in MB (default: 128, unit: MB)")
+	dbCmd.Flags().StringVar(&dbRedoFileSize, "db-redo-file-size", "128", "REDO file size (default 128; unit M/G/T/K or bare number as MB; minimum 96M / 100663296 bytes)")
 	dbCmd.Flags().BoolVar(&dbDisableArchivelog, "db-disable-archivelog", false, "Disable archive log: set ISARCHIVELOG = false in yashandb.toml (default yasboot keeps archive log on)")
 	dbCmd.Flags().StringVar(&dbCustomSQLScript, "db-custom-sql-script", "", "Custom SQL script to execute after installation (supports: remote:/path, local:/path, /absolute/path, relative/path)")
-	dbCmd.Flags().BoolVar(&dbTPCC, "db-tpcc", false, "Enable TPCC parameter optimization (default: false)")
+	dbCmd.Flags().BoolVar(&dbTPCC, "db-tpcc", false, "Enable TPCC parameter optimization (requires --db-redo-file-size >= 128M)")
 	dbCmd.Flags().MarkHidden("db-tpcc")
 	dbCmd.Flags().BoolVar(&dbUnifiedAudit, "db-unified-audit", false, "Enable unified auditing, audit policies, and purge jobs (default: false)")
-	dbCmd.Flags().StringVar(&dbSpfileParams, "db-spfile-params", "", "Custom SPFILE parameters as name=value|name=value (empty=skip C-026; values may include quotes, e.g. date_format='yyyy-mm-dd hh24:mi:ss')")
+	dbCmd.Flags().StringVar(&dbSpfileParams, "db-spfile-params", "", "Custom SPFILE parameters as name=value|name=value (empty=skip C-026; e.g. DATE_FORMAT='yyyy-mm-dd hh24:mi:ss'|OPEN_CURSORS=500; use MAX_SESSIONS not SESSIONS)")
+	dbCmd.Flags().StringVar(&dbReplicaCIDR, "db-replica-cidr", "", "Primary-standby replication network CIDR passed to yasboot --replica-cidr; empty=omit (public/IP network). Port is begin-port+1 (standalone) or +2 (YAC), not set by this flag.")
 	dbCmd.Flags().StringVar(&dbYasbootGenExtraArgs, "yasboot-gen-extra-args", "", "Extra arguments appended to yasboot package se gen / package ce gen (space-separated)")
 	dbCmd.Flags().StringVar(&dbYasbootDeployExtraArgs, "yasboot-deploy-extra-args", "", "Extra arguments appended to yasboot cluster deploy (space-separated)")
 	dbCmd.Flags().BoolVar(&dbEnablePluggable, "db-enable-pluggable", false, "Deploy as CDB (multitenant); passes --enable-pluggable-database to yasboot package se/ce gen (mutually exclusive with --db-mode mysql)")
-	dbCmd.Flags().StringSliceVar(&dbPDBSpecs, "db-pdb", nil, "PDB to create after install (repeatable). Bare name or key=value. Short keys: name,user,password,datafile,size,file_convert,compat,archivelog,open. Official aliases: admin_user,admin_password,tablespace_datafile,tablespace_size,compat_mode,file_name_convert,file_convert_from,file_convert_to")
+	// StringArray：保留逗号，支持单条 name=PDB1,user=...,password=...；多 PDB 用重复 --db-pdb 或 |
+	dbCmd.Flags().StringArrayVar(&dbPDBSpecs, "db-pdb", nil, "PDB to create after install (repeatable). Bare name, or comma-separated key=value (e.g. name=PDB1,user=u,password=p). Multiple PDBs: repeat --db-pdb or use |. Short keys: name,user,password,datafile,size,file_convert,compat,archivelog,open. Official aliases: admin_user,admin_password,tablespace_datafile,tablespace_size,compat_mode,file_name_convert,file_convert_from,file_convert_to")
 
-	// YAC 网络参数
-	dbCmd.Flags().StringVar(&yacInterCIDR, "yac-inter-cidr", "", "YAC inter-connect CIDR (required for YAC)")
-	dbCmd.Flags().StringVar(&yacPublicNetwork, "yac-public-network", "", "YAC public network CIDR or interface (required for YAC)")
+	// YAC 网络参数（inter/public/vips/disk-found-path 与 standby 共用 registerYACNetworkFlags）
+	registerYACNetworkFlags(dbCmd, false)
 	dbCmd.Flags().StringVar(&yacAccessMode, "yac-access-mode", "vip", "YAC access mode (vip/scan/direct; direct skips VIP)")
-	dbCmd.Flags().StringSliceVar(&yacVIPs, "yac-vips", nil, "VIP addresses for YAC (vip/scan mode; auto-generated if omitted)")
 	dbCmd.Flags().StringVar(&yacScanName, "yac-scanname", "", "SCAN name for YAC (dns:name for DNS mode, name or empty for local mode)")
-	dbCmd.Flags().StringVar(&yacDiskFoundPath, "yac-disk-found-path", "/dev/yfs/", "Disk found path for yasboot package ce gen")
 	dbCmd.Flags().BoolVar(&yacAutoDiscoverDisks, "yac-auto-discover-disks", false,
 		"Auto-discover YAC disk groups from /dev/yfs when --skip-os (default: true if --skip-os is set)")
 	dbCmd.Flags().StringVar(&yacDiscoverRoot, "yac-discover-root", "/dev/yfs",
@@ -134,6 +144,10 @@ func init() {
 		"When /dev/yfs is empty, discover sys*/data* under /dev/mapper")
 	dbCmd.Flags().BoolVar(&yacEnsureOSPassword, "yac-ensure-os-password", true,
 		"YAC: verify product user SSH password before ce gen; reset to --os-user-password on mismatch when login user has root/sudo (default: true)")
+	dbCmd.Flags().BoolVar(&dbOmSecondary, "om-secondary", true,
+		"YAC: after install, deploy secondary yasom on non-primary --targets (default: true; --om-secondary=false to skip; reuses standby/om secondary steps)")
+	dbCmd.Flags().StringVar(&dbOmSecondaryScope, "om-secondary-scope", "targets",
+		"YAC OM secondary scope: targets (other --targets) or cluster (all non-primary hosts from yasom status)")
 
 	// YAC YFS 调优参数
 	dbCmd.Flags().BoolVar(&yacYFSTuneEnable, "yac-yfs-tune", false, "Enable YFS tuning")
@@ -199,6 +213,30 @@ func runDB(cmd *cobra.Command, args []string) error {
 
 	if dbEnablePluggable && dbMode == "mysql" {
 		return fmt.Errorf("--db-enable-pluggable is mutually exclusive with --db-mode mysql (use compat=mysql on --db-pdb instead)")
+	}
+
+	if _, err := dbsteps.CanonicalYashanCharacterSet(dbCharacterSet); err != nil {
+		return fmt.Errorf("invalid --db-character-set: %w", err)
+	}
+
+	if strings.TrimSpace(dbRedoFileSize) != "" {
+		if err := dbsteps.ValidateRedoFileSize(dbRedoFileSize); err != nil {
+			return fmt.Errorf("invalid --db-redo-file-size: %w", err)
+		}
+	}
+	if dbTPCC {
+		redoForTpcc := dbRedoFileSize
+		if strings.TrimSpace(redoForTpcc) == "" {
+			redoForTpcc = "128"
+		}
+		if err := dbsteps.ValidateTpccRedoFileSize(redoForTpcc); err != nil {
+			return err
+		}
+	}
+	if isYACMode && strings.TrimSpace(yacRedoFileSize) != "" {
+		if err := dbsteps.ValidateRedoFileSize(yacRedoFileSize); err != nil {
+			return fmt.Errorf("invalid --yac-redo-file-size: %w", err)
+		}
 	}
 
 	if len(dbPDBSpecs) > 0 {
@@ -284,12 +322,38 @@ func runDB(cmd *cobra.Command, args []string) error {
 		logger.Info("OS baseline preparation: ENABLED")
 	}
 
+	// YAC 备 OM：默认启用；SE / 单节点忽略
+	wantOMSecondary := isYACMode && dbOmSecondary && len(flags.Targets) >= 2
+	if isYACMode {
+		if dbOmSecondary {
+			scope := strings.ToLower(strings.TrimSpace(dbOmSecondaryScope))
+			if scope != "targets" && scope != "cluster" {
+				return fmt.Errorf("--om-secondary-scope must be targets or cluster")
+			}
+			dbOmSecondaryScope = scope
+			if wantOMSecondary {
+				logger.Info("OM secondary: ENABLED (scope=%s; after DB install)", dbOmSecondaryScope)
+			} else {
+				logger.Info("OM secondary: SKIPPED (need >=2 targets)")
+			}
+		} else {
+			logger.Info("OM secondary: SKIPPED (--om-secondary=false)")
+		}
+	}
+
 	// 构建 params
 	params := buildDBParams(isYACMode, len(flags.Targets))
 	params["sudo"] = flags.UseSudo
 	params["target_ips"] = flags.Targets
 	params["ssh_port"] = flags.SSHPort
 	params["yasboot_ssh_port"] = flags.YasbootSSHPort
+	if wantOMSecondary {
+		params["om_deploy_secondary"] = true
+		params["om_deploy_secondary_scope"] = dbOmSecondaryScope
+		params["primary_os_user"] = osUser
+		// 主 OM 在安装首节点（与 yasboot ce deploy 一致）
+		params["om_ip"] = flags.Targets[0]
+	}
 
 	if isYACMode && yacAccessMode == "scan" {
 		if yacScanName == "" {
@@ -315,7 +379,7 @@ func runDB(cmd *cobra.Command, args []string) error {
 		// 即使跳过 OS，仍需要连通性检查（B-001）
 		osSteps := ossteps.GetAllSteps()
 		for _, step := range osSteps {
-			if step.ID == "B-001" {
+			if step.ID == ossteps.FirstStepID() {
 				allSteps = append(allSteps, step)
 				break
 			}
@@ -325,6 +389,11 @@ func runDB(cmd *cobra.Command, args []string) error {
 	// 加入 DB steps
 	dbSteps := dbsteps.GetAllSteps()
 	allSteps = append(allSteps, dbSteps...)
+
+	// YAC：备 OM 步骤进目录与 -s/-e（执行在 DB 成功后的独立阶段，DRY 复用 standby/om）
+	if wantOMSecondary {
+		allSteps = append(allSteps, omsteps.GetDeploySecondarySteps()...)
+	}
 
 	// 按全局过滤规则筛选 steps
 	steps := filterSteps(allSteps, flags)
@@ -343,17 +412,33 @@ func runDB(cmd *cobra.Command, args []string) error {
 	var hostInfos []*HostInfo
 	var connectivityStep *runner.Step
 	var otherSteps []*runner.Step
+	var omSecSteps []*runner.Step
 
 	for _, step := range steps {
-		if step.ID == "B-001" {
+		if step == nil {
+			continue
+		}
+		if strings.HasPrefix(step.ID, "O-") {
+			omSecSteps = append(omSecSteps, step)
+			continue
+		}
+		if step.ID == ossteps.FirstStepID() {
 			connectivityStep = step
 		} else {
 			otherSteps = append(otherSteps, step)
 		}
 	}
 
+	// 进度：不含 O-*（备 OM 在独立阶段执行，避免进度分母虚高）
+	var progressSteps []*runner.Step
+	for _, s := range steps {
+		if s != nil && !strings.HasPrefix(s.ID, "O-") {
+			progressSteps = append(progressSteps, s)
+		}
+	}
+
 	// 进度：分母 = 非 Optional 安装步 +（--archive 时）非 Optional 且跳过 R-001 的 collect 步
-	plannedProgress := runner.CountNonOptionalSteps(steps)
+	plannedProgress := runner.CountNonOptionalSteps(progressSteps)
 	if flags.ArchiveOnSuccess && !flags.DryRun && !flags.Precheck {
 		plannedProgress += CountArchiveCollectSteps("db", isYACMode, flags)
 	}
@@ -439,17 +524,17 @@ func runDB(cmd *cobra.Command, args []string) error {
 
 	// C-001 作为全局预检只运行一次（连通性 + YAC 网段/密码/磁盘发现等，合并为单一步骤 ID）。
 	var stepsToRun []*runner.Step
-	if len(otherSteps) > 0 && stepsContainID(otherSteps, "C-001") {
+	if len(otherSteps) > 0 && stepsContainID(otherSteps, dbsteps.FirstStepID()) {
 		(&runner.StepContext{
 			Logger:        logger,
 			Params:        params,
-			CurrentStepID: "C-001",
+			CurrentStepID: dbsteps.FirstStepID(),
 		}).LogPhase("plan", fmt.Sprintf("global-precheck hosts=%d yac=%v", len(hostExecs), isYACMode))
 		if err := dbsteps.RunC001FullPrecheck(hostExecs, params, logger, isYACMode, dbSkipOS, flags.Precheck, flags.DryRun); err != nil {
 			if flags.Precheck {
 				pc := &runner.StepContext{Logger: logger, Params: params, Results: make(map[string]interface{}), Precheck: flags.Precheck}
 				pc.ReportPrecheckIssue(runner.PrecheckIssue{
-					StepID:   "C-001",
+					StepID:   dbsteps.FirstStepID(),
 					StepName: "Connectivity and YAC precheck",
 					Severity: runner.PrecheckSeverityError,
 					Code:     "PC.DB.C001",
@@ -462,10 +547,10 @@ func runDB(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("C-001 precheck failed: %w", err)
 			}
 		} else {
-			(&runner.StepContext{Logger: logger, CurrentStepID: "C-001"}).LogPhase("op-done", "global-connectivity-precheck")
+			(&runner.StepContext{Logger: logger, CurrentStepID: dbsteps.FirstStepID()}).LogPhase("op-done", "global-connectivity-precheck")
 			logger.Info("C-001: global precheck completed (placeholder step C-001 is not repeated in the numbered list below)")
 		}
-		stepsToRun = removeFirstStepWithID(otherSteps, "C-001")
+		stepsToRun = removeFirstStepWithID(otherSteps, dbsteps.FirstStepID())
 	} else {
 		stepsToRun = otherSteps
 	}
@@ -498,6 +583,19 @@ func runDB(cmd *cobra.Command, args []string) error {
 		}
 		if osResult.LastError != nil {
 			lastErr = osResult.LastError
+		}
+	}
+
+	// YAC + OS 基线：B-003 创建用户后补做身份一致性与密码确保（C-001 全局预检已推迟）
+	if lastErr == nil && isYACMode && !dbSkipOS && !flags.DryRun && len(dbStepsToRun) > 0 {
+		logger.Info("======== Phase 2b: YAC ready-after-OS (identity + password) ========")
+		if err := dbsteps.EnsureYACReadyAfterOS(hostExecs, params, logger, flags.Precheck); err != nil {
+			if flags.Precheck {
+				precheckFailed = true
+				logger.Error("YAC post-OS precheck failed: %v", err)
+			} else {
+				lastErr = fmt.Errorf("YAC post-OS precheck failed: %w", err)
+			}
 		}
 	}
 
@@ -557,6 +655,36 @@ func runDB(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("precheck failed")
 	}
 
+	// 阶段 3：YAC 备 OM（复用 runOMDeploySecondarySteps；主 OM = 首 target）
+	if wantOMSecondary && standbyHasDeploySecondarySteps(omSecSteps) && len(hostInfos) > 0 {
+		logger.Info("======== Phase 3: OM secondary deploy (YAC) ========")
+		omIP := strings.TrimSpace(fmt.Sprint(params["om_ip"]))
+		if omIP == "" {
+			omIP = hostInfos[0].Host
+			params["om_ip"] = omIP
+		}
+		var omHost *HostInfo
+		for _, h := range hostInfos {
+			if h != nil && standbysteps.SameHostIP(h.Host, omIP) {
+				omHost = h
+				break
+			}
+		}
+		if omHost == nil || omHost.Executor == nil {
+			return fmt.Errorf("OM secondary: primary OM host %s not in connected targets", omIP)
+		}
+		topo := &standbyHostExecutors{
+			omIP:            omIP,
+			om:              omHost.Executor,
+			primary:         omHost.Executor,
+			omSameAsPrimary: true,
+			primaryIP:       omIP,
+		}
+		if err := runOMDeploySecondarySteps(topo, hostInfos, logger, params, flags, omSecSteps); err != nil {
+			return err
+		}
+	}
+
 	installResults := map[string]interface{}{}
 	if dbInstallResults != nil {
 		for k, v := range dbInstallResults {
@@ -575,6 +703,11 @@ func runDB(cmd *cobra.Command, args []string) error {
 			executedIDs = append(executedIDs, s.ID)
 		}
 	}
+	for _, s := range omSecSteps {
+		if s != nil {
+			executedIDs = append(executedIDs, s.ID)
+		}
+	}
 	installSnap := buildInstallParamsSnapshot("db", rid, params, executedIDs)
 	runInstallArchiveCollect("db", isYACMode, progress, hostInfos, installSnap, installResults, flags, logger)
 
@@ -588,7 +721,7 @@ func buildDBParams(isYACMode bool, targetCount int) map[string]interface{} {
 
 	// 兜底：若仍残留 yashan 硬编码默认路径，按当前 os_user 重写（兼容未走 runDB 的调用路径）。
 	user := dbProductUser(osUser)
-	if dbStageDir == "/home/yashan/install" || (dbPort != dbDefaultBeginPort && dbStageDir == fmt.Sprintf("/home/yashan/install_%d", dbPort)) {
+	if commonos.IsConventionStageDir(dbStageDir, "yashan", dbPort) {
 		dbStageDir = defaultDBStageDir(user, dbPort)
 	}
 	if dbPort != dbDefaultBeginPort {
@@ -608,6 +741,7 @@ func buildDBParams(isYACMode bool, targetCount int) map[string]interface{} {
 	params["db_begin_port"] = dbPort
 	params["db_memory_percent"] = dbMemoryPercent
 	params["db_character_set"] = dbCharacterSet
+	params["db_timezone"] = dbTimezone
 	params["db_use_native_type"] = dbUseNativeType
 	params["db_mode"] = dbMode
 	params["db_admin_password"] = dbSysPassword
@@ -626,6 +760,7 @@ func buildDBParams(isYACMode bool, targetCount int) map[string]interface{} {
 	params["db_tpcc"] = dbTPCC
 	params["db_unified_audit"] = dbUnifiedAudit
 	params["db_spfile_params"] = dbSpfileParams
+	params["db_replica_cidr"] = dbReplicaCIDR
 	params[dbsteps.ParamYasbootGenExtraArgs] = dbYasbootGenExtraArgs
 	params[dbsteps.ParamYasbootDeployExtraArgs] = dbYasbootDeployExtraArgs
 	params["db_enable_pluggable"] = dbEnablePluggable
@@ -692,4 +827,12 @@ func (a *c001ExecAdapter) Execute(cmd string, sudo bool) (dbsteps.ExecResultForC
 
 func (a *c001ExecAdapter) Host() string {
 	return a.e.Host()
+}
+
+// RunnerExecutor 供 C-001 挂接实时 debug 输出回调。
+func (a *c001ExecAdapter) RunnerExecutor() runner.Executor {
+	if a == nil {
+		return nil
+	}
+	return a.e
 }

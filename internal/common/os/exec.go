@@ -28,8 +28,11 @@ func buildRunAsUserCommand(ctx *runner.StepContext, targetUser string, command s
 
 	// 规则 2：可用 sudo，则使用 sudo 切换到目标用户执行。
 	// 注意：使用 `sudo -n`，避免因需要输入密码而卡住。
+	// 勿用 `sudo -i`：-i 会把命令再交给登录 shell 的 -c，导致命令行中的 $$ 被展开为 PID
+	//（默认 os 密码 aaBB11@@33$$ 经 C-014 yasboot -p 时 SSH 认证失败）。
+	// 登录环境由 bash -lc 的 -l 提供；显式 cd ~ 对齐旧 sudo -i 的起始目录（否则 cwd 常留在 /root）。
 	if ctx.GetParamBool("sudo", false) {
-		return fmt.Sprintf("sudo -n -iu %s bash -lc %s", targetUser, ShellSingleQuote(command)), nil
+		return fmt.Sprintf("sudo -n -u %s bash -lc %s", targetUser, ShellSingleQuote("cd ~ && "+command)), nil
 	}
 
 	// 规则 3：当前用户是 root，则使用 su 切换到目标用户执行。

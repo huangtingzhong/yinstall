@@ -10,7 +10,6 @@ import (
 
 func StepCleanMssql001StopServices() *runner.Step {
 	return &runner.Step{
-		ID:          "CLEAN-MSSQL-001",
 		Name:        "Stop MSSQL Services",
 		Description: "Stop SQL Server and SQL Agent Windows services",
 		Tags:        []string{"clean", "mssql"},

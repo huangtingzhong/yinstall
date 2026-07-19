@@ -2,31 +2,37 @@ package clean
 
 import "github.com/yinstall/internal/runner"
 
-// GetAllSteps returns all clean steps (DB 为分步列表；CLEAN-DB 单步仍可通过 GetStepByID 按 -s 选用)。
+// GetAllSteps returns all clean steps.
 func GetAllSteps() []*runner.Step {
-	steps := make([]*runner.Step, 0, len(GetDBCleanSteps())+2)
-	steps = append(steps, GetDBCleanSteps()...)
-	steps = append(steps, StepCleanYCM(), StepCleanYMP())
-	return steps
+	out := GetDBCleanSteps()
+	extra := runner.BuildSteps(runner.StepSpec{
+		Entries: []runner.StepEntry{
+			{FixedID: "CLEAN-YCM", New: StepCleanYCM},
+			{FixedID: "CLEAN-YMP", New: StepCleanYMP},
+		},
+	})
+	return append(out, extra...)
 }
 
-// GetDBCleanSteps returns detailed DB cleanup steps
+// GetDBCleanSteps returns detailed DB cleanup steps (CLEAN-DB-001..)。
+// 序号由 registry 顺序赋予：001 查 YAC → 002 摘备 → 003 停进程 → …
 func GetDBCleanSteps() []*runner.Step {
-	return []*runner.Step{
-		StepCleanDB001QueryYACDisks(),     // 查询 YAC 磁盘信息（在删除前）
-		StepCleanDB002StopProcesses(),     // 停止进程
-		StepCleanDB003RemoveDirectories(), // 删除目录
-		StepCleanDB004RemoveConfig(),      // 删除配置文件
-		StepCleanDB005CleanYACDisks(),     // 清理 YAC 共享磁盘
-		StepCleanDB006FinalCheck(),        // 最终检查
-	}
+	return runner.BuildSteps(runner.StepSpec{
+		Prefix: "CLEAN-DB",
+		Entries: []runner.StepEntry{
+			{New: StepCleanDB001QueryYACDisks},
+			{New: StepCleanDBDetachStandby},
+			{New: StepCleanDB002StopProcesses},
+			{New: StepCleanDB003RemoveDirectories},
+			{New: StepCleanDB004RemoveConfig},
+			{New: StepCleanDB005CleanYACDisks},
+			{New: StepCleanDB006FinalCheck},
+		},
+	})
 }
 
-// GetStepByID returns a step by its ID（含遗留聚合步 CLEAN-DB）。
+// GetStepByID returns a step by its ID（YCM/YMP/MySQL 固定 ID，或 registry 动态步）。
 func GetStepByID(id string) *runner.Step {
-	if id == "CLEAN-DB" {
-		return StepCleanDB()
-	}
 	if id == "CLEAN-MYSQL" {
 		return StepCleanMySQL()
 	}

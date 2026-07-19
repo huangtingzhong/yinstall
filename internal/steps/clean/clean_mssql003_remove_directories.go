@@ -10,7 +10,6 @@ import (
 
 func StepCleanMssql003RemoveDirectories() *runner.Step {
 	return &runner.Step{
-		ID:          "CLEAN-MSSQL-003",
 		Name:        "Remove MSSQL Directories",
 		Description: "Remove SQL instance data or software paths per --stage",
 		Tags:        []string{"clean", "mssql"},

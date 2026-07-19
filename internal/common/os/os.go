@@ -189,3 +189,15 @@ func GetTotalMemoryGB(ctx *runner.StepContext) (int, error) {
 	memGB := memMBInt / 1024
 	return memGB, nil
 }
+
+// GetSELinuxEnforce returns getenforce output (Enforcing, Permissive, Disabled) or empty if unavailable.
+func GetSELinuxEnforce(ctx *runner.StepContext) string {
+	if ctx == nil {
+		return ""
+	}
+	res, _ := ctx.Execute("getenforce 2>/dev/null || true", false)
+	if res == nil {
+		return ""
+	}
+	return strings.TrimSpace(res.GetStdout())
+}

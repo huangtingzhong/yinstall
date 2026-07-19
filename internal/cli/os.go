@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/logging"
 	"github.com/yinstall/internal/runner"
 	"github.com/yinstall/internal/ssh"
@@ -37,7 +38,7 @@ var (
 	// Hugepages 参数
 	osHugepagesEnable bool
 
-	// 单机 OS 下：若设置则让 sysctl 的 shmmax/shmall 与 DB memory percent 对齐；-1 表示不写（按 90%% 内存估算）
+	// 单机 OS 下：若设置则让 sysctl 的 shmmax/shmall 与 DB memory percent 对齐；-1 表示不写（按 90% 内存估算）
 	osDbMemoryPercent int
 
 	osYumMode             string
@@ -68,10 +69,10 @@ var (
 	osLocalLV    string
 	osLocalMount string
 
-	// YAC diskgroup 参数
-	yacSystemDG     string // 格式：dgname:disk1,disk2,...
-	yacDataDG       string // 格式：dgname:disk1,disk2,...
-	yacArchDG       string // 格式：dgname:disk1,disk2,...（可选，默认跟随 datadg）
+	// YAC 盘参数：推荐纯路径 /dev/a,/dev/b；兼容旧 role:/dev/...（非 YFS 组名）
+	yacSystemDG     string
+	yacDataDG       string
+	yacArchDG       string // 可选，默认跟随 datadg
 	yacArchDGEnable bool   // 是否启用独立 ArchDG 创建
 
 	// YAC SCAN 参数
@@ -206,13 +207,17 @@ func runOS(cmd *cobra.Command, args []string) error {
 		logger.Info("  [%s] %s", s.ID, s.Name)
 	}
 
-	// 拆出连通步与其它步骤
+	// 连通步始终从完整 registry 取 B-001（保证 OSInfo 探测），即使 -s 未包含 B-001。
 	var connectivityStep *runner.Step
+	for _, step := range allSteps {
+		if step.ID == ossteps.FirstStepID() {
+			connectivityStep = step
+			break
+		}
+	}
 	var otherSteps []*runner.Step
 	for _, step := range steps {
-		if step.ID == "B-001" {
-			connectivityStep = step
-		} else {
+		if step.ID != "B-001" {
 			otherSteps = append(otherSteps, step)
 		}
 	}
@@ -256,9 +261,10 @@ func runOS(cmd *cobra.Command, args []string) error {
 }
 
 // buildOSYumISOParams 返回 YUM/ISO 相关 ctx.Params 条目（os / db / stressos 共用）。
+// os_yum_mode 保留原始串（IP/URL），由 commonos.ParseYumMode / GetYumMode 解析。
 func buildOSYumISOParams() map[string]interface{} {
 	return map[string]interface{}{
-		"os_yum_mode":       osYumMode,
+		"os_yum_mode":       strings.TrimSpace(osYumMode),
 		"os_iso_device":     osISODevice,
 		"os_iso_mountpoint": osISOMountpoint,
 		"os_yum_repo_file":  osYumRepoFile,
@@ -276,7 +282,7 @@ func buildOSParams(isYACMode bool, targetCount int) map[string]interface{} {
 		"os_user_shell":              osUserShell,
 		"os_user_password":           osUserPassword,
 		"os_sudoers_enable":          osSudoersEnable,
-		"os_timezone":                osTimezone,
+		"os_timezone":                commonos.ResolveOSTimezone(osTimezone),
 		"os_ntp_server":              osNTPServer,
 		"os_hostname":                osHostname,
 		"os_hostname_default_prefix": "yashandb",

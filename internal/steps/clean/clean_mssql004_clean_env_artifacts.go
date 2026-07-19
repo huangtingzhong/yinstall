@@ -7,7 +7,6 @@ import (
 
 func StepCleanMssql004CleanEnvArtifacts() *runner.Step {
 	return &runner.Step{
-		ID:          "CLEAN-MSSQL-004",
 		Name:        "Clean MSSQL Env Artifacts",
 		Description: "Remove yinstall env files and machine YINSTALL_* variables",
 		Tags:        []string{"clean", "mssql"},

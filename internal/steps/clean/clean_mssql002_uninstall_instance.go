@@ -9,7 +9,6 @@ import (
 
 func StepCleanMssql002UninstallInstance() *runner.Step {
 	return &runner.Step{
-		ID:          "CLEAN-MSSQL-002",
 		Name:        "Uninstall SQL Instance",
 		Description: "Run setup.exe /Action=Uninstall for the instance",
 		Tags:        []string{"clean", "mssql"},

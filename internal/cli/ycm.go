@@ -1,6 +1,6 @@
 // ycm.go - YCM 安装命令实现
 // 本文件实现 yinstall ycm 命令，用于安装 YCM（YashanDB Cloud Manager）
-// 流程：OS 基线配置（可选）→ YCM 安装步骤（G-001 ~ G-011）
+// 流程：OS 基线配置（可选）→ YCM 安装步骤（G-001 ~ G-011，连续编号）
 
 package cli
 
@@ -19,7 +19,7 @@ var (
 	// YCM OS 控制
 	ycmSkipOS              bool   // 是否跳过 OS 基线配置，默认 true
 	ycmIgnoreInstallErrors bool   // 忽略软件包安装错误
-	ycmOSYumMode           string // YUM 模式：online/local-iso/none
+	ycmOSYumMode           string // YUM 模式：空 / local / IP·URL
 	ycmOSISODevice         string // ISO 文件路径、文件名或块设备
 	ycmOSISOMountpoint     string // ISO 挂载目录
 	ycmOSYumRepoFile       string // YUM repo 文件路径
@@ -66,14 +66,14 @@ var ycmCmd = &cobra.Command{
     - Set timezone and NTP
     - Disable/configure firewall
     - Mount ISO and install dependencies
+  - Check pre-install prerequisites (ports, directory, processes, systemd)
   - Install YCM dependencies (libnsl)
   - Extract YCM package
   - Set directory ownership
   - Verify deploy configuration
   - Configure ports
-  - Check port availability
   - Deploy YCM (sqlite3 or yashandb backend)
-  - Verify processes, ports and web access
+  - Verify YCM processes, ports, and Web access
   - Configure YCM systemd autostart (unit name derived from port/install dir)`,
 	RunE:         runYCM,
 	SilenceUsage: true,
@@ -83,10 +83,10 @@ func init() {
 	// OS 控制
 	ycmCmd.Flags().BoolVar(&ycmSkipOS, "skip-os", true, "Skip OS baseline preparation (default: true)")
 	ycmCmd.Flags().BoolVar(&ycmIgnoreInstallErrors, "os-ignore-install-errors", false, "Ignore package installation errors and continue (only show warnings)")
-	ycmCmd.Flags().StringVar(&ycmOSYumMode, "os-yum-mode", "none", "YUM/DNF mode: none (use system repos), local-iso (use mounted ISO repo only), online (internet repos)")
-	ycmCmd.Flags().StringVar(&ycmOSISODevice, "os-iso-device", "/dev/cdrom", "ISO file path/name or block device used when --os-yum-mode=local-iso (auto-searched if filename only)")
-	ycmCmd.Flags().StringVar(&ycmOSISOMountpoint, "os-iso-mountpoint", "/media", "Mount point for ISO when --os-yum-mode=local-iso")
-	ycmCmd.Flags().StringVar(&ycmOSYumRepoFile, "os-yum-repo-file", "/etc/yum.repos.d/local.repo", "YUM repo file path for local-iso mode")
+	ycmCmd.Flags().StringVar(&ycmOSYumMode, "os-yum-mode", "", "YUM/DNF mode: empty (system repos, auto ISO fallback), local (optical/ISO), or IP[:port]/http(s)://... (custom yum)")
+	ycmCmd.Flags().StringVar(&ycmOSISODevice, "os-iso-device", "auto", "ISO source for local mode / auto fallback: auto (probe /dev/cdrom /dev/sr0 then OS-matched *.iso), block device, filename, or path")
+	ycmCmd.Flags().StringVar(&ycmOSISOMountpoint, "os-iso-mountpoint", "/media", "Mount point for ISO when using local mode or auto fallback")
+	ycmCmd.Flags().StringVar(&ycmOSYumRepoFile, "os-yum-repo-file", "/etc/yum.repos.d/local.repo", "YUM repo file path for local mode / auto fallback")
 
 	// OS 用户参数
 	ycmCmd.Flags().StringVar(&ycmOSUser, "os-user", "yashan", "Product user name")
@@ -122,23 +122,23 @@ func init() {
 
 // runYCM 执行 YCM 安装流程
 func runYCM(cmd *cobra.Command, args []string) error {
-	if err := validatePorts(map[string]int{
-		"--ycm-port":                ycmPort,
-		"--ycm-prometheus-port":     ycmPrometheusPort,
-		"--ycm-loki-http-port":      ycmLokiHTTPPort,
-		"--ycm-loki-grpc-port":      ycmLokiGRPCPort,
-		"--ycm-yasdb-exporter-port": ycmYasdbExporterPort,
-	}); err != nil {
-		return err
-	}
-
 	flags := GetGlobalFlags()
 	if flags.ListSteps {
 		PrintYCMStepCatalog(ycmSkipOS)
 		return nil
 	}
 
-	// 未指定 --targets 时，默认本地执行。
+	layout := resolveYCMInstallLayout(cmd)
+	if err := validatePorts(map[string]int{
+		"--ycm-port":                layout.WebPort,
+		"--ycm-prometheus-port":     layout.PrometheusPort,
+		"--ycm-loki-http-port":      layout.LokiHTTPPort,
+		"--ycm-loki-grpc-port":      layout.LokiGRPCPort,
+		"--ycm-yasdb-exporter-port": layout.YasdbExporterPort,
+	}); err != nil {
+		return err
+	}
+
 	if len(flags.Targets) == 0 {
 		flags.Local = true
 		flags.Targets = []string{"localhost"}
@@ -181,7 +181,10 @@ func runYCM(cmd *cobra.Command, args []string) error {
 	logger.Info("Starting YCM installation (RunID: %s)", rid)
 	logger.Info("Targets: %v", flags.Targets)
 	logger.Info("YCM package: %s", ycmPackage)
-	logger.Info("Install directory: %s", ycmInstallDir)
+	logger.Info("Install directory: %s", layout.InstallDir)
+	logger.Info("YCM home: %s", layout.YCMHome)
+	logger.Info("YCM ports: web=%d prometheus=%d loki_http=%d loki_grpc=%d exporter=%d",
+		layout.WebPort, layout.PrometheusPort, layout.LokiHTTPPort, layout.LokiGRPCPort, layout.YasdbExporterPort)
 	logger.Info("Database driver: %s", ycmDBDriver)
 
 	if ycmSkipOS {
@@ -191,7 +194,7 @@ func runYCM(cmd *cobra.Command, args []string) error {
 	}
 
 	// 构建参数
-	params := buildYCMParams(flags)
+	params := buildYCMParams(cmd, flags)
 
 	// 收集所有步骤
 	var allSteps []*runner.Step
@@ -204,7 +207,7 @@ func runYCM(cmd *cobra.Command, args []string) error {
 		// 即使跳过 OS，也需要连通性检查 (B-001)
 		osSteps := ossteps.GetAllSteps()
 		for _, step := range osSteps {
-			if step.ID == "B-001" {
+			if step.ID == ossteps.FirstStepID() {
 				allSteps = append(allSteps, step)
 				break
 			}
@@ -212,8 +215,7 @@ func runYCM(cmd *cobra.Command, args []string) error {
 	}
 
 	// 添加 YCM 步骤
-	ycmSteps := ycmsteps.GetAllSteps()
-	allSteps = append(allSteps, ycmSteps...)
+	allSteps = append(allSteps, ycmsteps.GetAllSteps()...)
 
 	// 过滤步骤
 	steps := filterSteps(allSteps, flags)
@@ -234,7 +236,7 @@ func runYCM(cmd *cobra.Command, args []string) error {
 	var otherSteps []*runner.Step
 
 	for _, step := range steps {
-		if step.ID == "B-001" {
+		if step.ID == ossteps.FirstStepID() {
 			connectivityStep = step
 		} else {
 			otherSteps = append(otherSteps, step)
@@ -368,10 +370,11 @@ func runYCM(cmd *cobra.Command, args []string) error {
 		stepIndex += len(osStepsToRun)
 	}
 
-	// YCM 步骤：遍历所有节点执行
+	// YCM 步骤：遍历所有节点执行（同一 host 共享 Results，供 G-008~G-010 验证与 G-010 健康摘要）
 	if lastErr == nil && len(ycmStepsToRun) > 0 {
 		for _, info := range hostInfos {
 			logger.Info("-------- Host: %s (YCM install) --------", info.Host)
+			hostResults := make(map[string]interface{})
 
 			for i, step := range ycmStepsToRun {
 				ctx := &runner.StepContext{
@@ -380,7 +383,7 @@ func runYCM(cmd *cobra.Command, args []string) error {
 					Params:            params,
 					DryRun:            flags.DryRun,
 					Precheck:          flags.Precheck,
-					Results:           make(map[string]interface{}),
+					Results:           hostResults,
 					OSInfo:            info.OSInfo,
 					LocalSoftwareDirs: flags.LocalSoftwareDirs,
 					RemoteSoftwareDir: flags.RemoteSoftwareDir,
@@ -419,17 +422,34 @@ func runYCM(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("precheck failed")
 	}
 
-	// 输出访问信息
+	// 访问 URL 已在 G-010 输出；此处仅写 debug 日志
 	for _, info := range hostInfos {
-		logger.Info("YCM access URL: http://%s:%d", info.Host, ycmPort)
+		logger.Info("YCM access URL: http://%s:%d", info.Host, layout.WebPort)
 	}
-	logger.Info("Default credentials: admin / admin (change on first login)")
 	logger.Info("YCM installation completed successfully")
 	return nil
 }
 
+// resolveYCMInstallLayout 解析本次安装的有效路径与端口（与 clean 共用 ycmsteps.ResolveInstallLayout）。
+func resolveYCMInstallLayout(cmd *cobra.Command) ycmsteps.InstallLayout {
+	return ycmsteps.ResolveInstallLayout(ycmsteps.InstallLayoutInput{
+		WebPort:               ycmPort,
+		InstallDir:            ycmInstallDir,
+		InstallDirExplicit:    cmd.Flags().Changed("ycm-install-dir"),
+		PrometheusPort:        ycmPrometheusPort,
+		PrometheusExplicit:    cmd.Flags().Changed("ycm-prometheus-port"),
+		LokiHTTPPort:          ycmLokiHTTPPort,
+		LokiHTTPExplicit:      cmd.Flags().Changed("ycm-loki-http-port"),
+		LokiGRPCPort:          ycmLokiGRPCPort,
+		LokiGRPCExplicit:      cmd.Flags().Changed("ycm-loki-grpc-port"),
+		YasdbExporterPort:     ycmYasdbExporterPort,
+		YasdbExporterExplicit: cmd.Flags().Changed("ycm-yasdb-exporter-port"),
+	})
+}
+
 // buildYCMParams 构建 YCM 安装参数
-func buildYCMParams(flags GlobalFlags) map[string]interface{} {
+func buildYCMParams(cmd *cobra.Command, flags GlobalFlags) map[string]interface{} {
+	layout := resolveYCMInstallLayout(cmd)
 	// 复用 OS 参数构建
 	params := buildOSParams(false, len(flags.Targets))
 	params["ssh_port"] = flags.SSHPort
@@ -449,27 +469,28 @@ func buildYCMParams(flags GlobalFlags) map[string]interface{} {
 	// 若用户指定，则覆盖 OS ignore install errors 参数
 	params["os_ignore_install_errors"] = ycmIgnoreInstallErrors
 	// YUM 模式及 ISO 参数覆盖（与 db --os-yum-mode 对齐）
-	params["os_yum_mode"] = ycmOSYumMode
+	params["os_yum_mode"] = strings.TrimSpace(ycmOSYumMode)
 	params["os_iso_device"] = ycmOSISODevice
 	params["os_iso_mountpoint"] = ycmOSISOMountpoint
 	params["os_yum_repo_file"] = ycmOSYumRepoFile
 
 	// YCM 安装参数
 	params["ycm_package"] = ycmPackage
-	params["ycm_install_dir"] = ycmInstallDir
-	// ycm_deploy_file: 若用户未指定，动态根据 ycm_install_dir 计算
+	params["ycm_install_dir"] = layout.InstallDir
+	params["ycm_home"] = layout.YCMHome
+	// ycm_deploy_file: 若用户未指定，动态根据 ycm_home 计算
 	deployFile := ycmDeployFile
 	if deployFile == "" {
-		deployFile = ycmInstallDir + "/ycm/etc/deploy.yml"
+		deployFile = layout.YCMHome + "/etc/deploy.yml"
 	}
 	params["ycm_deploy_file"] = deployFile
 
 	// YCM 端口参数
-	params["ycm_port"] = ycmPort
-	params["ycm_prometheus_port"] = ycmPrometheusPort
-	params["ycm_loki_http_port"] = ycmLokiHTTPPort
-	params["ycm_loki_grpc_port"] = ycmLokiGRPCPort
-	params["ycm_yasdb_exporter_port"] = ycmYasdbExporterPort
+	params["ycm_port"] = layout.WebPort
+	params["ycm_prometheus_port"] = layout.PrometheusPort
+	params["ycm_loki_http_port"] = layout.LokiHTTPPort
+	params["ycm_loki_grpc_port"] = layout.LokiGRPCPort
+	params["ycm_yasdb_exporter_port"] = layout.YasdbExporterPort
 
 	// YCM 数据库后端参数
 	params["ycm_db_driver"] = ycmDBDriver

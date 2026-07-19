@@ -101,21 +101,29 @@ func FilterUninstalledPackages(ctx *runner.StepContext, packages, pkgManager str
 		if !IsDepPackageSatisfied(ctx, pkg, pkgManager) {
 			uninstalled = append(uninstalled, pkg)
 		} else {
-			ctx.Logger.Info("  Package '%s' already installed", pkg)
+			ctx.LogPhase("pkg-skip-installed", fmt.Sprintf("package=%s pkg_mgr=%s", pkg, pkgManager))
 		}
 	}
 
 	return uninstalled
 }
 
-// BuildInstallCmd builds the install command based on package manager and yum mode
-// yumMode 取值: "local-iso"（使用本地 ISO 仓库）、"none"（使用默认/网络仓库）
+// BuildInstallCmd builds the install command based on package manager and yum mode.
+// yumMode: "" = system repos; YumModeLocal = local ISO repo; YumModeHTTP = custom HTTP repo.
 func BuildInstallCmd(pkgManager, yumMode, packages string, isRHEL8 bool) string {
-	if yumMode == "local-iso" {
+	if IsLocalYumMode(yumMode) {
 		if isRHEL8 {
 			return fmt.Sprintf("%s -y install --disablerepo=\\* --enablerepo=local-baseos --enablerepo=local-appstream %s", pkgManager, packages)
 		}
 		return fmt.Sprintf("%s -y install --disablerepo=\\* --enablerepo=local %s", pkgManager, packages)
+	}
+	if IsHTTPYumMode(yumMode) {
+		if isRHEL8 {
+			return fmt.Sprintf("%s -y install --disablerepo=\\* --enablerepo=%s --enablerepo=%s %s",
+				pkgManager, yumHTTPRepoBaseOS, yumHTTPRepoAppStream, packages)
+		}
+		return fmt.Sprintf("%s -y install --disablerepo=\\* --enablerepo=%s %s",
+			pkgManager, yumHTTPRepoSingle, packages)
 	}
 
 	if pkgManager == "apt" {

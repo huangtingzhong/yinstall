@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	commonmysql "github.com/yinstall/internal/common/mysql"
-	"github.com/yinstall/internal/logging"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -82,9 +81,6 @@ func displayPrimaryRootPassword(ctx *runner.StepContext) string {
 	pwd := strings.TrimSpace(ctx.GetParamString("primary_root_password", ""))
 	if pwd == "" {
 		return "(not configured)"
-	}
-	if logging.RedactSensitive() {
-		return "***REDACTED***"
 	}
 	return pwd
 }

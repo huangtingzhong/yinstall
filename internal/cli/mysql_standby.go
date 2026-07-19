@@ -46,7 +46,7 @@ var mysqlStandbyCmd = &cobra.Command{
 	Short: "Add MySQL replica to existing primary",
 	Long: `Add MySQL replica instance to an existing primary:
   - --stage all/a: install replica software + instance + replication (default)
-  - --stage software/s: install replica binaries only (MR-007 + MR-018)
+  - --stage software/s: install replica binaries only (MR-007 + MR-008)
   - --stage instance/i: replica instance + sync; software must already exist
   - Data sync: clone (default) or remote mysqldump on replica (--sync-method dump)
 
@@ -202,10 +202,10 @@ func runMysqlStandby(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	// Phase B: MR-006, MR-007; MR-018 only for software/all
+	// Phase B: MR-006, MR-007; MR-008 only for software/all
 	phaseB := map[string]bool{"MR-006": true, "MR-007": true}
 	if commonmysql.StandbyIncludesSoftwareInstall(stage) {
-		phaseB["MR-018"] = true
+		phaseB["MR-008"] = true
 	}
 	if err := runMysqlStandbyReplicaSteps(filtered, phaseB, replicaHosts, nil, logger, params, flags, shared, progress); err != nil {
 		return err
@@ -220,30 +220,30 @@ func runMysqlStandby(cmd *cobra.Command, args []string) error {
 		}
 		mergeShared(params, shared)
 
-		// Phase D: MR-009 then MR-008 on replica (cnf before instance init)
+		// Phase D: MR-010 then MR-009 on replica (cnf before instance init)
+		if err := runMysqlStandbyReplicaSteps(filtered, map[string]bool{"MR-010": true}, replicaHosts, nil, logger, params, flags, shared, progress); err != nil {
+			return err
+		}
 		if err := runMysqlStandbyReplicaSteps(filtered, map[string]bool{"MR-009": true}, replicaHosts, nil, logger, params, flags, shared, progress); err != nil {
 			return err
 		}
-		if err := runMysqlStandbyReplicaSteps(filtered, map[string]bool{"MR-008": true}, replicaHosts, nil, logger, params, flags, shared, progress); err != nil {
-			return err
-		}
 		if strings.ToLower(strings.TrimSpace(mysqlStandbySyncMethod)) == "clone" {
-			if err := runMysqlStandbyReplicaSteps(filtered, map[string]bool{"MR-010": true}, replicaHosts, primaryExec, logger, params, flags, shared, progress); err != nil {
+			if err := runMysqlStandbyReplicaSteps(filtered, map[string]bool{"MR-011": true}, replicaHosts, primaryExec, logger, params, flags, shared, progress); err != nil {
 				return err
 			}
 		}
 
-		// Inter-server firewall + port check before clone/dump/replication (MR-019).
-		if err := runMysqlStandbyPrimarySteps(filtered, map[string]bool{"MR-019": true}, primaryExec, logger, params, flags, shared, progress); err != nil {
+		// Inter-server firewall + port check before clone/dump/replication (MR-012).
+		if err := runMysqlStandbyPrimarySteps(filtered, map[string]bool{"MR-012": true}, primaryExec, logger, params, flags, shared, progress); err != nil {
 			return err
 		}
-		if err := runMysqlStandbyReplicaSteps(filtered, map[string]bool{"MR-019": true}, replicaHosts, primaryExec, logger, params, flags, shared, progress); err != nil {
+		if err := runMysqlStandbyReplicaSteps(filtered, map[string]bool{"MR-012": true}, replicaHosts, primaryExec, logger, params, flags, shared, progress); err != nil {
 			return err
 		}
 
 		// Phase E/F/G on replica
 		replicaPhase := map[string]bool{}
-		for _, id := range []string{"MR-011", "MR-013", "MR-014", "MR-015"} {
+		for _, id := range []string{"MR-013", "MR-014", "MR-015", "MR-016"} {
 			replicaPhase[id] = true
 		}
 		if err := runMysqlStandbyReplicaSteps(filtered, replicaPhase, replicaHosts, primaryExec, logger, params, flags, shared, progress); err != nil {
@@ -254,16 +254,16 @@ func runMysqlStandby(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// MR-016 semi-sync on primary then replica
+	// MR-018 semi-sync on primary then replica
 	if mysqlStandbyEnableSemiSync {
 		p := copyParams(params)
 		p["semi_sync_role"] = "source"
-		if err := runMysqlStandbyPrimarySteps(filtered, map[string]bool{"MR-016": true}, primaryExec, logger, p, flags, shared, progress); err != nil {
+		if err := runMysqlStandbyPrimarySteps(filtered, map[string]bool{"MR-018": true}, primaryExec, logger, p, flags, shared, progress); err != nil {
 			return err
 		}
 		p2 := copyParams(params)
 		p2["semi_sync_role"] = "replica"
-		_ = runMysqlStandbyReplicaSteps(filtered, map[string]bool{"MR-016": true}, replicaHosts, primaryExec, logger, p2, flags, shared, progress)
+		_ = runMysqlStandbyReplicaSteps(filtered, map[string]bool{"MR-018": true}, replicaHosts, primaryExec, logger, p2, flags, shared, progress)
 	}
 
 	logger.Info("MySQL standby completed successfully")
@@ -389,7 +389,7 @@ func buildMysqlStandbyExecPlan(filtered []*runner.Step, stage, syncMethod string
 	add(&plan, "MR-006", "replica")
 	add(&plan, "MR-007", "replica")
 	if commonmysql.StandbyIncludesSoftwareInstall(stage) {
-		add(&plan, "MR-018", "replica")
+		add(&plan, "MR-008", "replica")
 	}
 	if commonmysql.StandbyIncludesReplicationSetup(stage) {
 		add(&plan, "MR-003", "primary")
@@ -397,21 +397,21 @@ func buildMysqlStandbyExecPlan(filtered []*runner.Step, stage, syncMethod string
 		if syncMethod == "clone" {
 			add(&plan, "MR-005", "primary")
 		}
+		add(&plan, "MR-010", "replica")
 		add(&plan, "MR-009", "replica")
-		add(&plan, "MR-008", "replica")
 		if syncMethod == "clone" {
-			add(&plan, "MR-010", "replica")
+			add(&plan, "MR-011", "replica")
 		}
-		add(&plan, "MR-019", "primary")
-		add(&plan, "MR-019", "replica")
-		add(&plan, "MR-011", "replica")
+		add(&plan, "MR-012", "primary")
+		add(&plan, "MR-012", "replica")
 		add(&plan, "MR-013", "replica")
 		add(&plan, "MR-014", "replica")
 		add(&plan, "MR-015", "replica")
+		add(&plan, "MR-016", "replica")
 	}
 	if enableSemiSync {
-		add(&plan, "MR-016", "primary")
-		add(&plan, "MR-016", "replica")
+		add(&plan, "MR-018", "primary")
+		add(&plan, "MR-018", "replica")
 	}
 	return plan
 }
@@ -431,31 +431,31 @@ func mysqlStandbyExcludeReason(id, stage, syncMethod string, enableSemiSync bool
 	case "MR-017":
 		return "failure cleanup only (not in normal flow)"
 	case "MR-018":
-		if !commonmysql.StandbyIncludesSoftwareInstall(stage) {
-			return fmt.Sprintf("stage=%q does not install software", stage)
+		if !enableSemiSync {
+			return "--enable-semi-sync not set"
 		}
-	case "MR-003", "MR-004", "MR-008", "MR-009", "MR-013", "MR-014", "MR-015":
+	case "MR-003", "MR-004", "MR-009", "MR-010", "MR-014", "MR-015", "MR-016":
 		if !commonmysql.StandbyIncludesReplicationSetup(stage) {
 			return fmt.Sprintf("stage=%q does not configure replication", stage)
 		}
-	case "MR-005", "MR-010":
+	case "MR-005", "MR-011":
 		if !commonmysql.StandbyIncludesReplicationSetup(stage) {
 			return fmt.Sprintf("stage=%q does not configure replication", stage)
 		}
 		if syncMethod != "clone" {
 			return fmt.Sprintf("sync_method=%q (clone plugin not needed)", syncMethod)
 		}
-	case "MR-019":
+	case "MR-012":
 		if !commonmysql.StandbyIncludesReplicationSetup(stage) {
 			return fmt.Sprintf("stage=%q does not configure replication", stage)
 		}
-	case "MR-011":
+	case "MR-013":
 		if !commonmysql.StandbyIncludesReplicationSetup(stage) {
 			return fmt.Sprintf("stage=%q does not configure replication", stage)
 		}
-	case "MR-016":
-		if !enableSemiSync {
-			return "--enable-semi-sync not set"
+	case "MR-008":
+		if !commonmysql.StandbyIncludesSoftwareInstall(stage) {
+			return fmt.Sprintf("stage=%q does not install software", stage)
 		}
 	}
 	return ""
@@ -593,7 +593,7 @@ func copyParams(p map[string]interface{}) map[string]interface{} {
 func mysqlStandbyOSSteps(skipOS bool) []*runner.Step {
 	if skipOS {
 		for _, s := range ossteps.GetAllSteps() {
-			if s.ID == "B-001" {
+			if s.ID == ossteps.FirstStepID() {
 				return []*runner.Step{s}
 			}
 		}

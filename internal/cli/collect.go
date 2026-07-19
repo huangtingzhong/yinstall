@@ -44,6 +44,14 @@ func (a *collectExecAdapter) Upload(localPath, remotePath string, uploadCtx *ssh
 	return a.e.Upload(localPath, remotePath, uploadCtx)
 }
 
+// SSHExecutor 暴露底层传输，供 runner 挂接实时 debug 输出回调。
+func (a *collectExecAdapter) SSHExecutor() ssh.Executor {
+	if a == nil {
+		return nil
+	}
+	return a.e
+}
+
 // collectExecFactory 是 ExecutorAdapterFactory，供 RunPerHostStepsEx 使用。
 func collectExecFactory(e ssh.Executor) runner.Executor {
 	return &collectExecAdapter{e: e}

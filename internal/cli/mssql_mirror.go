@@ -279,7 +279,7 @@ func resolveMirrorHosts(flags GlobalFlags) (string, []string, bool) {
 
 func buildMssqlMirrorAllSteps(skipOS bool, profile commonwin.Profile) []*runner.Step {
 	var all []*runner.Step
-	all = append(all, ossteps.StepB001CheckConnectivity())
+	all = append(all, connectivityStepForMssql())
 	if !skipOS {
 		all = append(all, winsteps.GetPreInstanceSteps(profile)...)
 	}
@@ -304,7 +304,7 @@ func splitMssqlMirrorSteps(steps []*runner.Step) mssqlMirrorStepGroups {
 			continue
 		}
 		switch {
-		case s.ID == "B-001":
+		case s.ID == ossteps.FirstStepID():
 			g.b001 = s
 		case strings.HasPrefix(s.ID, "W-"):
 			if s.ID == "W-012" || s.ID == "W-014" {
@@ -356,13 +356,13 @@ func RunMssqlMirrorOnHosts(flags GlobalFlags, logger *logging.Logger, params map
 
 	logger.Info("======== Phase: Resolve instance (M-001) ========")
 	for _, hi := range hostInfos {
-		if err := runMssqlHASingleStep(mirrsteps.StepM001ResolveInstance(), hi, params, flags, logger, sharedResults, progress); err != nil {
+		if err := runMssqlHASingleStep(mirrsteps.StepResolveInstance(), hi, params, flags, logger, sharedResults, progress); err != nil {
 			return fmt.Errorf("M-001 on %s: %w", hi.Host, err)
 		}
 	}
 
 	logger.Info("======== Phase: Primary SQL check (M-002) ========")
-	if err := runMssqlHASingleStep(mirrsteps.StepM002CheckPrimary(), primaryInfo, params, flags, logger, sharedResults, progress); err != nil {
+	if err := runMssqlHASingleStep(mirrsteps.StepCheckPrimary(), primaryInfo, params, flags, logger, sharedResults, progress); err != nil {
 		return err
 	}
 
@@ -386,7 +386,7 @@ func RunMssqlMirrorOnHosts(flags GlobalFlags, logger *logging.Logger, params map
 			return fmt.Errorf("no replica hosts in -t for install stage %q", haStage)
 		}
 		logger.Info("======== Phase: Replica SQL install (M-003/004) ========")
-		installSteps := []*runner.Step{mirrsteps.StepM003PlanReplicaInstall(), mirrsteps.StepM004InstallReplica()}
+		installSteps := []*runner.Step{mirrsteps.StepPlanReplicaInstall(), mirrsteps.StepInstallReplica()}
 		for _, rh := range replicaInfos {
 			logger.Info("-------- Replica host: %s --------", rh.Host)
 			for _, step := range installSteps {
@@ -432,7 +432,7 @@ func RunMssqlMirrorOnHosts(flags GlobalFlags, logger *logging.Logger, params map
 
 func buildMssqlMirrorRemoveSteps() []*runner.Step {
 	out := make([]*runner.Step, 0, 5)
-	out = append(out, ossteps.StepB001CheckConnectivity())
+	out = append(out, connectivityStepForMssql())
 	out = append(out, mirrsteps.GetMirrorRemoveSteps()...)
 	return out
 }
@@ -441,7 +441,7 @@ func buildMssqlMirrorRemoveSteps() []*runner.Step {
 func PrintMssqlMirrorStepCatalog(skipOS bool) {
 	profile := commonmssql.WinOSProfileForMssql(commonmssql.TopologyMirror, nil)
 	steps := buildMssqlMirrorAllSteps(skipOS, profile)
-	printStepSection("Primary SQL check", []*runner.Step{mirrsteps.StepM002CheckPrimary()})
+	printStepSection("Primary SQL check", []*runner.Step{mirrsteps.StepCheckPrimary()})
 	printStepSection("Connectivity", []*runner.Step{steps[0]})
 	if !skipOS {
 		var pre []*runner.Step
@@ -453,8 +453,8 @@ func PrintMssqlMirrorStepCatalog(skipOS bool) {
 		printStepSection("Windows OS pre-instance", pre)
 	}
 	printStepSection("Replica SQL install (optional)", []*runner.Step{
-		mirrsteps.StepM003PlanReplicaInstall(),
-		mirrsteps.StepM004InstallReplica(),
+		mirrsteps.StepPlanReplicaInstall(),
+		mirrsteps.StepInstallReplica(),
 	})
 	var m []*runner.Step
 	for _, s := range steps {

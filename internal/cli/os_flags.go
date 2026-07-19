@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	dbsteps "github.com/yinstall/internal/steps/db"
 )
 
 const defaultOSUserPassword = "aaBB11@@33$$"
@@ -88,7 +89,10 @@ func registerOSUserGroupFlags(cmd *cobra.Command, cfg registerOSFlagsConfig) {
 		cmd.Flags().IntVar(&osDBAGroupGID, "os-dba-group-gid", 702, "DBA group GID")
 	}
 	cmd.Flags().StringVar(&osUserShell, "os-user-shell", shellDefault, "User shell")
-	cmd.Flags().StringVar(&osUserPassword, "os-user-password", defaultOSUserPassword, userPwdHelp)
+	// 父命令已挂同名 persistent flag 时跳过, 避免 cobra 重复注册 (如 yinstall om)
+	if cmd.Flags().Lookup("os-user-password") == nil && cmd.InheritedFlags().Lookup("os-user-password") == nil {
+		cmd.Flags().StringVar(&osUserPassword, "os-user-password", defaultOSUserPassword, userPwdHelp)
+	}
 	cmd.Flags().BoolVar(&osSudoersEnable, "os-sudoers-enable", sudoDefault, cfg.whenSkipOSFalse("Enable sudoers configuration"))
 }
 
@@ -102,7 +106,7 @@ func registerOSBaselineFlags(cmd *cobra.Command, cfg registerOSFlagsConfig) {
 	if cfg.forDB {
 		prefix = "[OS] "
 	}
-	cmd.Flags().StringVar(&osTimezone, "os-timezone", "Asia/Shanghai", prefix+cfg.whenSkipOSFalse("System timezone"))
+	cmd.Flags().StringVar(&osTimezone, "os-timezone", "", prefix+cfg.whenSkipOSFalse("System timezone (empty=Asia/Shanghai)"))
 	cmd.Flags().StringVar(&osNTPServer, "os-ntp-server", "", prefix+cfg.whenSkipOSFalse("NTP server address (empty to skip NTP configuration)"))
 	cmd.Flags().StringVar(&osHostname, "os-hostname", "", prefix+cfg.whenSkipOSFalse("Hostname prefix or comma-separated list for B-023 (empty=auto: replace only localhost/system default names, keep existing custom names)"))
 	cmd.Flags().StringVar(&osSysctlFile, "os-sysctl-file", "/etc/sysctl.d/yashandb.conf", prefix+cfg.whenSkipOSFalse("Sysctl config file path"))
@@ -111,9 +115,10 @@ func registerOSBaselineFlags(cmd *cobra.Command, cfg registerOSFlagsConfig) {
 	cmd.Flags().StringVar(&osKernelArgs, "os-kernel-args", "transparent_hugepage=never elevator=deadline LANG=en_US.UTF-8", prefix+cfg.whenSkipOSFalse("Kernel boot arguments"))
 	cmd.Flags().BoolVar(&osHugepagesEnable, "os-hugepages-enable", false, prefix+cfg.whenSkipOSFalse("Enable huge pages configuration (memory size based on db-memory-percent)"))
 	registerOSYumISOFlags(cmd, cfg)
-	depsDefault := "libzstd zlib lz4 openssl openssl-devel libaio"
-	toolsDefault := "zip bind-utils sysstat telnet iotop openssh-clients net-tools unzip libvncserver tigervnc-server device-mapper-multipath dstat lsof psmisc redhat-lsb-core parted xhost strace showmount expect tcl sysfsutils gdisk rsync lvm2 qperf chrony tmux bpftrace perf"
+	depsDefault := "libzstd zlib lz4 openssl openssl-devel libaio tar unzip sshpass"
+	toolsDefault := "tar zip bind-utils sysstat telnet iotop openssh-clients net-tools unzip libvncserver tigervnc-server device-mapper-multipath dstat lsof psmisc redhat-lsb-core parted xhost strace showmount expect tcl sysfsutils gdisk rsync lvm2 qperf chrony tmux bpftrace perf"
 	if cfg.forDB {
+		// DB install must extract .tar.gz on target; keep tools empty but tar/unzip are in os-deps-db-packages above.
 		toolsDefault = ""
 	}
 	cmd.Flags().StringVar(&osDepsPkgs, "os-deps-db-packages", depsDefault, prefix+cfg.whenSkipOSFalse("DB dependency packages"))
@@ -126,7 +131,7 @@ func registerOSBaselineFlags(cmd *cobra.Command, cfg registerOSFlagsConfig) {
 }
 
 func registerMysqlOSBaselineFlags(cmd *cobra.Command, cfg registerOSFlagsConfig) {
-	cmd.Flags().StringVar(&osTimezone, "os-timezone", "Asia/Shanghai", "System timezone"+cfg.whenSkipOSFalse(""))
+	cmd.Flags().StringVar(&osTimezone, "os-timezone", "", "System timezone (empty=Asia/Shanghai)"+cfg.whenSkipOSFalse(""))
 	cmd.Flags().StringVar(&osHostname, "os-hostname", "", "Hostname for B-023 (empty=auto: replace only localhost/system default names, keep existing custom names)"+cfg.whenSkipOSFalse(""))
 	cmd.Flags().StringVar(&osSysctlFile, "os-sysctl-file", "/etc/sysctl.d/mysql.conf", "Sysctl config file path"+cfg.whenSkipOSFalse(""))
 	cmd.Flags().StringVar(&osLimitsFile, "os-limits-file", "/etc/security/limits.conf", "Limits config file path"+cfg.whenSkipOSFalse(""))
@@ -143,10 +148,10 @@ func registerOSYumISOFlags(cmd *cobra.Command, cfg registerOSFlagsConfig) {
 	if cfg.forDB {
 		prefix = "[OS] "
 	}
-	cmd.Flags().StringVar(&osYumMode, "os-yum-mode", "none", prefix+cfg.whenSkipOSFalse("YUM mode: online/local-iso/none"))
-	cmd.Flags().StringVar(&osISODevice, "os-iso-device", "/dev/cdrom", prefix+cfg.whenSkipOSFalse("ISO file path/name or block device used when --os-yum-mode=local-iso (auto-searched if filename only)"))
-	cmd.Flags().StringVar(&osISOMountpoint, "os-iso-mountpoint", "/media", prefix+cfg.whenSkipOSFalse("Mount point for ISO when --os-yum-mode=local-iso"))
-	cmd.Flags().StringVar(&osYumRepoFile, "os-yum-repo-file", "/etc/yum.repos.d/local.repo", prefix+cfg.whenSkipOSFalse("YUM repo file path for local-iso mode"))
+	cmd.Flags().StringVar(&osYumMode, "os-yum-mode", "", prefix+cfg.whenSkipOSFalse("YUM mode: empty (system repos, auto ISO fallback), local (optical/ISO), or IP[:port]/http(s)://host[:port][/path] (custom yum; auto repo by OS version)"))
+	cmd.Flags().StringVar(&osISODevice, "os-iso-device", "auto", prefix+cfg.whenSkipOSFalse("ISO source for local mode / auto fallback: auto (probe /dev/cdrom /dev/sr0 then OS-matched *.iso), block device, filename, or path"))
+	cmd.Flags().StringVar(&osISOMountpoint, "os-iso-mountpoint", "/media", prefix+cfg.whenSkipOSFalse("Mount point for ISO when using local mode or auto fallback"))
+	cmd.Flags().StringVar(&osYumRepoFile, "os-yum-repo-file", "/etc/yum.repos.d/local.repo", prefix+cfg.whenSkipOSFalse("YUM repo file path for local mode / auto fallback"))
 }
 
 // registerOSMultipathFlags YAC 多路径与 udev（B-019 等）。
@@ -187,9 +192,9 @@ func registerOSYACDiskGroupFlags(cmd *cobra.Command, cfg registerOSFlagsConfig) 
 	if cfg.forDB {
 		prefix = "[OS] "
 	}
-	cmd.Flags().StringVar(&yacSystemDG, "yac-systemdg", "", prefix+"System diskgroup (format: dgname:/dev/sda,/dev/sdb)")
-	cmd.Flags().StringVar(&yacDataDG, "yac-datadg", "", prefix+"Data diskgroup (format: dgname:/dev/sdc,/dev/sdd)")
-	cmd.Flags().StringVar(&yacArchDG, "yac-archdg", "", prefix+"Archive diskgroup (format: dgname:/dev/sde, optional)")
+	cmd.Flags().StringVar(&yacSystemDG, "yac-systemdg", "", prefix+"System disks (comma-separated paths, e.g. /dev/sda,/dev/sdb; legacy role:paths OK)")
+	cmd.Flags().StringVar(&yacDataDG, "yac-datadg", "", prefix+"Data disks (comma-separated paths, e.g. /dev/sdc,/dev/sdd; legacy role:paths OK)")
+	cmd.Flags().StringVar(&yacArchDG, "yac-archdg", "", prefix+"Archive disks (comma-separated paths, optional; legacy role:paths OK)")
 	cmd.Flags().BoolVar(&yacArchDGEnable, "yac-archdg-enable", false, prefix+"Enable independent ArchDG creation (separate archive diskgroup)")
 	cmd.Flags().StringVar(&yacScanIPs, "yac-scan-ips", "", prefix+"SCAN IP addresses for local SCAN mode (comma-separated, empty=auto-allocate)")
 	cmd.Flags().StringVar(&yacDiskPattern, "yac-disk-pattern", "", prefix+cfg.whenSkipOSFalse("Disk path pattern for filtering (e.g., '/dev/sd[c-z]', empty=all disks)"))
@@ -209,9 +214,25 @@ func registerYACModeFlag(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&yacMode, "yac", false, "Enable YAC cluster mode (package ce gen; auto-enabled when targets >= 2)")
 }
 
+// registerYACNetworkFlags 注册 db/standby 共用的 YAC 网络类 flag（包级变量与 db.go 一致）。
+// forStandby=true 时 help 强调 CE 备路径强制语义；disk-found-path 默认无尾斜杠。
+func registerYACNetworkFlags(cmd *cobra.Command, forStandby bool) {
+	if forStandby {
+		cmd.Flags().StringVar(&yacInterCIDR, "yac-inter-cidr", "", "YAC interconnect CIDR; also used as primary/standby replication network (required for CE standby path)")
+		cmd.Flags().StringVar(&yacPublicNetwork, "yac-public-network", "", "YAC public network CIDR (optional for CE path; inherit from primary toml if empty)")
+		cmd.Flags().StringSliceVar(&yacVIPs, "yac-vips", nil, "VIP list for yasboot config group gen; bare IP or ip/prefix; count must equal standby node count (required for CE path)")
+		cmd.Flags().StringVar(&yacDiskFoundPath, "yac-disk-found-path", dbsteps.DefaultYACDiskFoundPath, "Disk found path for yasboot config group gen")
+		return
+	}
+	cmd.Flags().StringVar(&yacInterCIDR, "yac-inter-cidr", "", "YAC inter-connect CIDR (required for YAC)")
+	cmd.Flags().StringVar(&yacPublicNetwork, "yac-public-network", "", "YAC public network CIDR or interface (required for YAC)")
+	cmd.Flags().StringSliceVar(&yacVIPs, "yac-vips", nil, "VIP addresses for YAC (vip/scan mode; auto-generated if omitted; bare IP or ip/prefix)")
+	cmd.Flags().StringVar(&yacDiskFoundPath, "yac-disk-found-path", dbsteps.DefaultYACDiskFoundPath+"/", "Disk found path for yasboot package ce gen")
+}
+
 // registerOSOnlyFlags 仅 os 子命令使用的参数（db 使用独立的 --db-memory-percent）。
 func registerOSOnlyFlags(cmd *cobra.Command) {
-	cmd.Flags().IntVar(&osDbMemoryPercent, "db-memory-percent", -1, "Planned DB memory percent (1-100) for shared memory sizing; omit on standalone os to use 90%% physical RAM")
+	cmd.Flags().IntVar(&osDbMemoryPercent, "db-memory-percent", -1, "Planned DB memory percent (1-100) for shared memory sizing; omit on standalone os to use 90% physical RAM")
 	registerYACModeFlag(cmd)
 }
 

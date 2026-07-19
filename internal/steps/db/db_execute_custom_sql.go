@@ -1,0 +1,288 @@
+package db
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/yinstall/internal/common/file"
+	commonos "github.com/yinstall/internal/common/os"
+	commonsql "github.com/yinstall/internal/common/sql"
+	"github.com/yinstall/internal/runner"
+)
+
+// stepExecuteCustomSql 执行自定义 SQL 脚本。
+// CDB 模式：在 --db-pdb 指定的每个 PDB 内执行；非 CDB：在实例内执行。
+func stepExecuteCustomSql() *runner.Step {
+	return &runner.Step{
+		Name:        "Execute Custom SQL Script",
+		Description: "Execute custom SQL script using yasql",
+		Tags:        []string{"db", "sql", "custom"},
+		// 不用 Optional：否则 PreCheck 报错会被当成 skip；无脚本用 StepSkipped。
+		Optional: false,
+
+		PreCheck: func(ctx *runner.StepContext) error {
+			sqlScript := ctx.GetParamString("db_custom_sql_script", "")
+			if sqlScript == "" {
+				return runner.NewStepSkippedError("no custom SQL script specified")
+			}
+			if strings.TrimSpace(ctx.GetParamString("db_admin_password", "")) == "" {
+				return fmt.Errorf("db_admin_password is required for SQL execution")
+			}
+			if ctxCDBEnabled(ctx) {
+				names, err := pdbNamesFromCtx(ctx)
+				if err != nil {
+					return fmt.Errorf("invalid --db-pdb for custom SQL: %w", err)
+				}
+				if len(names) == 0 {
+					return fmt.Errorf("multitenant custom SQL requires at least one --db-pdb")
+				}
+			}
+			if err := precheckCustomSQLScriptExists(ctx, sqlScript); err != nil {
+				return err
+			}
+			return nil
+		},
+
+		Action: func(ctx *runner.StepContext) error {
+			dbLogPhase(ctx, "plan", "op=yasql-script-file")
+			sqlScript := ctx.GetParamString("db_custom_sql_script", "")
+			sysPassword := ctx.GetParamString("db_admin_password", "")
+			clusterName := ctx.GetParamString("db_cluster_name", "yashandb")
+			beginPort := ctx.GetParamInt("db_begin_port", 1688)
+			user := ctx.GetParamString("os_user", "yashan")
+
+			if sysPassword == "" {
+				return fmt.Errorf("db_admin_password is required for SQL execution")
+			}
+
+			remotePath, err := resolveScriptPath(ctx, sqlScript)
+			if err != nil {
+				return fmt.Errorf("failed to resolve SQL script path: %w", err)
+			}
+			ctx.Logger.Info("Custom SQL script resolved: %s", remotePath)
+
+			firstHost := ctx.HostsToRun()[0]
+			hctx := ctx.ForHost(firstHost)
+			envFile, err := resolveDBEnvFile(ctx, hctx)
+			if err != nil {
+				return err
+			}
+
+			runScript := func(serviceName, containerLabel string) error {
+				connectStr := commonsql.BuildYasqlTCPConnect(commonsql.YasqlConnectHost(hctx), "sys", sysPassword, beginPort, serviceName)
+				yasqlCmd := fmt.Sprintf("yasql -S %s -f %s", connectStr, commonos.ShellSingleQuote(remotePath))
+				hctx.Logger.Info("Executing custom SQL in %s: %s", containerLabel, remotePath)
+				dbLogPhase(hctx, "query-start", fmt.Sprintf("label=custom-script container=%s path=%s", containerLabel, remotePath))
+				result, err := commonos.ExecuteAsUserWithEnv(hctx, user, envFile, yasqlCmd, false)
+				if err != nil {
+					return fmt.Errorf("failed to execute yasql in %s: %w", containerLabel, err)
+				}
+				yr := &commonsql.YasqlResult{
+					Stdout:   result.GetStdout(),
+					Stderr:   result.GetStderr(),
+					ExitCode: result.GetExitCode(),
+					Success:  result.GetExitCode() == 0,
+				}
+				if err := commonsql.ValidateYasqlResultSuccess(yr); err != nil {
+					dbLogPhase(hctx, "query-fail", fmt.Sprintf("label=custom-script container=%s exit=%d", containerLabel, result.GetExitCode()))
+					hctx.Logger.Error("SQL script execution failed in %s: %v", containerLabel, err)
+					hctx.Logger.Error("STDOUT: %s", result.GetStdout())
+					hctx.Logger.Error("STDERR: %s", result.GetStderr())
+					return fmt.Errorf("SQL script execution failed in %s: %w", containerLabel, err)
+				}
+				dbLogPhase(hctx, "query-done", fmt.Sprintf("label=custom-script container=%s exit=0", containerLabel))
+				hctx.Logger.Info("Custom SQL executed successfully in %s", containerLabel)
+				if out := strings.TrimSpace(result.GetStdout()); out != "" {
+					hctx.Logger.Info("Output (%s): %s", containerLabel, out)
+				}
+				return nil
+			}
+
+			if ctxCDBEnabled(hctx) {
+				return forEachPDBTarget(hctx, func(pdbName string) error {
+					return runScript(pdbName, "PDB "+pdbName)
+				})
+			}
+			return runScript(clusterName, "CDB$ROOT")
+		},
+
+		PostCheck: func(ctx *runner.StepContext) error {
+			return nil
+		},
+	}
+}
+
+// resolveScriptPath 解析脚本路径，支持多种格式
+//
+// 工具支持在 Windows/Linux/macOS 控制端运行，目标端始终为 Linux。
+// 路径语义：
+//   - remote:/path 或 r:/path    -  明确指定远端 Linux 路径，直接使用
+//   - local:/path 或 l:/path     -  明确指定本地文件，上传后使用
+//   - /absolute/path             -  以 '/' 开头，视为远端 Linux 绝对路径，先检查远端，
+//     不存在则尝试从本地上传
+//   - C:\...（Windows 本地绝对）   -  filepath.IsAbs 为 true 但不以 '/' 开头，
+//     直接从本地上传
+//   - relative/path              -  相对路径，从本地软件目录查找并上传
+func resolveScriptPath(ctx *runner.StepContext, scriptPath string) (string, error) {
+	scriptPath = strings.TrimSpace(scriptPath)
+	if scriptPath == "" {
+		return "", fmt.Errorf("empty script path")
+	}
+
+	// 明确指定远程路径
+	if strings.HasPrefix(scriptPath, "remote:") || strings.HasPrefix(scriptPath, "r:") {
+		remotePath := strings.TrimPrefix(scriptPath, "remote:")
+		remotePath = strings.TrimPrefix(remotePath, "r:")
+		remotePath = strings.TrimSpace(remotePath)
+
+		if !file.FileExists(ctx, remotePath) {
+			return "", fmt.Errorf("remote file not found: %s", remotePath)
+		}
+		ctx.Logger.Info("Using remote SQL script: %s", remotePath)
+		return remotePath, nil
+	}
+
+	// 明确指定本地路径
+	if strings.HasPrefix(scriptPath, "local:") || strings.HasPrefix(scriptPath, "l:") {
+		localPath := strings.TrimPrefix(scriptPath, "local:")
+		localPath = strings.TrimPrefix(localPath, "l:")
+		localPath = strings.TrimSpace(localPath)
+
+		remotePath, err := file.FindAndDistribute(
+			ctx,
+			localPath,
+			ctx.LocalSoftwareDirs,
+			ctx.RemoteSoftwareDir,
+		)
+		if err != nil {
+			return "", fmt.Errorf("failed to upload local file: %w", err)
+		}
+		ctx.Logger.Info("Uploaded local SQL script to: %s", remotePath)
+		return remotePath, nil
+	}
+
+	// 以 '/' 开头 → 远端 Linux 绝对路径，先检查远端，不存在则尝试本地上传
+	// 注意：Windows 控制端下 filepath.IsAbs("/foo") == false，因此这里不用 filepath.IsAbs
+	if strings.HasPrefix(scriptPath, "/") {
+		if file.FileExists(ctx, scriptPath) {
+			ctx.Logger.Info("Using existing remote SQL script: %s", scriptPath)
+			return scriptPath, nil
+		}
+		ctx.Logger.Info("Remote file not found at %s, trying to upload from local...", scriptPath)
+		remotePath, err := file.FindAndDistribute(
+			ctx,
+			scriptPath,
+			ctx.LocalSoftwareDirs,
+			ctx.RemoteSoftwareDir,
+		)
+		if err != nil {
+			return "", fmt.Errorf("file not found on remote or local: %s", scriptPath)
+		}
+		ctx.Logger.Info("Uploaded SQL script to: %s", remotePath)
+		return remotePath, nil
+	}
+
+	// 本地平台绝对路径（如 Windows C:\...）→ 直接上传
+	if filepath.IsAbs(scriptPath) {
+		ctx.Logger.Info("Local absolute path detected, uploading: %s", scriptPath)
+		remotePath, err := file.FindAndDistribute(
+			ctx,
+			scriptPath,
+			ctx.LocalSoftwareDirs,
+			ctx.RemoteSoftwareDir,
+		)
+		if err != nil {
+			return "", fmt.Errorf("failed to upload local file: %w", err)
+		}
+		ctx.Logger.Info("Uploaded SQL script to: %s", remotePath)
+		return remotePath, nil
+	}
+
+	// 相对路径 → 从本地软件目录查找并上传
+	ctx.Logger.Info("Relative path detected, searching in local software directories...")
+	remotePath, err := file.FindAndDistribute(
+		ctx,
+		scriptPath,
+		ctx.LocalSoftwareDirs,
+		ctx.RemoteSoftwareDir,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to find and upload SQL script: %w", err)
+	}
+	ctx.Logger.Info("Uploaded SQL script to: %s", remotePath)
+	return remotePath, nil
+}
+
+// precheckCustomSQLScriptExists 只读：确认脚本在远端或控制端可解析，不上传。
+func precheckCustomSQLScriptExists(ctx *runner.StepContext, scriptPath string) error {
+	scriptPath = strings.TrimSpace(scriptPath)
+	if scriptPath == "" {
+		return fmt.Errorf("empty script path")
+	}
+
+	if strings.HasPrefix(scriptPath, "remote:") || strings.HasPrefix(scriptPath, "r:") {
+		remotePath := strings.TrimPrefix(scriptPath, "remote:")
+		remotePath = strings.TrimPrefix(remotePath, "r:")
+		remotePath = strings.TrimSpace(remotePath)
+		if !file.FileExists(ctx, remotePath) {
+			return fmt.Errorf("remote SQL script not found: %s", remotePath)
+		}
+		return nil
+	}
+
+	localPath := scriptPath
+	if strings.HasPrefix(scriptPath, "local:") || strings.HasPrefix(scriptPath, "l:") {
+		localPath = strings.TrimPrefix(scriptPath, "local:")
+		localPath = strings.TrimPrefix(localPath, "l:")
+		localPath = strings.TrimSpace(localPath)
+	}
+
+	if strings.HasPrefix(scriptPath, "/") {
+		if file.FileExists(ctx, scriptPath) {
+			return nil
+		}
+		// 远端没有时，控制端同名绝对路径或软件目录中需存在
+		if _, err := os.Stat(scriptPath); err == nil {
+			return nil
+		}
+		if findLocalSoftwareFile(ctx, filepath.Base(scriptPath)) != "" {
+			return nil
+		}
+		return fmt.Errorf("SQL script not found on remote or local: %s", scriptPath)
+	}
+
+	if filepath.IsAbs(localPath) {
+		if _, err := os.Stat(localPath); err != nil {
+			return fmt.Errorf("local SQL script not found: %s", localPath)
+		}
+		return nil
+	}
+
+	if _, err := os.Stat(localPath); err == nil {
+		return nil
+	}
+	if findLocalSoftwareFile(ctx, localPath) != "" {
+		return nil
+	}
+	return fmt.Errorf("SQL script not found in cwd or -L dirs: %s", localPath)
+}
+
+func findLocalSoftwareFile(ctx *runner.StepContext, name string) string {
+	if st, err := os.Stat(name); err == nil && !st.IsDir() {
+		return name
+	}
+	candidates := []string{}
+	if ctx != nil {
+		candidates = append(candidates, ctx.LocalSoftwareDirs...)
+	}
+	candidates = append(candidates, ".", "./software", "./pkg")
+	for _, dir := range candidates {
+		p := filepath.Join(dir, name)
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p
+		}
+	}
+	return ""
+}

@@ -1,37 +1,28 @@
-// registry.go - YCM 安装步骤注册表
-// 返回所有 YCM 安装步骤，按执行顺序排列
-
 package ycm
 
 import "github.com/yinstall/internal/runner"
 
-// GetAllSteps 返回全部 YCM 安装 steps（顺序即默认执行顺序）。
-// 步骤编号为 G-001 … G-011，与文件名 g001_*.go … g011_*.go 一一对应。
+// GetAllSteps 返回 yinstall ycm 安装 steps（ID 由 BuildSteps 自动赋 G-001..G-NNN）。
 func GetAllSteps() []*runner.Step {
-	return []*runner.Step{
-		// Dependencies
-		StepG001InstallDeps(),
+	return runner.BuildSteps(runner.StepSpec{
+		Prefix: "G",
+		Entries: []runner.StepEntry{
+			{New: stepCheckPreinstall},
+			{New: stepInstallDeps},
+			{New: stepExtractPackage},
+			{New: stepSetOwnership},
+			{New: stepCheckDeployConfig},
+			{New: stepConfigurePorts},
+			{New: stepDeploy},
+			{New: stepVerifyProcess},
+			{New: stepVerifyPorts},
+			{New: stepVerifyWeb},
+			{New: stepConfigAutostartService},
+		},
+	})
+}
 
-		// Package extraction and setup
-		StepG002ExtractPackage(),
-		StepG003SetOwnership(),
-
-		// Configuration
-		StepG004CheckDeployConfig(),
-		StepG005ConfigurePorts(),
-
-		// Port validation
-		StepG006CheckPorts(),
-
-		// Deployment
-		StepG007Deploy(),
-
-		// Verification
-		StepG008VerifyProcess(),
-		StepG009VerifyPorts(),
-		StepG010VerifyWeb(),
-
-		// Autostart
-		StepG011ConfigAutostartService(),
-	}
+// StepIDByName returns the registry ID for a step Name.
+func StepIDByName(name string) string {
+	return runner.StepIDByName(GetAllSteps(), name)
 }

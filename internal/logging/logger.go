@@ -11,19 +11,6 @@ import (
 	"time"
 )
 
-// redactSensitive 为 true 时对日志中的密码/密钥等做 ***REDACTED*** 脱敏；默认 false（明文，便于排障）。
-var redactSensitive bool
-
-// SetRedactSensitive 设置是否在 session/debug 日志中脱敏密码等敏感字段。
-func SetRedactSensitive(enabled bool) {
-	redactSensitive = enabled
-}
-
-// RedactSensitive 返回当前是否启用日志脱敏。
-func RedactSensitive() bool {
-	return redactSensitive
-}
-
 // Logger 日志管理器
 type Logger struct {
 	runID          string
@@ -249,7 +236,7 @@ func (l *Logger) Warn(format string, args ...interface{}) {
 	l.debugWrite("WARN", fmt.Sprintf(format, args...))
 }
 
-// DebugWrite 写入 debug 日志文件（供 ssh 等包记录不经 redact 的排障信息）。
+// DebugWrite 写入 debug 日志文件（供 ssh 等包记录排障信息）。
 func (l *Logger) DebugWrite(level, msg string) {
 	l.debugWrite(level, msg)
 }
@@ -262,13 +249,13 @@ func (l *Logger) LogInvocationCommandLine(argv []string) {
 	l.debugWrite("INFO", "invocation| "+FormatInvocationCommandLine(argv))
 }
 
-// FormatInvocationCommandLine 将 argv 格式化为单行 shell 风格命令（--log-redact 时脱敏密码类 flag）。
+// FormatInvocationCommandLine 将 argv 格式化为单行 shell 风格命令（含明文密码类 flag，便于排障）。
 func FormatInvocationCommandLine(argv []string) string {
 	if len(argv) == 0 {
 		return ""
 	}
-	parts := make([]string, len(redactInvocationArgs(argv)))
-	for i, arg := range redactInvocationArgs(argv) {
+	parts := make([]string, len(argv))
+	for i, arg := range argv {
 		parts[i] = quoteShellArg(arg)
 	}
 	return strings.Join(parts, " ")
@@ -295,10 +282,6 @@ func (l *Logger) LogErrorExit(host, stepID, stepName, command, stdout, stderr st
 		fmt.Sprintf("  Host: %s", host),
 		fmt.Sprintf("  Step: %s %s", stepID, stepName),
 	}
-	command = redact(command)
-	stdout = redact(stdout)
-	stderr = redact(stderr)
-	errMsg = redact(errMsg)
 
 	if command != "" {
 		lines = append(lines, "  --- Command ---", indentBlock(command), "")
@@ -338,12 +321,6 @@ func (l *Logger) Debug(entry LogEntry) {
 	entry.Timestamp = time.Now().Format(time.RFC3339)
 	entry.RunID = l.runID
 
-	// 脱敏处理
-	entry.Command = redact(entry.Command)
-	entry.Stdout = redact(entry.Stdout)
-	entry.Stderr = redact(entry.Stderr)
-	entry.Message = redact(entry.Message)
-
 	var parts []string
 	parts = append(parts, fmt.Sprintf("host=%s step=%s level=%s", entry.Host, entry.StepID, entry.Level))
 	if entry.Phase != "" {
@@ -374,7 +351,7 @@ func (l *Logger) Debug(entry LogEntry) {
 // maxScriptPreviewLines 限制单次脚本预览的最大行数，避免超大 SQL/脚本撑爆 debug 日志。
 const maxScriptPreviewLines = 256
 
-// LogScriptPreview 在执行 shell/SQL 脚本正文前写入 debug（多行；--log-redact 时脱敏）；超长截断。
+// LogScriptPreview 在执行 shell/SQL 脚本正文前写入 debug（多行）；超长截断。
 // scriptKind 示例：shell、sql；label 可为空或远端路径等附注。
 func (l *Logger) LogScriptPreview(host, stepID, scriptKind, label, body string) {
 	if l == nil {
@@ -389,7 +366,7 @@ func (l *Logger) LogScriptPreview(host, stepID, scriptKind, label, body string) 
 		prefix += " label=" + label
 	}
 	l.debugWrite("DEBUG", prefix+" >>> body (before execute):")
-	body = strings.TrimRight(redact(body), "\n")
+	body = strings.TrimRight(body, "\n")
 	if body == "" {
 		l.debugWrite("DEBUG", prefix+" body| (empty)")
 		return
@@ -410,8 +387,94 @@ func (l *Logger) LogScriptPreview(host, stepID, scriptKind, label, body string) 
 
 // LogCommandStart 在命令执行前记录到 debug 日志
 func (l *Logger) LogCommandStart(host, stepID, command string) {
-	command = redact(command)
 	l.debugWrite("DEBUG", fmt.Sprintf("host=%s step=%s >>> %s", host, stepID, command))
+}
+
+// LogCommandOutputLine 在命令执行过程中实时写入一行 stdout/stderr（流式 debug）。
+// stream 取值 "stdout" 或 "stderr"；line 不应含尾部换行。
+func (l *Logger) LogCommandOutputLine(host, stepID, stream, line string) {
+	if l == nil {
+		return
+	}
+	stream = strings.TrimSpace(stream)
+	if stream == "" {
+		stream = "stdout"
+	}
+	line = strings.TrimRight(line, "\r\n")
+	l.debugWrite("DEBUG", fmt.Sprintf("host=%s step=%s %s| %s", host, stepID, stream, line))
+}
+
+// CommandStream 跟踪一次命令的实时输出，避免结束后整包重复打印。
+type CommandStream struct {
+	logger     *Logger
+	host       string
+	stepID     string
+	mu         sync.Mutex
+	sawStdout  bool
+	sawStderr  bool
+	streamedOK bool // 是否已成功挂到 Executor（有真流式读）
+}
+
+// BeginCommandStream 开始一次命令的流式 debug 会话（须在 LogCommandStart 之后）。
+func (l *Logger) BeginCommandStream(host, stepID string) *CommandStream {
+	if l == nil {
+		return nil
+	}
+	return &CommandStream{logger: l, host: host, stepID: stepID}
+}
+
+// OnLine 供 Executor 回调；stream 为 "stdout" / "stderr"。
+func (s *CommandStream) OnLine(stream, line string) {
+	if s == nil || s.logger == nil {
+		return
+	}
+	s.mu.Lock()
+	switch strings.TrimSpace(stream) {
+	case "stderr":
+		s.sawStderr = true
+	default:
+		s.sawStdout = true
+	}
+	s.mu.Unlock()
+	s.logger.LogCommandOutputLine(s.host, s.stepID, stream, line)
+}
+
+// MarkAttached 标记底层 Executor 已挂接行回调（真流式）。
+func (s *CommandStream) MarkAttached() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.streamedOK = true
+	s.mu.Unlock()
+}
+
+// Attached 是否已挂接真流式输出。
+func (s *CommandStream) Attached() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.streamedOK
+}
+
+// End 写 exit_code/duration；若全程 stdout/stderr 无行则补 (empty)，与旧格式可区分。
+func (s *CommandStream) End(exitCode int, duration time.Duration) {
+	if s == nil || s.logger == nil {
+		return
+	}
+	prefix := fmt.Sprintf("host=%s step=%s", s.host, s.stepID)
+	s.logger.debugWrite("DEBUG", fmt.Sprintf("%s exit_code=%d duration=%s", prefix, exitCode, duration))
+	s.mu.Lock()
+	sawOut, sawErr := s.sawStdout, s.sawStderr
+	s.mu.Unlock()
+	if !sawOut {
+		s.logger.debugWrite("DEBUG", fmt.Sprintf("%s stdout| (empty)", prefix))
+	}
+	if !sawErr {
+		s.logger.debugWrite("DEBUG", fmt.Sprintf("%s stderr| (empty)", prefix))
+	}
 }
 
 // logCommandStream 将单路输出逐行写入 debug；无内容时写一行 (empty)，便于区分「无输出」与「未记录」。
@@ -425,10 +488,11 @@ func (l *Logger) logCommandStream(prefix, label, s string) {
 	}
 }
 
-// LogCommandResult 在命令执行后记录结果到 debug 日志（每个字段独立一行）
+// LogCommandResult 在命令执行后记录结果到 debug 日志（每个字段独立一行）。
+// 用于未挂接流式回调的路径（如 WinRM）；已流式时请用 CommandStream.End。
 func (l *Logger) LogCommandResult(host, stepID string, stdout, stderr string, exitCode int, duration time.Duration) {
-	stdout = redact(strings.TrimRight(stdout, "\n"))
-	stderr = redact(strings.TrimRight(stderr, "\n"))
+	stdout = strings.TrimRight(stdout, "\n")
+	stderr = strings.TrimRight(stderr, "\n")
 	prefix := fmt.Sprintf("host=%s step=%s", host, stepID)
 
 	l.debugWrite("DEBUG", fmt.Sprintf("%s exit_code=%d duration=%s", prefix, exitCode, duration))
@@ -530,89 +594,6 @@ func (l *Logger) Console(stepID, stepName, host, phase string, msg string, durat
 func (l *Logger) ConsoleWithType(stepID, stepName, host, phase, execType string, msg string, duration time.Duration) {
 	// Legacy: just write to debug log (callers should use ConsoleStep now)
 	l.debugWrite("CONSOLE", fmt.Sprintf("[%s] %s host=%s phase=%s type=%s msg=%s duration=%s", stepID, stepName, host, phase, execType, msg, duration))
-}
-
-// 敏感信息脱敏正则
-// 1. key=value / key:value 格式（password、passwd、pwd、secret、token、api_key 等）
-// 2. echo ... | passwd 格式
-// 3. --password value / --passwd value 命令行参数格式
-// 4. yasboot 风格 -p 'secret'（非 --password）
-var sensitivePatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)(password|passwd|pwd|secret|token|api[_-]?key|secret[_-]?key|private[_-]?key)[\s]*[=:]\s*['"]?([^'";\s]+)`),
-	regexp.MustCompile(`(?i)echo\s+['"]?[^'"]+['"]?\s*\|\s*passwd`),
-	regexp.MustCompile(`(?i)--(?:password|passwd|pwd|secret|token)\s+['"]?([^'";\s]+)['"]?`),
-	regexp.MustCompile(`(?i)(?:^|\s)-p\s+(?:'[^']*'|"[^"]*"|\S+)`),
-}
-
-func redact(s string) string {
-	if !redactSensitive || s == "" {
-		return s
-	}
-	result := s
-	for i, pattern := range sensitivePatterns {
-		result = pattern.ReplaceAllStringFunc(result, func(match string) string {
-			switch i {
-			case 0:
-				if idx := strings.IndexAny(match, "=:"); idx >= 0 {
-					return match[:idx+1] + "***REDACTED***"
-				}
-			case 1:
-				return "echo '***REDACTED***'|passwd"
-			case 2:
-				parts := strings.Fields(match)
-				if len(parts) >= 2 {
-					return parts[0] + " ***REDACTED***"
-				}
-			case 3:
-				if idx := strings.Index(strings.ToLower(match), "-p"); idx >= 0 {
-					return match[:idx+2] + " ***REDACTED***"
-				}
-			}
-			return "***REDACTED***"
-		})
-	}
-	return result
-}
-
-func redactInvocationArgs(argv []string) []string {
-	out := append([]string(nil), argv...)
-	if !redactSensitive {
-		return out
-	}
-	for i := 0; i < len(out); i++ {
-		arg := out[i]
-		if key, _, ok := strings.Cut(arg, "="); ok {
-			if isSensitiveInvocationFlag(key) {
-				out[i] = key + "=***REDACTED***"
-			}
-			continue
-		}
-		if !isSensitiveInvocationFlag(arg) {
-			continue
-		}
-		if i+1 < len(out) && !strings.HasPrefix(out[i+1], "-") {
-			out[i+1] = "***REDACTED***"
-			i++
-		}
-	}
-	return out
-}
-
-func isSensitiveInvocationFlag(flag string) bool {
-	flag = strings.TrimSpace(flag)
-	if flag == "" {
-		return false
-	}
-	if flag == "-P" {
-		return true
-	}
-	flag = strings.TrimLeft(flag, "-")
-	flag = strings.ToLower(flag)
-	if strings.Contains(flag, "password") || strings.Contains(flag, "passwd") ||
-		strings.Contains(flag, "secret") || strings.Contains(flag, "token") {
-		return true
-	}
-	return false
 }
 
 func quoteShellArg(s string) string {

@@ -9,7 +9,7 @@ import (
 )
 
 func dbLogPhase(ctx *runner.StepContext, phase, msg string) {
-	ctx.LogPhase(phase, msg)
+	ctx.LogPhase(phase, runner.StepMsg(ctx, msg))
 }
 
 // dbRunSQLPhase 以 query-start/done/fail 里程碑执行单条 sysdba SQL。

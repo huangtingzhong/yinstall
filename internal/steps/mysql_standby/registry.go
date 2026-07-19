@@ -2,31 +2,38 @@ package mysql_standby
 
 import "github.com/yinstall/internal/runner"
 
-// GetAllSteps returns ordered MySQL standby steps MR-001 .. MR-018 and MR-017.
-// MR-016 (semi-sync) is opt-in via --enable-semi-sync only; see SemiSyncSteps().
+// GetAllSteps returns ordered MySQL standby steps (MR-001 .. MR-NNN).
 func GetAllSteps() []*runner.Step {
-	return []*runner.Step{
-		StepMR001CheckPrimaryConnectivity(),
-		StepMR002CheckPrimaryReplicationReady(),
-		StepMR003ConfigurePrimaryForReplication(),
-		StepMR004CreateReplicationUser(),
-		StepMR005InstallClonePluginPrimary(),
-		StepMR006CheckReplicaConnectivity(),
-		StepMR007PlanReplicaLayout(),
-		StepMR018InstallReplicaSoftware(),
-		StepMR008InstallReplicaInstance(),
-		StepMR009CopyPatchReplicaCnf(),
-		StepMR010InstallClonePluginReplica(),
-		StepMR019ReplicationFirewallPrepare(),
-		StepMR011SyncFromPrimary(),
-		StepMR013ConfigureReplicationSource(),
-		StepMR014StartReplica(),
-		StepMR015VerifyReplication(),
-		StepMR017CleanupFailedReplica(),
-	}
+	return runner.BuildSteps(runner.StepSpec{
+		Prefix: "MR",
+		Entries: []runner.StepEntry{
+			{New: stepCheckPrimaryConnectivity},
+			{New: stepCheckPrimaryReplicationReady},
+			{New: stepConfigurePrimaryForReplication},
+			{New: stepCreateReplicationUser},
+			{New: stepInstallClonePluginPrimary},
+			{New: stepCheckReplicaConnectivity},
+			{New: stepPlanReplicaLayout},
+			{New: stepInstallReplicaSoftware},
+			{New: stepInstallReplicaInstance},
+			{New: stepCopyPatchReplicaCnf},
+			{New: stepInstallClonePluginReplica},
+			{New: stepReplicationFirewallPrepare},
+			{New: stepSyncFromPrimary},
+			{New: stepConfigureReplicationSource},
+			{New: stepStartReplica},
+			{New: stepVerifyReplication},
+			{New: stepCleanupFailedReplica},
+		},
+	})
 }
 
-// SemiSyncSteps returns MR-016; not part of default standby flow.
+// SemiSyncSteps returns MR-018; not part of default standby flow (MR-016 is Verify Replication).
 func SemiSyncSteps() []*runner.Step {
-	return []*runner.Step{StepMR016EnableSemiSync()}
+	return runner.BuildSteps(runner.StepSpec{
+		Prefix: "MR",
+		Entries: []runner.StepEntry{
+			{FixedID: "MR-018", New: stepEnableSemiSync},
+		},
+	})
 }

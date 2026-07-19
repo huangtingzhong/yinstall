@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	ossteps "github.com/yinstall/internal/steps/os"
 	"strings"
 
 	"github.com/yinstall/internal/runner"
@@ -70,7 +71,7 @@ func ensureConnectivityStep(allSteps, steps []*runner.Step) []*runner.Step {
 		if s == nil {
 			continue
 		}
-		if s.ID == "B-001" {
+		if s.ID == ossteps.FirstStepID() {
 			hasB001 = true
 		}
 		id := s.ID
@@ -83,7 +84,7 @@ func ensureConnectivityStep(allSteps, steps []*runner.Step) []*runner.Step {
 		return steps
 	}
 	for _, s := range allSteps {
-		if s != nil && s.ID == "B-001" {
+		if s != nil && s.ID == ossteps.FirstStepID() {
 			return append([]*runner.Step{s}, steps...)
 		}
 	}

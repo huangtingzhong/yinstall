@@ -4,5 +4,5 @@ package ycm
 import "github.com/yinstall/internal/runner"
 
 func ycmLogPhase(ctx *runner.StepContext, phase, msg string) {
-	ctx.LogPhase(phase, msg)
+	ctx.LogPhase(phase, runner.StepMsg(ctx, msg))
 }

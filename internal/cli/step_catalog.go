@@ -13,6 +13,7 @@ import (
 	dbsteps "github.com/yinstall/internal/steps/db"
 	mysqlsteps "github.com/yinstall/internal/steps/mysql"
 	mysqlstandbysteps "github.com/yinstall/internal/steps/mysql_standby"
+	omsteps "github.com/yinstall/internal/steps/om"
 	ossteps "github.com/yinstall/internal/steps/os"
 	standbysteps "github.com/yinstall/internal/steps/standby"
 	winsteps "github.com/yinstall/internal/steps/win_os"
@@ -57,7 +58,7 @@ func printStepSection(title string, steps []*runner.Step) {
 
 func osStepsB001Only() []*runner.Step {
 	for _, s := range ossteps.GetAllSteps() {
-		if s.ID == "B-001" {
+		if s.ID == ossteps.FirstStepID() {
 			return []*runner.Step{s}
 		}
 	}
@@ -100,7 +101,7 @@ func PrintMySQLStepCatalog(skipOS bool) {
 	PrintMySQLStandbyStepCatalog()
 }
 
-// PrintDBStepCatalog 打印 yinstall db 的 steps（OS 前置 + DB）。
+// PrintDBStepCatalog 打印 yinstall db 的 steps（OS 前置 + DB + YAC 备 OM）。
 func PrintDBStepCatalog(skipOS bool) {
 	fmt.Fprintln(os.Stdout, "yinstall db - step catalog (typical execution order)")
 	if skipOS {
@@ -109,23 +110,44 @@ func PrintDBStepCatalog(skipOS bool) {
 		printStepSection("OS baseline (when --skip-os=false, default)", ossteps.GetAllSteps())
 	}
 	printStepSection("Database installation", dbsteps.GetAllSteps())
+	printStepSection("OM secondary (YAC only; default --om-secondary; skip with --om-secondary=false)", omsteps.GetDeploySecondarySteps())
 	fmt.Fprintln(os.Stdout, "Note: combined list may be filtered by -s/--include-steps, -e/--exclude-steps (wins over -s for same ID), or --skip-os.")
+	fmt.Fprintln(os.Stdout, "YAC: after DB install succeeds, O-* secondary deploy runs on non-primary --targets (scope via --om-secondary-scope).")
 	fmt.Fprintln(os.Stdout, "")
 }
 
-// PrintStandbyStepCatalog 打印 OS 前置 + standby steps，与默认 allSteps 布局一致：
-// （skipOS=true → 仅 B-001；skipOS=false → 完整 OS 基线），然后是 E-001…E-019。
-// 实际执行是分阶段的（primary / per-standby / primary）；详见 standby 命令说明。
+// PrintOMMigrateStepCatalog 打印 yinstall om migrate 步骤目录 (OS on --om-new + O-*, 对齐 db)。
+func PrintOMMigrateStepCatalog(skipOS bool) {
+	fmt.Fprintln(os.Stdout, "yinstall om migrate - step catalog")
+	fmt.Fprintln(os.Stdout, "OS baseline runs on --om-new (reuse ossteps, same pattern as yinstall db); then O-* migrate.")
+	if skipOS {
+		printStepSection("OS (when --skip-os: connectivity on --om-new)", osStepsB001Only())
+	} else {
+		printStepSection("OS baseline on --om-new (default --skip-os=false)", ossteps.GetAllSteps())
+	}
+	printStepSection("OM migrate", omsteps.GetMigrateSteps())
+	fmt.Fprintln(os.Stdout, "Note: filtered by -s/-e; O-002 Host Prepare remains OM-specific (empty path / PATH) after OS.")
+	fmt.Fprintln(os.Stdout, "")
+}
+
+// PrintStandbyStepCatalog 打印 OS 前置 + OM 迁主 + standby steps，与默认 allSteps 布局一致：
+// （skipOS=true → 仅 B-001；skipOS=false → 完整 OS 基线），然后是 O-*（可选迁主）与 E-001…E-019。
+// 实际执行是分阶段的（primary / Phase1.5 OM / per-standby / primary）；详见 standby 命令说明。
 func PrintStandbyStepCatalog(skipOS bool) {
 	fmt.Fprintln(os.Stdout, "yinstall standby - step catalog")
-	fmt.Fprintln(os.Stdout, "Layout matches combined step list before -s/-e filters. Runtime order is phased (see logs: Phase 1-6+).")
+	fmt.Fprintln(os.Stdout, "Layout matches combined step list before -s/-e filters. Runtime order is phased (see logs: Phase 1 / 1.5 / 2-6+).")
 	if skipOS {
 		printStepSection("OS (default --skip-os=true: B-001 on each standby)", osStepsB001Only())
 	} else {
 		printStepSection("OS baseline (--skip-os=false, on each standby)", ossteps.GetAllSteps())
 	}
+	printStepSection("OM migrate (optional: --om-new + --om-current or --om; OS on --om-new in Phase 1.5)", omsteps.GetMigrateSteps())
+	printStepSection("OM secondary (default: --om-secondary; skip with --om-secondary=false)", omsteps.GetDeploySecondarySteps())
 	printStepSection("Standby / expansion steps", standbysteps.GetAllSteps())
-	fmt.Fprintln(os.Stdout, "E-018 is optional/dangerous: without --force-steps E-018 (or -f) or --standby-cleanup-on-failure, it is skipped when executed.")
+	cleanupID := standbysteps.StepIDByName("Cleanup Failed Expansion")
+	fmt.Fprintf(os.Stdout, "%s is optional/dangerous: without --force-steps %s (or -f) or --standby-cleanup-on-failure, it is skipped when executed.\n", cleanupID, cleanupID)
+	fmt.Fprintln(os.Stdout, "OM migrate runs in Phase 1.5 when --om-new is set with --om-current or global --om; B-* in the filtered list also run on --om-new there.")
+	fmt.Fprintln(os.Stdout, "OM secondary runs in Phase 4.5 by default (--om-secondary); scope via --om-secondary-scope=targets|cluster.")
 	fmt.Fprintln(os.Stdout, "")
 }
 
@@ -177,6 +199,6 @@ func PrintCleanStepCatalog() {
 		clean.GetStepByID("CLEAN-YMP"),
 	})
 	printStepSection("MSSQL cleanup (--type mssql, hidden)", clean.GetMssqlCleanSteps())
-	fmt.Fprintln(os.Stdout, "Use -s/--include-steps (e.g. CLEAN-DB-002) to run a single DB cleanup phase.")
+	fmt.Fprintln(os.Stdout, "Use -s/--include-steps (e.g. CLEAN-DB-003) to run a single DB cleanup phase; CLEAN-DB-002 detaches standby from cluster.")
 	fmt.Fprintln(os.Stdout, "")
 }

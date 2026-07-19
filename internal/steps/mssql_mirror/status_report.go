@@ -15,7 +15,7 @@ func printMirrorStatusSummary(ctx *runner.StepContext) error {
 	if ctx.DryRun || ctx.Precheck {
 		return nil
 	}
-	const stepID = "M-014"
+	stepID := ctx.CurrentStepID
 	primary := commonmssql.ResolvePrimaryHost(ctx)
 	replicas := commonmssql.ReplicaHosts(ctx)
 	secondary := ""

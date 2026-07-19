@@ -6,6 +6,6 @@ import (
 
 func mshLogPhase(ctx *runner.StepContext, phase, detail string) {
 	if ctx != nil {
-		ctx.LogPhase(phase, detail)
+		ctx.LogPhase(phase, runner.StepMsg(ctx, detail))
 	}
 }

@@ -230,8 +230,8 @@ func IsISOFile(path string) bool {
 }
 
 // remoteSearchDirs 返回自动发现时需要扫描的远端目录列表（去重）。
-// 顺序为：[remoteDir（若为空则默认 /data/yashan/soft）, SSH 用户 $HOME]。
-// 即使用户通过 --remote-software-dir 指定了远端目录，仍会额外扫描 $HOME 下的包（与历史行为一致）。
+// 顺序为：[remoteDir（若为空则默认 /data/yashan/soft）, SSH 登录用户 $HOME]。
+// 即使用户通过 --remote-software-dir 指定了远端目录，仍会额外扫描 SSH 用户家目录下的包。
 func remoteSearchDirs(ctx *runner.StepContext, remoteDir string) []string {
 	homeDir := RemoteHomeDir(ctx)
 
@@ -728,4 +728,36 @@ func findLatestVersion(files []string, re *regexp.Regexp) string {
 	})
 
 	return versionFiles[0].file
+}
+
+// RequiredArchiveExtractCommands returns command names needed to extract archivePath on Linux.
+func RequiredArchiveExtractCommands(archivePath string) []string {
+	lower := strings.ToLower(strings.TrimSpace(archivePath))
+	switch {
+	case strings.HasSuffix(lower, ".zip"):
+		return []string{"unzip"}
+	case strings.HasSuffix(lower, ".tar.gz"), strings.HasSuffix(lower, ".tgz"), strings.HasSuffix(lower, ".tar"):
+		return []string{"tar"}
+	default:
+		return []string{"tar"}
+	}
+}
+
+// EnsureArchiveExtractTools verifies extract utilities exist on the target (C-007 / G-003 / similar).
+func EnsureArchiveExtractTools(ctx *runner.StepContext, archivePath string) error {
+	if ctx == nil {
+		return fmt.Errorf("missing step context")
+	}
+	for _, cmd := range RequiredArchiveExtractCommands(archivePath) {
+		res, _ := ctx.Execute(fmt.Sprintf("command -v %s >/dev/null 2>&1", cmd), false)
+		if res != nil && res.GetExitCode() == 0 {
+			continue
+		}
+		installHint := "yum install -y " + cmd + "  (or dnf/apt equivalent)"
+		return fmt.Errorf(
+			"%s: command not found on target (required to extract %s); run OS step Install Dependencies (--os-deps-db-packages includes tar/unzip) or manually: %s",
+			cmd, path.Base(archivePath), installHint,
+		)
+	}
+	return nil
 }

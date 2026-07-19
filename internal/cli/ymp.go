@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 	ossteps "github.com/yinstall/internal/steps/os"
 	ympsteps "github.com/yinstall/internal/steps/ymp"
@@ -19,8 +20,8 @@ var (
 	// YMP OS 控制
 	ympSkipOS              bool   // 是否跳过 OS 基线配置，默认 true
 	ympIgnoreInstallErrors bool   // 忽略软件包安装错误
-	ympOSYumMode           string // YUM 模式：online/local-iso/none
-	ympOSISODevice         string // ISO 文件路径、文件名或块设备（local-iso 模式使用）
+	ympOSYumMode           string // YUM 模式：空（系统源）/ local（光驱或 ISO）
+	ympOSISODevice         string // ISO 文件路径、文件名或块设备（local 模式 / auto fallback）
 	ympOSISOMountpoint     string // ISO 挂载目录
 	ympOSYumRepoFile       string // YUM repo 文件路径
 
@@ -77,10 +78,10 @@ func init() {
 	// OS 控制
 	ympCmd.Flags().BoolVar(&ympSkipOS, "skip-os", true, "Skip OS baseline preparation (default: true)")
 	ympCmd.Flags().BoolVar(&ympIgnoreInstallErrors, "os-ignore-install-errors", false, "Ignore package installation errors and continue (only show warnings)")
-	ympCmd.Flags().StringVar(&ympOSYumMode, "os-yum-mode", "none", "YUM/DNF mode: none (use system repos), local-iso (use mounted ISO repo only), online (internet repos)")
-	ympCmd.Flags().StringVar(&ympOSISODevice, "os-iso-device", "/dev/cdrom", "ISO file path/name or block device used when --os-yum-mode=local-iso (auto-searched if filename only)")
-	ympCmd.Flags().StringVar(&ympOSISOMountpoint, "os-iso-mountpoint", "/media", "Mount point for ISO when --os-yum-mode=local-iso")
-	ympCmd.Flags().StringVar(&ympOSYumRepoFile, "os-yum-repo-file", "/etc/yum.repos.d/local.repo", "YUM repo file path for local-iso mode")
+	ympCmd.Flags().StringVar(&ympOSYumMode, "os-yum-mode", "", "YUM/DNF mode: empty (system repos, auto ISO fallback), local (optical/ISO), or IP[:port]/http(s)://... (custom yum)")
+	ympCmd.Flags().StringVar(&ympOSISODevice, "os-iso-device", "auto", "ISO source for local mode / auto fallback: auto (probe /dev/cdrom /dev/sr0 then OS-matched *.iso), block device, filename, or path")
+	ympCmd.Flags().StringVar(&ympOSISOMountpoint, "os-iso-mountpoint", "/media", "Mount point for ISO when using local mode or auto fallback")
+	ympCmd.Flags().StringVar(&ympOSYumRepoFile, "os-yum-repo-file", "/etc/yum.repos.d/local.repo", "YUM repo file path for local mode / auto fallback")
 
 	// 用户参数
 	ympCmd.Flags().StringVar(&ympUser, "ymp-user", "ymp", "YMP user name")
@@ -183,7 +184,7 @@ func runYMP(cmd *cobra.Command, args []string) error {
 		// 即使跳过OS，也需要连通性检查
 		osSteps := ossteps.GetAllSteps()
 		for _, step := range osSteps {
-			if step.ID == "B-001" {
+			if step.ID == ossteps.FirstStepID() {
 				allSteps = append(allSteps, step)
 				break
 			}
@@ -212,7 +213,7 @@ func runYMP(cmd *cobra.Command, args []string) error {
 	var otherSteps []*runner.Step
 
 	for _, step := range steps {
-		if step.ID == "B-001" {
+		if step.ID == ossteps.FirstStepID() {
 			connectivityStep = step
 		} else {
 			otherSteps = append(otherSteps, step)
@@ -403,11 +404,10 @@ func runYMP(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("precheck failed")
 	}
 
-	// 输出访问信息
+	// 访问信息已在 H-014 Health Summary 输出到终端；此处仅写 debug 日志
 	for _, info := range hostInfos {
 		logger.Info("YMP access URL: http://%s:%d", info.Host, ympPort)
 	}
-	logger.Info("YMP service management: ymp.sh start/stop")
 	logger.Info("YMP installation completed successfully")
 	return nil
 }
@@ -421,7 +421,7 @@ func buildYMPParams(cmd *cobra.Command, flags GlobalFlags) map[string]interface{
 	// 若用户指定，则覆盖 OS ignore install errors 参数
 	params["os_ignore_install_errors"] = ympIgnoreInstallErrors
 	// YUM 模式及 ISO 参数覆盖（与 db --os-yum-mode 对齐）
-	params["os_yum_mode"] = ympOSYumMode
+	params["os_yum_mode"] = strings.TrimSpace(ympOSYumMode)
 	params["os_iso_device"] = ympOSISODevice
 	params["os_iso_mountpoint"] = ympOSISOMountpoint
 	params["os_yum_repo_file"] = ympOSYumRepoFile
@@ -456,7 +456,7 @@ func buildYMPParams(cmd *cobra.Command, flags GlobalFlags) map[string]interface{
 
 	// 环境变量
 	if ympOracleEnvFile == "" {
-		ympOracleEnvFile = fmt.Sprintf("/home/%s/.oracle", ympUser)
+		ympOracleEnvFile = commonos.ConventionYmpOracleEnvFile(ympUser)
 	}
 	params["ymp_oracle_env_file"] = ympOracleEnvFile
 
@@ -476,29 +476,11 @@ func buildYMPParams(cmd *cobra.Command, flags GlobalFlags) map[string]interface{
 // YMP作为迁移工具，不需要完整的数据库OS基线配置（如内核参数、多路径等）
 // 但需要基础的系统配置：用户创建、资源限制、依赖包安装、主机名、时区、时间同步、防火墙
 func getYMPRequiredOSSteps() []*runner.Step {
-	allOSSteps := ossteps.GetAllSteps()
-	requiredStepIDs := []string{
-		"B-001", // 连通性检查（必须）
-		// B-002~B-005 已移除：用户和组的创建在 YMP 步骤 H-002 中完成
-		"B-007", // 时区配置（建议，确保时间正确）
-		// B-010 已移除：用户资源限制配置在 YMP 步骤 H-003 中完成
-		// B-013, B-014, B-015 已移除：H-005/H-006 内部通过 EnsureLocalISORepo 自行处理 ISO 挂载和 repo 配置，
-		//   B-015 安装的是数据库依赖包（libzstd, lz4 等），YMP 不需要；YMP 自身依赖由 H-005（libaio, lsof）和 H-006（JDK）处理
-		"B-016", // chrony 配置（建议，时间同步）
-		"B-017", // 禁用防火墙（如果客户无特殊要求）
-		"B-023", // 主机名配置（基础配置）
-		// 注意：B-018（开放防火墙端口）可以通过 --include-steps 单独添加
-	}
-
-	var ympOSSteps []*runner.Step
-	for _, step := range allOSSteps {
-		for _, requiredID := range requiredStepIDs {
-			if step.ID == requiredID {
-				ympOSSteps = append(ympOSSteps, step)
-				break
-			}
-		}
-	}
-
-	return ympOSSteps
+	return ossteps.StepsByName(
+		"Check Connectivity",
+		"Set Timezone",
+		"Configure Chrony",
+		"Disable Firewall",
+		"Set Hostname",
+	)
 }

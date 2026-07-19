@@ -281,7 +281,7 @@ func injectMssqlAGRemoveParams(p map[string]interface{}, replicaHosts []string) 
 
 func buildMssqlAGAllSteps(skipOS bool, profile commonwin.Profile) []*runner.Step {
 	var all []*runner.Step
-	all = append(all, ossteps.StepB001CheckConnectivity())
+	all = append(all, connectivityStepForMssql())
 	if !skipOS {
 		all = append(all, winsteps.GetPreInstanceSteps(profile)...)
 	}
@@ -306,7 +306,7 @@ func splitMssqlAGSteps(steps []*runner.Step) mssqlAGStepGroups {
 			continue
 		}
 		switch {
-		case s.ID == "B-001":
+		case s.ID == ossteps.FirstStepID():
 			g.b001 = s
 		case strings.HasPrefix(s.ID, "W-"):
 			if s.ID == "W-012" || s.ID == "W-014" {
@@ -478,13 +478,13 @@ func RunMssqlAGOnHosts(flags GlobalFlags, logger *logging.Logger, params map[str
 
 	logger.Info("======== Phase: Resolve instance (A-001) ========")
 	for _, hi := range hostInfos {
-		if err := runMssqlHASingleStep(agsteps.StepA001ResolveInstance(), hi, params, flags, logger, sharedResults, progress); err != nil {
+		if err := runMssqlHASingleStep(agsteps.StepResolveInstance(), hi, params, flags, logger, sharedResults, progress); err != nil {
 			return fmt.Errorf("A-001 on %s: %w", hi.Host, err)
 		}
 	}
 
 	logger.Info("======== Phase: Primary SQL check (A-002) ========")
-	if err := runMssqlHASingleStep(agsteps.StepA002CheckPrimary(), primaryInfo, params, flags, logger, sharedResults, progress); err != nil {
+	if err := runMssqlHASingleStep(agsteps.StepCheckPrimary(), primaryInfo, params, flags, logger, sharedResults, progress); err != nil {
 		return err
 	}
 
@@ -496,7 +496,7 @@ func RunMssqlAGOnHosts(flags GlobalFlags, logger *logging.Logger, params map[str
 	if len(addedExisting) > 0 {
 		logger.Info("======== Phase: Resolve instance (A-001) for existing AG replicas ========")
 		for _, hi := range addedExisting {
-			if err := runMssqlHASingleStep(agsteps.StepA001ResolveInstance(), hi, params, flags, logger, sharedResults, progress); err != nil {
+			if err := runMssqlHASingleStep(agsteps.StepResolveInstance(), hi, params, flags, logger, sharedResults, progress); err != nil {
 				return fmt.Errorf("A-001 on %s (existing AG replica): %w", hi.Host, err)
 			}
 		}
@@ -522,7 +522,7 @@ func RunMssqlAGOnHosts(flags GlobalFlags, logger *logging.Logger, params map[str
 			return fmt.Errorf("no replica hosts in -t for install stage %q", haStage)
 		}
 		logger.Info("======== Phase: Replica SQL install (A-003/004) ========")
-		installSteps := []*runner.Step{agsteps.StepA003PlanReplicaInstall(), agsteps.StepA004InstallReplica()}
+		installSteps := []*runner.Step{agsteps.StepPlanReplicaInstall(), agsteps.StepInstallReplica()}
 		for _, rh := range replicaInfos {
 			logger.Info("-------- Replica host: %s --------", rh.Host)
 			for _, step := range installSteps {
@@ -568,7 +568,7 @@ func RunMssqlAGOnHosts(flags GlobalFlags, logger *logging.Logger, params map[str
 
 func buildMssqlAGRemoveSteps() []*runner.Step {
 	out := make([]*runner.Step, 0, 5)
-	out = append(out, ossteps.StepB001CheckConnectivity())
+	out = append(out, connectivityStepForMssql())
 	out = append(out, agsteps.GetAGRemoveSteps()...)
 	return out
 }
@@ -577,7 +577,7 @@ func buildMssqlAGRemoveSteps() []*runner.Step {
 func PrintMssqlAGStepCatalog(skipOS bool) {
 	profile := commonmssql.WinOSProfileForMssql(commonmssql.TopologyAGWSFC, nil)
 	steps := buildMssqlAGAllSteps(skipOS, profile)
-	printStepSection("Primary SQL check", []*runner.Step{agsteps.StepA002CheckPrimary()})
+	printStepSection("Primary SQL check", []*runner.Step{agsteps.StepCheckPrimary()})
 	printStepSection("Connectivity", []*runner.Step{steps[0]})
 	if !skipOS {
 		var pre []*runner.Step
@@ -589,8 +589,8 @@ func PrintMssqlAGStepCatalog(skipOS bool) {
 		printStepSection("Windows OS pre-instance", pre)
 	}
 	printStepSection("Replica SQL install (optional)", []*runner.Step{
-		agsteps.StepA003PlanReplicaInstall(),
-		agsteps.StepA004InstallReplica(),
+		agsteps.StepPlanReplicaInstall(),
+		agsteps.StepInstallReplica(),
 	})
 	var a []*runner.Step
 	for _, s := range steps {

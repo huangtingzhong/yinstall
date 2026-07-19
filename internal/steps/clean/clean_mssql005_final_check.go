@@ -10,7 +10,6 @@ import (
 
 func StepCleanMssql005FinalCheck() *runner.Step {
 	return &runner.Step{
-		ID:          "CLEAN-MSSQL-005",
 		Name:        "MSSQL Cleanup Final Check",
 		Description: "Verify service stopped and paths removed per stage",
 		Tags:        []string{"clean", "mssql"},
