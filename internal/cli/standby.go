@@ -158,6 +158,30 @@ func tryFillBeginPortFromPrimary(cmd *cobra.Command, ex ssh.Executor, logger *lo
 	return nil
 }
 
+// tryFillInterCIDRFromPrimary --yac 且未显式传入 --yac-inter-cidr 时，在主库查 LISTEN_ADDR 推导业务网 CIDR 写入 params["yac_inter_cidr"]。
+// 与 tryFillBeginPortFromPrimary 同一套路；注意推导出的是 LISTEN_ADDR 所在业务网（单网环境等同内置网）。
+func tryFillInterCIDRFromPrimary(cmd *cobra.Command, ex ssh.Executor, logger *logging.Logger, params map[string]interface{}, flags GlobalFlags) error {
+	if !yacMode {
+		return nil
+	}
+	if cmd.Flags().Changed("yac-inter-cidr") {
+		logger.Info("YAC inter CIDR: %s (--yac-inter-cidr)", yacInterCIDR)
+		return nil
+	}
+	if flags.DryRun {
+		logger.Info("Dry-run: yac_inter_cidr auto LISTEN_ADDR fill skipped (pass --yac-inter-cidr to pin)")
+		return nil
+	}
+	ctx := newStandbyStepContext(&runnerExecAdapter{e: ex}, logger, params, flags)
+	if err := standbysteps.FillInterCIDRFromPrimaryListenAddr(ctx); err != nil {
+		return fmt.Errorf("omit --yac-inter-cidr: failed to derive inter CIDR from primary LISTEN_ADDR: %w", err)
+	}
+	if v, ok := params["yac_inter_cidr"].(string); ok && v != "" {
+		logger.Info("YAC inter CIDR: %s (from primary LISTEN_ADDR; note: business-network derived — see FillInterCIDRFromPrimaryListenAddr)", v)
+	}
+	return nil
+}
+
 func trySyncClusterNameFromPrimaryEnv(ex ssh.Executor, logger *logging.Logger, params map[string]interface{}, flags GlobalFlags) {
 	ctx := newStandbyStepContext(&runnerExecAdapter{e: ex}, logger, params, flags)
 	envFile, err := standbysteps.GetPrimaryEnvFile(ctx)
@@ -433,10 +457,14 @@ func runStandby(cmd *cobra.Command, args []string) error {
 
 	if yacMode {
 		logger.Info("YAC mode: ENABLED (CE standby group path when primary is CE; ycsrootagent autostart)")
-		if err := standbysteps.RequireCEAdminPassword(standbyAdminPassword); err != nil {
-			return err
+		// db-admin-password：空则回退默认 SYS 密码（与 yinstall db --db-sys-password 默认一致；主库改过密码则需显式 --db-admin-password）
+		if strings.TrimSpace(standbyAdminPassword) == "" {
+			standbyAdminPassword = dbsteps.DefaultSysPassword
+			logger.Warn("YAC mode: --db-admin-password empty, using default SYS password %q (override with --db-admin-password if primary uses a different one)", dbsteps.DefaultSysPassword)
 		}
-		if err := standbysteps.ValidateStandbyCEParams(yacInterCIDR, yacSystemDG, yacDataDG, yacVIPs, standbyNodeCount); err != nil {
+		// inter-cidr / systemdg / datadg / vips 允许空：留待拓扑解析后自动发现
+		// （inter-cidr ← 主库 LISTEN_ADDR；systemdg/datadg ← 备库 /dev/yfs udev；vips ← 自动生成）
+		if err := standbysteps.ValidateStandbyCEProvidedParams(yacInterCIDR, yacSystemDG, yacDataDG, yacVIPs, standbyNodeCount); err != nil {
 			return err
 		}
 	} else {
@@ -498,6 +526,9 @@ func runStandby(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := tryFillBeginPortFromPrimary(cmd, topo.primary, logger, params, flags); err != nil {
+		return err
+	}
+	if err := tryFillInterCIDRFromPrimary(cmd, topo.primary, logger, params, flags); err != nil {
 		return err
 	}
 
@@ -1577,19 +1608,55 @@ func validateStandbyCEYACOnTargets(standbyHosts []*HostInfo, params map[string]i
 		return fmt.Errorf("CE standby path: no usable standby executors for YAC validation")
 	}
 
-	inter := ""
-	public := ""
-	if v, ok := params["yac_inter_cidr"].(string); ok {
-		inter = v
-	}
-	if v, ok := params["yac_public_network"].(string); ok {
-		public = v
-	}
-	logger.Info("CE standby: validating YAC networks on %d standby target(s)...", len(hostExecs))
-	if err := dbsteps.ValidateYACNetworksOnHosts(hostExecs, inter, public, logger); err != nil {
-		return fmt.Errorf("CE standby YAC network validation failed: %w", err)
+	inter, _ := params["yac_inter_cidr"].(string)
+	systemdg, _ := params["yac_systemdg"].(string)
+	datadg, _ := params["yac_datadg"].(string)
+	n := 1
+	if v, ok := params["standby_node_count"].(int); ok && v > 0 {
+		n = v
 	}
 
+	// 盘组自动发现：systemdg/datadg 为空时，复用 db 安装 C-001 同款 udev 发现器在备库节点发现 /dev/yfs/sys*|data*。
+	// 发现失败（备库未跑 yinstall os、盘未呈现）则降级，交由末尾全量校验给清晰提示。
+	if strings.TrimSpace(systemdg) == "" || strings.TrimSpace(datadg) == "" {
+		params["yac_mode"] = true
+		if sk, ok := params["skip_os"].(bool); ok {
+			params["db_skip_os"] = sk
+		} else {
+			params["db_skip_os"] = true
+		}
+		params["yac_auto_discover_disks"] = true
+		if err := dbsteps.RunYACUdevDiskDiscovery(hostExecs, params, logger); err != nil {
+			logger.Warn("CE standby: YAC disk auto-discover on targets failed: %v", err)
+		}
+		systemdg, _ = params["yac_systemdg"].(string)
+		datadg, _ = params["yac_datadg"].(string)
+	}
+
+	// 裸→/dev/yfs 归一（仿 db C-011）：B-021 写入裸路径（如 /dev/nvme0n2）；
+	// OS 管线已创建 /dev/yfs/sys*,data* → multipath 设备（yashan 有权限），
+	// 但 params 保持裸路径，需在此归一为 /dev/yfs——裸盘 root:disk 会致 yasboot Permission denied。
+	if len(standbyHosts) > 0 && standbyHosts[0].Executor != nil {
+		normalizer := &runnerExecAdapter{e: standbyHosts[0].Executor}
+		if strings.TrimSpace(systemdg) != "" {
+			sysNorm := dbsteps.NormalizeDiskGroupToYfs(systemdg, "sys", normalizer, logger)
+			if sysNorm != systemdg {
+				logger.Info("CE standby: normalized yac_systemdg: %s -> %s", systemdg, sysNorm)
+				params["yac_systemdg"] = sysNorm
+				systemdg = sysNorm
+			}
+		}
+		if strings.TrimSpace(datadg) != "" {
+			dataNorm := dbsteps.NormalizeDiskGroupToYfs(datadg, "data", normalizer, logger)
+			if dataNorm != datadg {
+				logger.Info("CE standby: normalized yac_datadg: %s -> %s", datadg, dataNorm)
+				params["yac_datadg"] = dataNorm
+				datadg = dataNorm
+			}
+		}
+	}
+
+	// VIP：空则自动生成（复用 db C-009 同款生成器）；非空则由末尾 ValidateYACVIPsConfigured 校验。
 	var vips []string
 	switch v := params["yac_vips"].(type) {
 	case []string:
@@ -1601,77 +1668,95 @@ func validateStandbyCEYACOnTargets(standbyHosts []*HostInfo, params map[string]i
 			}
 		}
 	}
-	logger.Info("CE standby: validating VIP list on standby targets (ping from %s)...", hostExecs[0].Host)
-	if err := dbsteps.ValidateYACVIPsConfigured(hostExecs, vips, logger); err != nil {
-		return fmt.Errorf("CE standby VIP validation failed: %w", err)
+	vipAutoGenerated := false
+	if len(vips) == 0 {
+		// stepID 传空：避免复用 db C-009 的步骤 ID 串台到 standby 控制台（仅 logger.Info 记录）
+		if err := dbsteps.RunVIPValidationOrAutoGenerateFor(hostExecs, params, logger, "", ""); err != nil {
+			return fmt.Errorf("CE standby VIP auto-generation failed: %w", err)
+		}
+		if nv, ok := params["yac_vips"].([]string); ok {
+			vips = nv
+			vipAutoGenerated = true
+		}
+	}
+
+	// 末尾全量校验（inter-cidr Phase1 已校；此处补 systemdg/datadg/vips 并给清晰错误）
+	if err := standbysteps.ValidateStandbyCEParams(inter, systemdg, datadg, vips, n); err != nil {
+		if strings.TrimSpace(systemdg) == "" || strings.TrimSpace(datadg) == "" {
+			return fmt.Errorf("CE standby: --yac-systemdg/--yac-datadg not set and disk auto-discover found nothing on targets (run `yinstall os` on standby targets to provision /dev/yfs first, or pass --yac-systemdg/--yac-datadg): %w", err)
+		}
+		return fmt.Errorf("CE standby params validation failed: %w", err)
+	}
+
+	public, _ := params["yac_public_network"].(string)
+	logger.Info("CE standby: validating YAC networks on %d standby target(s)...", len(hostExecs))
+	if err := dbsteps.ValidateYACNetworksOnHosts(hostExecs, inter, public, logger); err != nil {
+		return fmt.Errorf("CE standby YAC network validation failed: %w", err)
+	}
+
+	if !vipAutoGenerated {
+		logger.Info("CE standby: validating VIP list on standby targets (ping from %s)...", hostExecs[0].Host)
+		if err := dbsteps.ValidateYACVIPsConfigured(hostExecs, vips, logger); err != nil {
+			return fmt.Errorf("CE standby VIP validation failed: %w", err)
+		}
 	}
 	logger.Info("CE standby: YAC network and VIP validation passed on standby targets")
 	return nil
 }
 
-// prepareStandbyNodes 准备备库节点（OS 基线 + 备库侧 E-005～E-007；各步仅当出现在 filtered 中才执行，且按 E-005→E-006→E-007 顺序）
+// prepareStandbyNodes 准备备库节点（OS 基线 + 备库侧 E-005～E-007）。
+// OS 基线复用 os.runOS 同款两段式（RunConnectivityPhase + RunPerHostStepsEx），使 B-021/B-023 等
+// Global 步骤跨 standby 目标多主机执行（与 db/os 对齐：--skip-os=false 时自动发现共享盘并建 /dev/yfs）。
+// E-005～E-007 为 standby 域 per-host 检查，保持逐主机执行；仅当出现在 filtered 中才跑，顺序固定 E-005→E-006→E-007。
+// 返回的 hostInfos（含 executor + OSInfo）由调用方 defer closeStandbyExecutors 关闭。
 func prepareStandbyNodes(flags GlobalFlags, logger *logging.Logger, params map[string]interface{}, osSteps []*runner.Step, filtered []*runner.Step) ([]*HostInfo, error) {
-	var hostInfos []*HostInfo
-	precheckFailed := false
-
-	for _, target := range flags.Targets {
-		executor, err := createExecutor(target, flags, logger, "")
-		if err != nil {
-			return nil, fmt.Errorf("failed to connect to standby %s: %w", target, err)
+	// 拆出 B-001 连通步（保证 OSInfo 探测），其余进 otherSteps（含 B-021/B-023 等 Global 步骤）
+	var connectivityStep *runner.Step
+	var otherSteps []*runner.Step
+	for _, step := range osSteps {
+		if step.ID == ossteps.FirstStepID() && connectivityStep == nil {
+			connectivityStep = step
+			continue
 		}
+		otherSteps = append(otherSteps, step)
+	}
 
-		logger.Info("-------- Standby: %s --------", target)
+	totalSteps := len(filtered)
+	if totalSteps == 0 {
+		totalSteps = len(osSteps)
+	}
 
-		ctx := newStandbyStepContext(&runnerExecAdapter{e: executor}, logger, params, flags)
+	// Phase 1：连通性（多主机建连 + B-001 + 回填 OSInfo/executor；fail-fast 与原实现一致）
+	connResult, err := RunConnectivityPhase(connectivityStep, flags.Targets, flags, params, logger, 0, totalSteps, nil)
+	if err != nil {
+		return nil, err
+	}
+	hostInfos := connResult.HostInfos
+	precheckFailed := connResult.PrecheckFailed
 
-		for _, step := range osSteps {
-			ctx.CurrentStepID = step.ID
-			setStandbyStepProgress(ctx, filtered, step)
-			result := runner.RunStep(step, ctx)
-
-			// 更新 OSInfo
-			if step.ID == ossteps.FirstStepID() && result.Success {
-				hostInfos = append(hostInfos, &HostInfo{
-					Host:     target,
-					Executor: executor,
-					OSInfo:   ctx.OSInfo,
-				})
+	// Phase 2：OS 基线——Global 步骤（B-021/B-023）多主机跑一次，per-host 步骤逐主机跑（与 os/db 对齐）
+	if len(hostInfos) > 0 && len(otherSteps) > 0 {
+		osResult := RunPerHostStepsEx(otherSteps, hostInfos, params, flags, logger, 0, totalSteps, nil, nil, nil)
+		if osResult != nil {
+			if osResult.LastError != nil {
+				return hostInfos, osResult.LastError
 			}
-
-			// 如果步骤失败（不是跳过），即使是 Optional 的也要退出
-			// B-015 等关键步骤失败时应该直接退出
-			if !result.Success && !result.Skipped {
-				executor.Close()
-				if flags.Precheck {
-					precheckFailed = true
-					// 当前主机上继续执行后续步骤
-					continue
-				}
-				return nil, fmt.Errorf("step %s failed on %s: %w", step.ID, target, result.Error)
+			if osResult.PrecheckFailed {
+				precheckFailed = true
 			}
 		}
+	}
 
-		// 如果没有执行 B-001，也要添加到列表
-		found := false
-		for _, info := range hostInfos {
-			if info.Host == target {
-				found = true
-				break
-			}
-		}
-		if !found {
-			hostInfos = append(hostInfos, &HostInfo{
-				Host:     target,
-				Executor: executor,
-			})
-		}
-
-		// 备库侧预检 E-005～E-007（在每台备库上执行；仅当 -s 过滤结果包含对应步，顺序固定）
-		standbyPrepStepIDs := []string{
-			standbyStepID("Check Standby Connectivity"),
-			standbyStepID("Check Standby Begin Port Available"),
-			standbyStepID("Check Standby Expansion Paths"),
-		}
+	// Phase 3：备库侧 E-005～E-007（per-host；仅当 filtered 含对应步，顺序固定）
+	standbyPrepStepIDs := []string{
+		standbyStepID("Check Standby Connectivity"),
+		standbyStepID("Check Standby Begin Port Available"),
+		standbyStepID("Check Standby Expansion Paths"),
+	}
+	for _, info := range hostInfos {
+		ctx := newStandbyStepContext(&runnerExecAdapter{e: info.Executor}, logger, params, flags)
+		ctx.OSInfo = info.OSInfo
+		logger.Info("-------- Standby: %s --------", info.Host)
 		for _, id := range standbyPrepStepIDs {
 			for _, step := range filtered {
 				if step.ID != id {
@@ -1681,13 +1766,11 @@ func prepareStandbyNodes(flags GlobalFlags, logger *logging.Logger, params map[s
 				setStandbyStepProgress(ctx, filtered, step)
 				result := runner.RunStep(step, ctx)
 				if !result.Success && !result.Skipped {
-					executor.Close()
 					if flags.Precheck {
 						precheckFailed = true
-						// 当前主机上继续执行后续步骤
-						break
+						break // precheck：当前主机失败则跳过该主机后续步骤
 					}
-					return nil, fmt.Errorf("step %s failed on %s: %w", step.ID, target, result.Error)
+					return hostInfos, fmt.Errorf("step %s failed on %s: %w", step.ID, info.Host, result.Error)
 				}
 				break
 			}

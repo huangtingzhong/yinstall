@@ -57,15 +57,22 @@ else
     ENV_FILE="$YASDB_HOME_DIR/.port${PORT}"
 fi
 
-if [ -f "$ENV_FILE" ]; then
-    source "$ENV_FILE"
-else
+if [ ! -f "$ENV_FILE" ]; then
     echo "$(date) Error: Environment file $ENV_FILE not found"
     exit 1
 fi
 
+# Resolve YASDB_HOME and YASCS_HOME in yashan user context
+# (NOT as root, because yasboot-generated bashrc uses ~ for paths)
+if [ "$PORT" = "bashrc" ]; then
+    ENV_VARS=$(su - $YASDB_USER -c 'source ~/.bashrc 2>/dev/null && echo "YASDB_HOME=$YASDB_HOME" && echo "YASCS_HOME=$YASCS_HOME"')
+else
+    ENV_VARS=$(su - $YASDB_USER -c "source ~/.port${PORT} 2>/dev/null && echo \"YASDB_HOME=\$YASDB_HOME\" && echo \"YASCS_HOME=\$YASCS_HOME\"")
+fi
+eval "$ENV_VARS"
+
 if [ -z "$YASDB_HOME" ]; then
-    echo "$(date) Error: YASDB_HOME is not set. Please check $ENV_FILE"
+    echo "$(date) Error: YASDB_HOME is not set. Please check $YASDB_USER's environment"
     exit 1
 fi
 

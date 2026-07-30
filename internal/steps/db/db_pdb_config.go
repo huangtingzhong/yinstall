@@ -46,7 +46,7 @@ const (
 	pdbOfficialFileNameConvert    = "file_name_convert"
 
 	defaultPDBAdminUser     = "admin"
-	defaultPDBAdminPassword = "Yashan1!"
+	defaultPDBAdminPassword = DefaultSysPassword
 	defaultPDBUsersSize     = "128M"
 	defaultPDBOpen          = true
 )

@@ -105,13 +105,14 @@ func EnsureStandbyCEPath(ctx *runner.StepContext, statusHint string) error {
 		if n < 1 {
 			n = 1
 		}
-		if err := ValidateStandbyCEParams(
-			ctx.GetParamString("yac_inter_cidr", ""),
-			ctx.GetParamString("yac_systemdg", ""),
-			ctx.GetParamString("yac_datadg", ""),
-			ctx.GetParamStringSlice("yac_vips"),
-			n,
-		); err != nil {
+		// Phase1（主库侧）只校 inter-cidr + nodecount；systemdg/datadg/vips 留到 Phase2 备库侧发现后再校。
+		// DryRun 豁免：dry-run 不做 LISTEN_ADDR 自动发现（见 cli.tryFillInterCIDRFromPrimary），此处放行以便展示计划步骤；
+		// Precheck 不豁免——Precheck 会真正跑发现，inter-cidr 已填。
+		if ctx.DryRun {
+			if ctx.Logger != nil {
+				ctx.Logger.Warn("Dry-run: skipping CE inter-cidr validation (auto-discovery from primary LISTEN_ADDR skipped; pass --yac-inter-cidr to pin)")
+			}
+		} else if err := ValidateStandbyCEPrimarySideParams(ctx.GetParamString("yac_inter_cidr", ""), n); err != nil {
 			return err
 		}
 	} else if ctx.Logger != nil {
@@ -154,6 +155,51 @@ func ResolveStandbyCEPath(yacMode, primaryIsCE bool) (useCE bool, err error) {
 	default:
 		return false, nil
 	}
+}
+
+// ValidateStandbyCEPrimarySideParams CE 路径 Phase1（主库侧）校验：inter-cidr 必填且格式合法、节点数>=1。
+// systemdg/datadg/vips 留到 Phase 2（备库侧 validateStandbyCEYACOnTargets）自动发现后再校。
+func ValidateStandbyCEPrimarySideParams(interCIDR string, nodeCount int) error {
+	if nodeCount < 1 {
+		return fmt.Errorf("standby node count must be >= 1")
+	}
+	if strings.TrimSpace(interCIDR) == "" {
+		return fmt.Errorf("--yac-inter-cidr is required for CE standby path (auto-discovery from primary LISTEN_ADDR failed; pass --yac-inter-cidr)")
+	}
+	if _, _, err := net.ParseCIDR(strings.TrimSpace(interCIDR)); err != nil {
+		return fmt.Errorf("invalid --yac-inter-cidr %q: %w", interCIDR, err)
+	}
+	return nil
+}
+
+// ValidateStandbyCEProvidedParams 急校验（CLI 入口）：仅校验"显式传入值"的格式，空值一律放行，
+// 留待拓扑解析后自动发现（inter-cidr ← LISTEN_ADDR；systemdg/datadg ← udev；vips ← 自动生成）。
+// 与 ValidateStandbyCEParams（Phase 2 发现后兜底全量校验）互补。
+func ValidateStandbyCEProvidedParams(interCIDR, systemdg, datadg string, vips []string, nodeCount int) error {
+	if nodeCount < 1 {
+		return fmt.Errorf("standby node count must be >= 1")
+	}
+	if strings.TrimSpace(interCIDR) != "" {
+		if _, _, err := net.ParseCIDR(strings.TrimSpace(interCIDR)); err != nil {
+			return fmt.Errorf("invalid --yac-inter-cidr %q: %w", interCIDR, err)
+		}
+	}
+	if strings.TrimSpace(systemdg) != "" {
+		if _, err := dbsteps.ParseYACDiskGroup(systemdg); err != nil {
+			return fmt.Errorf("invalid --yac-systemdg: %w", err)
+		}
+	}
+	if strings.TrimSpace(datadg) != "" {
+		if _, err := dbsteps.ParseYACDiskGroup(datadg); err != nil {
+			return fmt.Errorf("invalid --yac-datadg: %w", err)
+		}
+	}
+	if len(vips) > 0 {
+		if err := dbsteps.ValidateYACVIPList(vips, nodeCount); err != nil {
+			return fmt.Errorf("CE standby path: %w", err)
+		}
+	}
+	return nil
 }
 
 // ValidateStandbyCEParams 校验 CE 备路径强制参数。

@@ -36,8 +36,9 @@ func buildRunAsUserCommand(ctx *runner.StepContext, targetUser string, command s
 	}
 
 	// 规则 3：当前用户是 root，则使用 su 切换到目标用户执行。
+	// 显式指定 -s /bin/bash，避免目标用户 login shell 为 /sbin/nologin 时 su 失败。
 	if currentUser == "root" {
-		return fmt.Sprintf("su - %s -c %s", targetUser, ShellSingleQuote(command)), nil
+		return fmt.Sprintf("su -s /bin/bash - %s -c %s", targetUser, ShellSingleQuote(command)), nil
 	}
 
 	// 规则 4：无法进行非交互切换用户，给出明确指引。

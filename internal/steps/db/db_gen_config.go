@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	commonos "github.com/yinstall/internal/common/os"
+	"github.com/yinstall/internal/logging"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -513,6 +514,28 @@ func MapYACDiskGroupParam(dgStr string, mapDisk func(disk string, index int) str
 		updated = append(updated, mapDisk(disk, i))
 	}
 	return strings.Join(updated, ",")
+}
+
+// NormalizeDiskGroupToYfs 将 diskgroup 字符串中的裸磁盘路径映射为 /dev/yfs/<prefix><n> 路径。
+// 每块盘按索引 i 映射到 /dev/yfs/<prefix><i+1>（如 sys→sys1、data→data1、arch→arch1），
+// 仅当 /dev/yfs symlink/设备在目标节点存在时替换，否则保留原路径并 Warn。
+// 内部使用 MapYACDiskGroupParam 做磁盘级遍历；供 db C-011 与 standby CE 备路径复用。
+func NormalizeDiskGroupToYfs(dgStr, prefix string, exec runner.Executor, logger *logging.Logger) string {
+	return MapYACDiskGroupParam(dgStr, func(disk string, i int) string {
+		alias := fmt.Sprintf("%s%d", prefix, i+1)
+		yfsPath := fmt.Sprintf("/dev/yfs/%s", alias)
+		result, _ := exec.Execute(fmt.Sprintf("test -L %s || test -b %s", yfsPath, yfsPath), false)
+		if result != nil && result.GetExitCode() == 0 {
+			if logger != nil {
+				logger.Info("  %s -> %s", disk, yfsPath)
+			}
+			return yfsPath
+		}
+		if logger != nil {
+			logger.Warn("  /dev/yfs/%s not found, keeping path %s", alias, disk)
+		}
+		return disk
+	})
 }
 
 // yacCeHAPrimaryStandbyExtra 判断 gen extra 是否在做 CE 主备集群（备集群实例数）。

@@ -15,6 +15,10 @@ const (
 
 	// DefaultYACDiskFoundPath yasboot --disk-found-path 默认（db/standby 共用语义；CLI 默认可带尾斜杠）。
 	DefaultYACDiskFoundPath = "/dev/yfs"
+
+	// DefaultSysPassword DB SYS 默认密码：db 安装 --db-sys-password flag 默认值、PDB admin 默认值、
+	// 以及 standby CE 路径未显式传入 --db-admin-password 时的回退值，统一在此常量去重。
+	DefaultSysPassword = "Yashan1!"
 )
 
 // ValidateYACAccessMode 校验 --yac-access-mode 取值。

@@ -124,7 +124,11 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&globalOmIP, "om", "M", "", "Current OM (yasom) host IP (standby/om/clean; empty = discover from om_addr when possible)")
 
 	// 软件目录参数：-L 默认含 ./software、./pkg、当前目录、家目录等；-R 上传落点，查找时另扫 SSH 用户 $HOME
-	rootCmd.PersistentFlags().StringSliceVarP(&localSoftwareDirs, "local-software-dirs", "L", defaultLocalSoftwareDirs(), "Local software dirs (default: ./software, ./pkg, cwd, $HOME, and ~/Downloads/yashan or ~/Downloads/oracle if present)")
+	// DefValue 设为 []：隐藏 Cobra 自动打印的展开路径，避免与 usage 中的目录说明重复
+	rootCmd.PersistentFlags().StringSliceVarP(&localSoftwareDirs, "local-software-dirs", "L", defaultLocalSoftwareDirs(), "Local software dirs (./software, ./pkg, cwd, $HOME, and ~/Downloads/yashan or ~/Downloads/oracle if present)")
+	if f := rootCmd.PersistentFlags().Lookup("local-software-dirs"); f != nil {
+		f.DefValue = "[]"
+	}
 	rootCmd.PersistentFlags().StringVarP(&remoteSoftwareDir, "remote-software-dir", "R", "/data/yashan/soft", "Remote software dir for upload/lookup (also searches SSH login user $HOME)")
 
 	rootCmd.PersistentFlags().StringVarP(&outputDir, "output", "o", "",

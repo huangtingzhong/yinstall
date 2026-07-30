@@ -212,23 +212,9 @@ func stepDiskCheck() *runner.Step {
 				firstHost := ctx.HostsToRun()[0]
 				hctx := ctx.ForHost(firstHost)
 
-				updateDiskGroupToYfs := func(dgStr, prefix string) string {
-					return MapYACDiskGroupParam(dgStr, func(disk string, i int) string {
-						alias := fmt.Sprintf("%s%d", prefix, i+1)
-						yfsPath := fmt.Sprintf("/dev/yfs/%s", alias)
-						checkResult, _ := hctx.Execute(fmt.Sprintf("test -L %s || test -b %s", yfsPath, yfsPath), false)
-						if checkResult != nil && checkResult.GetExitCode() == 0 {
-							hctx.Logger.Info("  %s -> %s", disk, yfsPath)
-							return yfsPath
-						}
-						hctx.Logger.Warn("  /dev/yfs/%s not found, keeping path %s", alias, disk)
-						return disk
-					})
-				}
-
-				updatedSystemdgYfs := updateDiskGroupToYfs(systemdgStr, "sys")
-				updatedDatadgYfs := updateDiskGroupToYfs(datadgStr, "data")
-				updatedArchdgYfs := updateDiskGroupToYfs(archdgStr, "arch")
+				updatedSystemdgYfs := NormalizeDiskGroupToYfs(systemdgStr, "sys", hctx.Executor, hctx.Logger)
+				updatedDatadgYfs := NormalizeDiskGroupToYfs(datadgStr, "data", hctx.Executor, hctx.Logger)
+				updatedArchdgYfs := NormalizeDiskGroupToYfs(archdgStr, "arch", hctx.Executor, hctx.Logger)
 
 				if updatedSystemdgYfs != systemdgStr {
 					ctx.Params["yac_systemdg"] = updatedSystemdgYfs

@@ -93,9 +93,10 @@ func ValidateYACVIPsConfigured(hosts []HostExec, vips []string, logger *logging.
 	return nil
 }
 
-// RunVIPValidationOrAutoGenerate 校验用户配置的 VIP，或在策略允许时自动生成。
-// vip/scan 模式由 db.go 调用；direct 模式不调用。
-func RunVIPValidationOrAutoGenerate(hosts []HostExec, params map[string]interface{}, logger *logging.Logger) error {
+// RunVIPValidationOrAutoGenerateFor 校验用户配置的 VIP，或在策略允许时自动生成。
+// stepID/stepName 非空时打控制台进度（ConsoleWithType）；为空则仅 logger.Info 记录。
+// 跨域复用（如 standby CE 备路径）传空 stepID，避免打印 db 域步骤 ID（如 C-009）串台。
+func RunVIPValidationOrAutoGenerateFor(hosts []HostExec, params map[string]interface{}, logger *logging.Logger, stepID, stepName string) error {
 	if !YACAccessModeRequiresVIP(getParamString(params, "yac_access_mode", "vip")) {
 		return nil
 	}
@@ -104,7 +105,9 @@ func RunVIPValidationOrAutoGenerate(hosts []HostExec, params map[string]interfac
 	}
 
 	firstHost := hosts[0].Host
-	logger.ConsoleWithType(StepIDByName("Validate or Auto-Generate VIP"), "Validate or Auto-Generate VIP", firstHost, "start", "", "", 0)
+	if stepID != "" {
+		logger.ConsoleWithType(stepID, stepName, firstHost, "start", "", "", 0)
+	}
 	logger.Info("Running VIP validation or auto-generation...")
 
 	vips := getParamStringSliceFromParams(params, "yac_vips")
@@ -112,7 +115,9 @@ func RunVIPValidationOrAutoGenerate(hosts []HostExec, params map[string]interfac
 		if err := ValidateYACVIPsConfigured(hosts, vips, logger); err != nil {
 			return err
 		}
-		logger.ConsoleWithType(StepIDByName("Validate or Auto-Generate VIP"), "Validate or Auto-Generate VIP", firstHost, "success", "", "", time.Duration(0))
+		if stepID != "" {
+			logger.ConsoleWithType(stepID, stepName, firstHost, "success", "", "", time.Duration(0))
+		}
 		return nil
 	}
 
@@ -164,8 +169,16 @@ func RunVIPValidationOrAutoGenerate(hosts []HostExec, params map[string]interfac
 
 	params["yac_vips"] = generated
 	logger.Info("Auto-generated VIP addresses: %v", generated)
-	logger.ConsoleWithType(StepIDByName("Validate or Auto-Generate VIP"), "Validate or Auto-Generate VIP", firstHost, "success", "", fmt.Sprintf("VIPs: %v", generated), time.Duration(0))
+	if stepID != "" {
+		logger.ConsoleWithType(stepID, stepName, firstHost, "success", "", fmt.Sprintf("VIPs: %v", generated), time.Duration(0))
+	}
 	return nil
+}
+
+// RunVIPValidationOrAutoGenerate 校验/自动生成 VIP（db C-009 等本域调用；step ID/名称取 db 域 "Validate or Auto-Generate VIP"）。
+// 跨域调用方（standby CE 备路径）请改用 RunVIPValidationOrAutoGenerateFor 传空 stepID，以免 db 域步骤 ID 串台。
+func RunVIPValidationOrAutoGenerate(hosts []HostExec, params map[string]interface{}, logger *logging.Logger) error {
+	return RunVIPValidationOrAutoGenerateFor(hosts, params, logger, StepIDByName("Validate or Auto-Generate VIP"), "Validate or Auto-Generate VIP")
 }
 
 func containsString(slice []string, s string) bool {

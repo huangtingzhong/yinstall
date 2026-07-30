@@ -190,10 +190,37 @@ func remoteFileNeedsReplace(ctx *runner.StepContext, remotePath, localPath strin
 	return rs != li.Size()
 }
 
-func uploadLocalToRemote(ctx *runner.StepContext, localPath, uploadPath string) error {
-	if err := EnsureDir(ctx, path.Dir(uploadPath), true); err != nil {
-		return fmt.Errorf("ensure remote dir %s: %w", path.Dir(uploadPath), err)
+// ensureUploadDirOwned 修复「上传 permission denied」根因：EnsureDir 用 sudo mkdir 会把目录建成
+// root 属主，而后续 SFTP/SCP 以 SSH 登录用户身份上传（不 sudo）→ root 属主 + 755 时登录用户无写权限。
+// 故上传前补一次 sudo chown 到登录用户：id -un/id -gn 以非 sudo 解析，确保是真正执行 SFTP 的用户，
+// 而非 os_user 参数（多节点场景两者可能不同）。
+// best-effort：失败仅告警不中断——local 控制端 / Windows / root 登录等无需 chown 的场景不应回归。
+// 仅 Linux 生效（Windows 走 WinRM，权限模型不同）；不递归（无 -R），避免对 $HOME 误操作。
+func ensureUploadDirOwned(ctx *runner.StepContext, dir string) {
+	if isWindowsTarget(ctx) {
+		return
 	}
+	res, _ := ctx.Execute("echo \"$(id -un):$(id -gn)\"", false) // 非 sudo → SSH 登录用户:组
+	if res == nil {
+		return
+	}
+	owner := strings.TrimSpace(res.GetStdout())
+	parts := strings.Split(owner, ":")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return // id 解析异常则跳过，交由后续 Upload 给出最终结论
+	}
+	cmd := fmt.Sprintf("chown %s %s", shellSingleQuote(owner), shellSingleQuote(dir))
+	if _, err := ctx.Execute(cmd, true); err != nil {
+		ctx.Logger.Warn("ensureUploadDirOwned: chown %s -> %s failed (best-effort, ignored): %v", dir, owner, err)
+	}
+}
+
+func uploadLocalToRemote(ctx *runner.StepContext, localPath, uploadPath string) error {
+	dir := path.Dir(uploadPath)
+	if err := EnsureDir(ctx, dir, true); err != nil {
+		return fmt.Errorf("ensure remote dir %s: %w", dir, err)
+	}
+	ensureUploadDirOwned(ctx, dir) // 根因修复：确保上传目录归 SSH 登录用户，避免 root 属主导致 SFTP 写入被拒
 	if err := ctx.Executor.Upload(localPath, uploadPath, ctx.UploadContext()); err != nil {
 		return fmt.Errorf("failed to upload '%s' to '%s': %w", localPath, uploadPath, err)
 	}
