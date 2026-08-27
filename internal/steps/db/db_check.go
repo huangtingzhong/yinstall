@@ -163,12 +163,16 @@ func RunConnectivityAndYACPrecheck(hosts []HostExec, params map[string]interface
 
 	// 1. 网络：在各主机上做快速连通性检查
 	for _, h := range hosts {
-		result, err := c001Exec(h, logger, "echo 'connection_ok'", false)
+		result, err := c001Exec(h, logger, "true", false)
 		if err != nil {
 			return fmt.Errorf("network check failed for %s: %w", h.Host, err)
 		}
-		if result == nil || result.GetExitCode() != 0 || !strings.Contains(result.GetStdout(), "connection_ok") {
-			return fmt.Errorf("network check failed for %s: unexpected response", h.Host)
+		if result == nil || result.GetExitCode() != 0 {
+			code := -1
+			if result != nil {
+				code = result.GetExitCode()
+			}
+			return fmt.Errorf("network check failed for %s: exit code %d", h.Host, code)
 		}
 	}
 	logger.Info("Network connectivity: OK on all %d node(s)", len(hosts))

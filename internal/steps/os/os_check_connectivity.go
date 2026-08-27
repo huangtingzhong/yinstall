@@ -19,14 +19,12 @@ func stepCheckConnectivity() *runner.Step {
 		PreCheck: func(ctx *runner.StepContext) error {
 			host := ctx.Executor.Host()
 
-			// 1) 基础 SSH 命令
-			result, err := ctx.ExecuteWithCheck("echo 'connection_ok'", false)
+			// 1) 基础 SSH 通道验证（仅校验 exit code，避免命令包装器/审计系统改写 stdout 导致误判）
+			result, err := ctx.ExecuteWithCheck("true", false)
 			if err != nil {
 				return fmt.Errorf("SSH connection failed to %s: %w", host, err)
 			}
-			if !strings.Contains(result.GetStdout(), "connection_ok") {
-				return fmt.Errorf("unexpected response from %s", host)
-			}
+			_ = result
 
 			if commonos.IsWindowsTarget(ctx) {
 				ctx.SetResult("target_platform", "windows")
