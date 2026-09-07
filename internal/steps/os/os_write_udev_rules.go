@@ -11,6 +11,14 @@ import (
 // udevRuleActionOpts 与 installer.md 3.13.2 一致：仅在 add/change 时匹配，并关闭设备 watch。
 const udevRuleActionOpts = `, ACTION=="add|change", OPTIONS:="nowatch"`
 
+// FormatYfsIDWWNUdevRule 生成基于 ID_WWN 的 yfs udev 规则行（恩墨一体机）。
+func FormatYfsIDWWNUdevRule(idWWN, alias, owner, group, mode string) string {
+	return fmt.Sprintf(
+		`SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ENV{ID_WWN}=="%s", SYMLINK+="yfs/%s", OWNER="%s", GROUP="%s", MODE="%s"%s`,
+		idWWN, alias, owner, group, mode, udevRuleActionOpts,
+	)
+}
+
 // stepWriteUdevRules 写入 udev 规则（YAC）
 func stepWriteUdevRules() *runner.Step {
 	return &runner.Step{
@@ -74,6 +82,14 @@ func stepWriteUdevRules() *runner.Step {
 							wwid, alias, owner, group, mode, udevRuleActionOpts)
 						rules = append(rules, rule)
 						ctx.Logger.Info("  Generated WWID-based rule for Huawei disk %s -> /dev/yfs/%s (wwid: %s)", disk, alias, wwid)
+					} else if ctx.GetParamBool("yac_enmotech_appliance", false) && IsMultipathDisk(disk) {
+						idWWN, err := commonos.GetDiskIDWWN(ctx, disk)
+						if err != nil {
+							return fmt.Errorf("enmotech appliance: %w", err)
+						}
+						rule := FormatYfsIDWWNUdevRule(idWWN, alias, owner, group, mode)
+						rules = append(rules, rule)
+						ctx.Logger.Info("  Generated ID_WWN-based rule for Enmotech disk %s -> /dev/yfs/%s (ID_WWN: %s)", disk, alias, idWWN)
 					} else if IsMultipathDisk(disk) {
 						dmAlias := strings.TrimPrefix(disk, "/dev/mapper/")
 						if dmAlias == disk {

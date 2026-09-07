@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -186,6 +187,20 @@ func stepValidateYacDiskgroups() *runner.Step {
 
 		Action: func(ctx *runner.StepContext) error {
 			osLogPhase(ctx, "plan", "B-022: Validate YAC Diskgroups")
+
+			platform := commonos.DetectAppliancePlatform(ctx)
+			enmotech := platform == commonos.ApplianceEnmotech
+			ctx.SetResult("yac_enmotech_appliance", enmotech)
+			if ctx.Params == nil {
+				ctx.Params = map[string]interface{}{}
+			}
+			ctx.Params["yac_enmotech_appliance"] = enmotech
+			if enmotech {
+				ctx.Logger.Info("Enmotech appliance detected (platform=%s); mapper disks treated as NVMe aliases", platform)
+			} else {
+				ctx.Logger.Info("Appliance platform: none (or unsupported)")
+			}
+
 			systemdgStr := ctx.GetParamString("yac_systemdg", "")
 			datadgStr := ctx.GetParamString("yac_datadg", "")
 			archdgStr := ctx.GetParamString("yac_archdg", "")
@@ -268,15 +283,21 @@ func stepValidateYacDiskgroups() *runner.Step {
 				ctx.Logger.Info("  %s: OK", disk)
 			}
 
-			needMultipath := hasNonMultipath && !hasMultipath
+			needMultipath := false
+			if !enmotech {
+				needMultipath = hasNonMultipath && !hasMultipath
+			}
 			ctx.SetResult("yac_need_multipath", needMultipath)
 			ctx.SetResult("yac_has_multipath_disks", hasMultipath)
+			ctx.Params["yac_need_multipath"] = needMultipath
 
 			if hasMultipath && hasNonMultipath {
 				ctx.Logger.Warn("Mixed multipath and non-multipath disks detected")
 			}
 
-			if hasMultipath {
+			if enmotech {
+				ctx.Logger.Info("Enmotech appliance: skip dm-multipath software; yfs udev will use ID_WWN")
+			} else if hasMultipath {
 				ctx.Logger.Info("Multipath disks detected, skipping multipath software configuration")
 			} else {
 				ctx.Logger.Info("Non-multipath disks detected, enabling multipath and udev configuration")

@@ -19,6 +19,32 @@ func IsHuaweiMultipathDisk(disk string) bool {
 	return strings.HasPrefix(disk, "/dev/ultrapath")
 }
 
+// ParseUdevIDWWN 从 udevadm info --query=property 输出中解析 ID_WWN。
+func ParseUdevIDWWN(udevadmProps string) string {
+	for _, line := range strings.Split(udevadmProps, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "ID_WWN=") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "ID_WWN="))
+		}
+	}
+	return ""
+}
+
+// GetDiskIDWWN 通过 udevadm 获取块设备 ID_WWN（跟随 symlink，对齐恩墨厂商规则）。
+func GetDiskIDWWN(ctx *runner.StepContext, disk string) (string, error) {
+	cmd := fmt.Sprintf("udevadm info --query=property --name=%s 2>/dev/null", disk)
+	result, _ := ctx.Execute(cmd, false)
+	out := ""
+	if result != nil {
+		out = result.GetStdout()
+	}
+	id := ParseUdevIDWWN(out)
+	if id == "" {
+		return "", fmt.Errorf("failed to get ID_WWN for disk %s", disk)
+	}
+	return id, nil
+}
+
 // GetDiskWWID 获取磁盘的 WWID
 // 支持 NVMe、SCSI、SAS、SAN 等不同类型的设备
 // 对于华为存储多路径磁盘，使用 udevadm info 获取 WWID
