@@ -196,7 +196,7 @@ func stepValidateYacDiskgroups() *runner.Step {
 			}
 			ctx.Params["yac_enmotech_appliance"] = enmotech
 			if enmotech {
-				ctx.Logger.Info("Enmotech appliance detected (platform=%s); mapper disks treated as NVMe aliases", platform)
+				ctx.Logger.Info("Enmotech appliance detected (platform=%s); product identity only (storage policy uses disk classification)", platform)
 			} else {
 				ctx.Logger.Info("Appliance platform: none (or unsupported)")
 			}
@@ -284,27 +284,39 @@ func stepValidateYacDiskgroups() *runner.Step {
 			}
 
 			needMultipath := false
-			if !enmotech {
-				needMultipath = hasNonMultipath && !hasMultipath
+			useIDWWN := false
+			diskList := make([]string, 0, len(allDisks))
+			for disk := range allDisks {
+				diskList = append(diskList, disk)
 			}
+			policy, err := commonos.ResolveYACDiskStoragePolicy(ctx, diskList)
+			if err != nil {
+				return err
+			}
+			needMultipath = policy.NeedOSMultipath
+			useIDWWN = policy.UseIDWWNUdev
+
 			ctx.SetResult("yac_need_multipath", needMultipath)
 			ctx.SetResult("yac_has_multipath_disks", hasMultipath)
+			ctx.SetResult("yac_udev_use_id_wwn", useIDWWN)
 			ctx.Params["yac_need_multipath"] = needMultipath
+			ctx.Params["yac_udev_use_id_wwn"] = useIDWWN
 
 			if hasMultipath && hasNonMultipath {
-				ctx.Logger.Warn("Mixed multipath and non-multipath disks detected")
+				ctx.Logger.Warn("Mixed multipath and non-multipath path prefixes detected")
 			}
 
-			if enmotech {
-				ctx.Logger.Info("Enmotech appliance: skip dm-multipath software; yfs udev will use ID_WWN")
-			} else if hasMultipath {
-				ctx.Logger.Info("Multipath disks detected, skipping multipath software configuration")
-			} else {
-				ctx.Logger.Info("Non-multipath disks detected, enabling multipath and udev configuration")
+			ctx.Logger.Info("YAC disk storage policy: need_os_multipath=%v udev_id_wwn=%v", needMultipath, useIDWWN)
+			if needMultipath {
+				ctx.Logger.Info("Enabling multipath and udev configuration for non-native-multipath disks")
 				ctx.Params["yac_multipath_enable"] = true
 				ctx.Params["yac_multipath_auto_wwid"] = true
 				ctx.Params["yac_need_multipath"] = true
 				ctx.Params["yac_raw_disk_udev"] = true
+			} else if useIDWWN {
+				ctx.Logger.Info("Skip dm-multipath software; yfs udev will use ID_WWN")
+			} else {
+				ctx.Logger.Info("Multipath disks detected, skipping multipath software configuration")
 			}
 
 			return nil

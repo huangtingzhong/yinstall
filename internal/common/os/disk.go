@@ -45,6 +45,144 @@ func GetDiskIDWWN(ctx *runner.StepContext, disk string) (string, error) {
 	return id, nil
 }
 
+// DiskPathKind 共享盘路径形态（决定是否配 OS multipath 与 yfs udev 风格）。
+type DiskPathKind string
+
+const (
+	DiskRealDM    DiskPathKind = "real_dm"    // 真 dm / ultrapath 等
+	DiskAliasNVMe DiskPathKind = "alias_nvme" // 假 mapper symlink → nvme
+	DiskBareNVMe  DiskPathKind = "bare_nvme"  // /dev/nvme*
+	DiskBareOther DiskPathKind = "bare_other" // 其它裸盘
+)
+
+// blockBaseName 取 /dev/xxx 或绝对路径的末段设备名。
+func blockBaseName(path string) string {
+	path = strings.TrimSpace(path)
+	path = strings.TrimPrefix(path, "/dev/")
+	if i := strings.LastIndex(path, "/"); i >= 0 {
+		path = path[i+1:]
+	}
+	return path
+}
+
+// ClassifyDiskPathLocal 根据路径与 readlink -f 目标做本地分类（便于单测）。
+// resolvedTarget 仅对 mapper/dm 有意义；裸盘可传空。
+func ClassifyDiskPathLocal(disk, resolvedTarget string) DiskPathKind {
+	disk = strings.TrimSpace(disk)
+	base := blockBaseName(disk)
+	if strings.HasPrefix(base, "nvme") {
+		return DiskBareNVMe
+	}
+	if IsHuaweiMultipathDisk(disk) {
+		return DiskRealDM
+	}
+	if strings.HasPrefix(disk, "/dev/mapper/") || strings.HasPrefix(disk, "/dev/dm-") {
+		if strings.HasPrefix(blockBaseName(resolvedTarget), "nvme") {
+			return DiskAliasNVMe
+		}
+		return DiskRealDM
+	}
+	return DiskBareOther
+}
+
+// ClassifyDiskPath 在目标机上分类磁盘路径。
+func ClassifyDiskPath(ctx *runner.StepContext, disk string) (DiskPathKind, error) {
+	disk = strings.TrimSpace(disk)
+	if disk == "" {
+		return "", fmt.Errorf("empty disk path")
+	}
+	if strings.HasPrefix(blockBaseName(disk), "nvme") || IsHuaweiMultipathDisk(disk) ||
+		!(strings.HasPrefix(disk, "/dev/mapper/") || strings.HasPrefix(disk, "/dev/dm-")) {
+		return ClassifyDiskPathLocal(disk, ""), nil
+	}
+	resolved := ""
+	if ctx != nil {
+		res, _ := ctx.Execute(fmt.Sprintf("readlink -f %s 2>/dev/null", disk), false)
+		if res != nil && res.GetExitCode() == 0 {
+			resolved = strings.TrimSpace(res.GetStdout())
+		}
+	}
+	return ClassifyDiskPathLocal(disk, resolved), nil
+}
+
+// NVMeNativeMultipathEnabled 读取 nvme_core.multipath 是否为 Y。
+func NVMeNativeMultipathEnabled(ctx *runner.StepContext) bool {
+	if ctx == nil {
+		return false
+	}
+	res, _ := ctx.Execute("cat /sys/module/nvme_core/parameters/multipath 2>/dev/null", false)
+	if res == nil || res.GetExitCode() != 0 {
+		return false
+	}
+	return strings.TrimSpace(res.GetStdout()) == "Y"
+}
+
+// diskStorageFlags 返回该形态是否需要 OS multipath、是否用 ID_WWN udev。
+func diskStorageFlags(kind DiskPathKind, nativeMP bool) (needOSMultipath, useIDWWN bool) {
+	switch kind {
+	case DiskRealDM:
+		return false, false
+	case DiskAliasNVMe:
+		return false, true
+	case DiskBareNVMe:
+		if nativeMP {
+			return false, true
+		}
+		return true, false
+	default:
+		return true, false
+	}
+}
+
+// YACDiskStoragePolicy YAC 共享盘存储策略（整次安装一致）。
+type YACDiskStoragePolicy struct {
+	NeedOSMultipath bool
+	UseIDWWNUdev    bool
+}
+
+// ResolveYACDiskStoragePolicyFromKinds 按已分类结果与原生 MP 开关汇总策略（纯函数，便于模拟各环境）。
+func ResolveYACDiskStoragePolicyFromKinds(kinds []DiskPathKind, nativeMP bool) (YACDiskStoragePolicy, error) {
+	var out YACDiskStoragePolicy
+	if len(kinds) == 0 {
+		return out, fmt.Errorf("no disks to resolve storage policy")
+	}
+	var (
+		set      bool
+		needOS   bool
+		useIDWWN bool
+	)
+	for i, kind := range kinds {
+		n, id := diskStorageFlags(kind, nativeMP)
+		if !set {
+			needOS, useIDWWN, set = n, id, true
+			continue
+		}
+		if n != needOS || id != useIDWWN {
+			return out, fmt.Errorf("mixed YAC disk storage policies at index %d (kind=%s); refuse mixed layouts", i, kind)
+		}
+	}
+	out.NeedOSMultipath = needOS
+	out.UseIDWWNUdev = useIDWWN
+	return out, nil
+}
+
+// ResolveYACDiskStoragePolicy 汇总全部盘的策略；策略冲突则报错。
+func ResolveYACDiskStoragePolicy(ctx *runner.StepContext, disks []string) (YACDiskStoragePolicy, error) {
+	if len(disks) == 0 {
+		return YACDiskStoragePolicy{}, fmt.Errorf("no disks to resolve storage policy")
+	}
+	nativeMP := NVMeNativeMultipathEnabled(ctx)
+	kinds := make([]DiskPathKind, 0, len(disks))
+	for _, disk := range disks {
+		kind, err := ClassifyDiskPath(ctx, disk)
+		if err != nil {
+			return YACDiskStoragePolicy{}, err
+		}
+		kinds = append(kinds, kind)
+	}
+	return ResolveYACDiskStoragePolicyFromKinds(kinds, nativeMP)
+}
+
 // GetDiskWWID 获取磁盘的 WWID
 // 支持 NVMe、SCSI、SAS、SAN 等不同类型的设备
 // 对于华为存储多路径磁盘，使用 udevadm info 获取 WWID
