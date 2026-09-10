@@ -17,13 +17,11 @@
 | `standby` | 向已有主库添加备库 | E- |
 | `ycm` | 安装 YCM（云管） | G- |
 | `ymp` | 安装 YMP（迁移平台） | H- |
-| `clean` | 卸载清理 DB / YCM / YMP | CLEAN- |
+| `clean` | 卸载清理 DB / YCM / YMP（**仅自有测试环境**） | CLEAN- |
 | `collect` | 只读采集 OS/DB 环境并本地归档 | R- |
 | `stressos` | CPU/MEM/IO/NET 压测并归档 | S- |
 
 每个子命令支持 `yinstall <cmd> -l` 查看步骤目录；`yinstall <cmd> --help` 查看完整参数。
-
-MySQL / SQL Server / Windows OS 安装已拆至独立仓库 [`install`](../install)（二进制 `install`）。
 
 ---
 
