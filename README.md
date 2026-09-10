@@ -1,6 +1,6 @@
 # yinstall（yasinstaller）
 
-面向 YashanDB 生态的 **自动化安装与运维编排 CLI**。在控制端（macOS/Linux）通过 SSH 在目标 Linux 主机上，按预定义步骤执行 OS 基线、数据库安装、主备扩容、YCM/YMP 部署、环境清理、诊断采集与 OS 压测。
+面向 YashanDB 生态的 **自动化安装与运维编排 CLI**。可在目标 Linux **本机直接安装**，也可从控制端（macOS/Linux）经 SSH 在远端执行 OS 基线、数据库安装、主备扩容、YCM/YMP 部署、环境清理、诊断采集与 OS 压测。
 
 **开源仓库**：[https://github.com/huangtingzhong/yinstall](https://github.com/huangtingzhong/yinstall)
 
@@ -53,41 +53,40 @@ chmod +x yinstall
 
 ## 快速开始
 
-### 单机数据库（跳过 OS，包放 `./software/`）
+在**待安装的 Linux 本机**上以 root（或具备 sudo 的用户）执行，无需 `-t` SSH。
+
+1. 从上方 [`build/`](https://github.com/huangtingzhong/yinstall/tree/main/build) 下载对应架构的 `yinstall`，`chmod +x`。
+2. 将 YashanDB 安装包（如 `yashandb-*-linux-*.tar.gz`）放到下列任一目录（工具会自动找最新包）：
+   - `./software/`（推荐）
+   - `./pkg/`
+   - 当前目录 `.`
+   - `$HOME`、`~/Downloads/yashan`、`~/Downloads/oracle`（若存在）
+3. 一键安装（含 OS 基线 + 单机库；SYS 默认密码 `Yashan1!`）：
 
 ```bash
-./yinstall db \
-  -t 10.10.10.130 \
-  --skip-os \
-  --os-user yashan \
-  --db-admin-password 'YourSaPassword' \
-  --precheck
+./yinstall db
 ```
 
-`--db-package` 可省略：C-007 会在 `-R`、`$HOME`、`-L`（默认 `./software`、`./pkg` 等）中按版本自动发现最新安装包。
-
-### OS 基线 + 安装
+仅装库、跳过 OS 基线：
 
 ```bash
-yinstall os -t 10.10.10.130
-yinstall db  -t 10.10.10.130 --os-user-password '...'
+./yinstall db --skip-os
 ```
 
-`os` / `db` 成功后默认 **`--archive`** 挂钩采集（可用 `--archive=false` 关闭）。
+先看将执行的步骤：`./yinstall db -l`。完整参数：`./yinstall db -h`。
 
-### 单步调试
+---
 
-```bash
-yinstall db -t 10.10.10.130 --skip-os --precheck -s C-007
-yinstall db -t 10.10.10.130 --dry-run -s C-014-C-021
-```
+## 更多用法
 
 ### 诊断采集 / 压测
 
 ```bash
-yinstall collect -t 10.10.10.130 --profile full -o ./output/collect
-yinstall stressos -t 10.10.10.130 --cpu --mem --io -o ./output/stress
+./yinstall collect --profile full -o ./output/collect
+./yinstall stressos --cpu --mem --io -o ./output/stress
 ```
+
+未指定 `-t` 时在本机执行；远程采集/压测可加 `-t <IP>`。
 
 ### YAC 主库扩 CE 备（`--yac`）
 
