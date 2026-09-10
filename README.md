@@ -27,20 +27,27 @@ MySQL / SQL Server / Windows OS 安装已拆至独立仓库 [`install`](../insta
 
 ---
 
-## 构建
+## 下载二进制
+
+无需本地编译。请到仓库 [`build/`](https://github.com/huangtingzhong/yinstall/tree/main/build) 下载对应平台预编译文件，赋予执行权限后即可使用：
+
+| 平台 | 文件 |
+|------|------|
+| Linux amd64 | [`yinstall_linux_amd64`](https://github.com/huangtingzhong/yinstall/raw/main/build/yinstall_linux_amd64) |
+| Linux arm64 | [`yinstall_linux_arm64`](https://github.com/huangtingzhong/yinstall/raw/main/build/yinstall_linux_arm64) |
+| macOS amd64 | [`yinstall_darwin_amd64`](https://github.com/huangtingzhong/yinstall/raw/main/build/yinstall_darwin_amd64) |
+| macOS arm64 | [`yinstall_darwin_arm64`](https://github.com/huangtingzhong/yinstall/raw/main/build/yinstall_darwin_arm64) |
+| Windows amd64 | [`yinstall_windows_amd64.exe`](https://github.com/huangtingzhong/yinstall/raw/main/build/yinstall_windows_amd64.exe) |
+| Windows arm64 | [`yinstall_windows_arm64.exe`](https://github.com/huangtingzhong/yinstall/raw/main/build/yinstall_windows_arm64.exe) |
 
 ```bash
-git clone https://github.com/huangtingzhong/yinstall.git
-cd yinstall
-
-make build-current          # 当前平台 → build/yinstall_<os>_<arch>
-make build-all              # Linux / Windows / macOS 多架构
-./build.sh --current        # 等同 make build-current
-
-make check-debug-logging    # 安装步骤 debug 日志静态检查（需本地 scripts/）
+# 示例：macOS / Linux 按本机架构下载
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+curl -L -o yinstall "https://github.com/huangtingzhong/yinstall/raw/main/build/yinstall_${OS}_${ARCH}"
+chmod +x yinstall
+./yinstall --version
 ```
-
-输出示例：`build/yinstall_darwin_arm64`、`build/yinstall_linux_amd64`。
 
 ---
 
@@ -49,7 +56,7 @@ make check-debug-logging    # 安装步骤 debug 日志静态检查（需本地 
 ### 单机数据库（跳过 OS，包放 `./software/`）
 
 ```bash
-./build/yinstall_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m) db \
+./yinstall db \
   -t 10.10.10.130 \
   --skip-os \
   --os-user yashan \
@@ -153,7 +160,7 @@ internal/runner/       # 步骤编排
 internal/steps/        # 各域步骤实现（os/db/ycm/ymp/...）
 internal/ssh/          # SSH 执行与上传
 internal/common/       # 公共逻辑
-build/                 # 编译产物（不入库）
+build/                 # 预编译二进制（按平台下载）
 docs/                  # 本地文档（默认不入库）
 tmp/ scripts/          # 本地临时/脚本（不入库）
 ```
@@ -187,6 +194,6 @@ go test ./... -count=1
 
 ## 许可证与联系
 
-构建信息见 `yinstall --version`（含构建时间、Git commit）。
+版本信息见 `yinstall --version`（含构建时间、Git commit）。
 
 参数与步骤以当前二进制 `yinstall <command> -h` / `-l` 为准。
