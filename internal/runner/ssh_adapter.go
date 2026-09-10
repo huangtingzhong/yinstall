@@ -11,7 +11,7 @@ type sshExecutorAdapter struct {
 	e ssh.Executor
 }
 
-// SetExecuteTimeout forwards to the underlying executor when supported (e.g. WinRM).
+// SetExecuteTimeout forwards to the underlying executor when supported.
 func (a *sshExecutorAdapter) SetExecuteTimeout(d time.Duration) {
 	if a == nil || a.e == nil {
 		return

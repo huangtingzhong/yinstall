@@ -1,13 +1,17 @@
+// os_disable_firewall.go - 按 --os-firewall-mode=disable 停用 firewalld
+// mode 非 disable 时 Optional PreCheck skip
+
 package os
 
 import (
 	"fmt"
 	"strings"
 
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
-// stepDisableFirewall 关闭或调整防火墙（可选/危险）
+// stepDisableFirewall 关闭防火墙（--os-firewall-mode=disable）
 func stepDisableFirewall() *runner.Step {
 	return &runner.Step{
 		Name:        "Disable Firewall",
@@ -17,8 +21,11 @@ func stepDisableFirewall() *runner.Step {
 		Dangerous:   true,
 
 		PreCheck: func(ctx *runner.StepContext) error {
-			mode := ctx.GetParamString("os_firewall_mode", "keep")
-			if mode != "disable" {
+			mode, err := commonos.NormalizeFirewallMode(ctx.GetParamString("os_firewall_mode", commonos.FirewallModeEnable))
+			if err != nil {
+				return err
+			}
+			if mode != commonos.FirewallModeDisable {
 				return fmt.Errorf("firewall mode is not disable")
 			}
 			return nil

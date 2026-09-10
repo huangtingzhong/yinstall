@@ -20,7 +20,7 @@ var defaultBlockDevices = []string{"/dev/cdrom", "/dev/sr0"}
 
 // ISOProfile 描述目标机期望的 ISO 特征（一期：RHEL 系）。
 type ISOProfile struct {
-	Family   string // rhel7 | rhel8
+	Family   string // 布局族 rhel7=扁平 DVD（含 openEuler）| rhel8=BaseOS+AppStream
 	DistroID string // ol, rhel, centos, rocky, kylin, ...
 	MajorVer int
 	MinorVer int // -1 表示未知或未指定
@@ -33,7 +33,7 @@ type ISOMetadata struct {
 	Major   int
 	Minor   int // -1 未知
 	Arch    string
-	Family  string // rhel7 | rhel8
+	Family  string // 布局族 rhel7=扁平（含 openEuler）| rhel8=BaseOS+AppStream
 	Source  string // treeinfo | discinfo | media.repo
 }
 
@@ -53,7 +53,8 @@ func DefaultBlockDevices() []string {
 	return out
 }
 
-// ISOProfileFromOSInfo 根据 B-000 检测结果构建 ISO 匹配 profile。
+// ISOProfileFromOSInfo 根据 DetectOSType 结果构建 ISO 匹配 profile。
+// Family 表示 DVD/yum 布局族：rhel8=BaseOS+AppStream；rhel7=扁平 Packages（含 openEuler）。
 func ISOProfileFromOSInfo(osInfo *runner.OSInfo) ISOProfile {
 	p := ISOProfile{MinorVer: -1}
 	if osInfo == nil {
@@ -66,13 +67,17 @@ func ISOProfileFromOSInfo(osInfo *runner.OSInfo) ISOProfile {
 	p.Arch = NormalizeArch(osInfo.Arch)
 	p.MajorVer, p.MinorVer = parseVersionID(osInfo.VersionID)
 
+	// 与 B-001 一致：由 ID/Name 填充 IsRHEL*/IsOpenEuler（调用方可只填 os-release 字段）
+	DetectOSType(osInfo)
+
 	switch {
-	case IsRHEL7(osInfo):
+	case IsRHEL7(osInfo), IsOpenEuler(osInfo):
+		// 扁平 DVD（与 yum BaseURLs / ensureRepoFile 非 IsRHEL8 一致）
 		p.Family = "rhel7"
 	case IsRHEL8(osInfo):
 		p.Family = "rhel8"
 	default:
-		// 未识别发行版时按 RHEL8 布局处理（Kylin/UOS 等已在 DetectOSType 标记）
+		// 未识别发行版：仅按主版本猜测布局
 		if p.MajorVer == 7 {
 			p.Family = "rhel7"
 		} else {
@@ -358,8 +363,10 @@ func ISOMetadataMatchesProfile(meta ISOMetadata, profile ISOProfile) bool {
 }
 
 // ParseISOMetadataFromTreeinfo 解析 .treeinfo。
+// Family 优先取 treeinfo 的 family=（openEuler→扁平 rhel7）；否则再按主版本猜 EL7/EL8 布局。
 func ParseISOMetadataFromTreeinfo(content string) ISOMetadata {
 	meta := ISOMetadata{Minor: -1, Source: "treeinfo"}
+	familyRaw := ""
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.Contains(line, "=") {
@@ -374,31 +381,74 @@ func ParseISOMetadataFromTreeinfo(content string) ISOMetadata {
 			meta.Major, meta.Minor = parseVersionString(v)
 		case "arch":
 			meta.Arch = NormalizeArch(v)
+		case "family":
+			familyRaw = v
 		}
 	}
-	if meta.Major >= 8 {
-		meta.Family = "rhel8"
-	} else if meta.Major == 7 {
-		meta.Family = "rhel7"
-	}
+	meta.Family = isoLayoutFamilyFromTreeinfo(familyRaw, meta.Major)
 	return meta
 }
 
-// ParseISOMetadataFromDiscinfo 解析 .discinfo 首段版本信息。
+// isoLayoutFamilyFromTreeinfo 将 treeinfo/版本映射为布局族（与 DetectOSType + yum 判定对齐）。
+func isoLayoutFamilyFromTreeinfo(familyRaw string, major int) string {
+	fl := strings.ToLower(strings.TrimSpace(familyRaw))
+	if strings.Contains(fl, "euler") {
+		return "rhel7" // openEuler：扁平 Packages+repodata
+	}
+	if major >= 8 {
+		return "rhel8"
+	}
+	if major == 7 {
+		return "rhel7"
+	}
+	return ""
+}
+
+// discinfoTimestampLine 判断是否为 Anaconda .discinfo 首行 unix 时间戳(不得当发行版版本).
+var discinfoTimestampLine = regexp.MustCompile(`^\d+\.\d+$`)
+
+// ParseISOMetadataFromDiscinfo 解析 .discinfo 版本信息。
+// 首行为时间戳时跳过, 从后续行取 arch/版本; 否则按首行可读发行说明解析(RHEL/OL).
 func ParseISOMetadataFromDiscinfo(content string) ISOMetadata {
 	meta := ISOMetadata{Minor: -1, Source: "discinfo"}
 	lines := strings.Split(content, "\n")
 	if len(lines) == 0 {
 		return meta
 	}
-	first := strings.ToLower(lines[0])
-	meta.Version = strings.TrimSpace(lines[0])
-
-	if strings.Contains(first, "aarch64") || strings.Contains(first, "arm64") {
-		meta.Arch = "aarch64"
-	} else if strings.Contains(first, "x86_64") || strings.Contains(first, "amd64") {
-		meta.Arch = "x86_64"
+	firstRaw := strings.TrimSpace(lines[0])
+	if discinfoTimestampLine.MatchString(firstRaw) {
+		for _, line := range lines[1:] {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			low := strings.ToLower(line)
+			fillISOArchFromText(&meta, low)
+			if meta.Major > 0 {
+				continue
+			}
+			// 跳过裸 arch 行; 其余行尝试抽取版本
+			if low == "aarch64" || low == "arm64" || low == "x86_64" || low == "amd64" {
+				continue
+			}
+			if maj, min := parseVersionString(line); maj > 0 {
+				meta.Version = line
+				meta.Major, meta.Minor = maj, min
+				continue
+			}
+			if m := regexp.MustCompile(`(\d+)\.(\d+)`).FindStringSubmatch(low); len(m) == 3 {
+				meta.Version = line
+				meta.Major, _ = strconv.Atoi(m[1])
+				meta.Minor, _ = strconv.Atoi(m[2])
+			}
+		}
+		setISOFamilyFromMajor(&meta)
+		return meta
 	}
+
+	first := strings.ToLower(firstRaw)
+	meta.Version = firstRaw
+	fillISOArchFromText(&meta, first)
 
 	re := regexp.MustCompile(`(\d+)\.(\d+)`)
 	if m := re.FindStringSubmatch(first); len(m) == 3 {
@@ -407,12 +457,27 @@ func ParseISOMetadataFromDiscinfo(content string) ISOMetadata {
 	} else if reM := regexp.MustCompile(`(?:release|linux)\s+(\d+)`); len(reM.FindStringSubmatch(first)) == 2 {
 		meta.Major, _ = strconv.Atoi(reM.FindStringSubmatch(first)[1])
 	}
+	setISOFamilyFromMajor(&meta)
+	return meta
+}
+
+func fillISOArchFromText(meta *ISOMetadata, low string) {
+	if meta.Arch != "" {
+		return
+	}
+	if strings.Contains(low, "aarch64") || strings.Contains(low, "arm64") {
+		meta.Arch = "aarch64"
+	} else if strings.Contains(low, "x86_64") || strings.Contains(low, "amd64") {
+		meta.Arch = "x86_64"
+	}
+}
+
+func setISOFamilyFromMajor(meta *ISOMetadata) {
 	if meta.Major >= 8 {
 		meta.Family = "rhel8"
 	} else if meta.Major == 7 {
 		meta.Family = "rhel7"
 	}
-	return meta
 }
 
 // ParseISOMetadataFromMediaRepo 解析 BaseOS/media.repo 中的 version 字段。
@@ -448,16 +513,30 @@ func parseVersionString(v string) (major, minor int) {
 	}
 	parts := strings.Split(v, ".")
 	if len(parts) > 0 {
-		if n, err := strconv.Atoi(strings.TrimSpace(parts[0])); err == nil {
+		if n, ok := atoiLeading(parts[0]); ok {
 			major = n
 		}
 	}
 	if len(parts) > 1 {
-		if n, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil {
+		if n, ok := atoiLeading(parts[1]); ok {
 			minor = n
 		}
 	}
 	return major, minor
+}
+
+// atoiLeading 解析前缀连续数字(如 "03-LTS-SP3" -> 3), 供 openEuler 等 version 后缀.
+func atoiLeading(s string) (int, bool) {
+	s = strings.TrimSpace(s)
+	i := 0
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+	if i == 0 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(s[:i])
+	return n, err == nil
 }
 
 // MergeISOMetadata 合并多来源元数据（后者补全前者空缺）。

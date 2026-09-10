@@ -17,7 +17,7 @@ func ResolveProductUserIDs(ctx *runner.StepContext, user, group string, defaultU
 		return 0, 0, fmt.Errorf("step context is nil")
 	}
 	if user == "" {
-		user = "mysql"
+		user = "yashan"
 	}
 	if group == "" {
 		group = user

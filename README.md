@@ -21,9 +21,9 @@
 | `collect` | 只读采集 OS/DB 环境并本地归档 | R- |
 | `stressos` | CPU/MEM/IO/NET 压测并归档 | S- |
 
-扩展能力（开发中/专项场景）：`mysql`、`mssql`（含 install / standby / mirror / ag 等子命令）。
-
 每个子命令支持 `yinstall <cmd> -l` 查看步骤目录；`yinstall <cmd> --help` 查看完整参数。
+
+MySQL / SQL Server / Windows OS 安装已拆至独立仓库 [`install`](../install)（二进制 `install`）。
 
 ---
 

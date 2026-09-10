@@ -69,22 +69,7 @@ func stepWriteSysctl() *runner.Step {
 				memKB, pageSize, useMaxRAM, dbPct, shmmax, shmall, shmmni)
 
 			var config string
-			if ctx.GetParamString("os_sysctl_profile", "") == "mysql" {
-				config = fmt.Sprintf(`# MySQL kernel parameters
-vm.swappiness = 1
-vm.dirty_ratio = 15
-vm.dirty_background_ratio = 5
-vm.dirty_expire_centisecs = 500
-vm.dirty_writeback_centisecs = 100
-net.core.somaxconn = 4096
-net.ipv4.ip_local_port_range = 10000 65000
-fs.file-max = 6815744
-kernel.shmall = %d
-kernel.shmmni = %d
-kernel.shmmax = %d
-`, shmall, shmmni, shmmax)
-			} else {
-				config = fmt.Sprintf(`# YashanDB kernel parameters
+			config = fmt.Sprintf(`# YashanDB kernel parameters
 vm.swappiness = 0
 vm.oom-kill = 0
 vm.zone_reclaim_mode = 0
@@ -104,7 +89,6 @@ vm.min_free_kbytes = 524288
 net.core.netdev_max_backlog = 30000
 net.core.netdev_budget = 600
 `, shmall, shmmni, shmmax)
-			}
 
 			osLogPhase(ctx, "op-start", fmt.Sprintf("file=%s shmmax=%d", configFile, shmmax))
 			if !ctx.IsForceStep() {

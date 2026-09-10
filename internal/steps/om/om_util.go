@@ -14,18 +14,12 @@ import (
 
 // YasomListenPort 由 DB begin-port 推导 yasom 监听端口 (begin-13)。
 func YasomListenPort(beginPort int) int {
-	if beginPort <= 13 {
-		return 0
-	}
-	return beginPort - 13
+	return commonos.YasomListenPort(beginPort)
 }
 
 // YasomAgentListenPort 由 begin-port 推导 yasagent 端口 (begin-12)。
 func YasomAgentListenPort(beginPort int) int {
-	if beginPort <= 12 {
-		return 0
-	}
-	return beginPort - 12
+	return commonos.YasomAgentListenPort(beginPort)
 }
 
 // YasomListenAddr 返回 ip:yasomPort。

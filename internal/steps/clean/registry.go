@@ -31,22 +31,9 @@ func GetDBCleanSteps() []*runner.Step {
 	})
 }
 
-// GetStepByID returns a step by its ID（YCM/YMP/MySQL 固定 ID，或 registry 动态步）。
+// GetStepByID returns a step by its ID（YCM/YMP 固定 ID，或 registry 动态步）。
 func GetStepByID(id string) *runner.Step {
-	if id == "CLEAN-MYSQL" {
-		return StepCleanMySQL()
-	}
 	for _, step := range GetAllSteps() {
-		if step.ID == id {
-			return step
-		}
-	}
-	for _, step := range GetMysqlCleanSteps() {
-		if step.ID == id {
-			return step
-		}
-	}
-	for _, step := range GetMssqlCleanSteps() {
 		if step.ID == id {
 			return step
 		}

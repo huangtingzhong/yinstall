@@ -400,6 +400,11 @@ func ExecuteSQLAsSysdbaInPDBCtx(ctx *runner.StepContext, osUser, envFile, cluste
 	return ExecuteSQL(ctx, cfg, sql)
 }
 
+// EscapeSQLString escapes single quotes for SQL string literals.
+func EscapeSQLString(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
+}
+
 // BuildYasqlTCPConnect builds user/pass@host:port/service for yasql -f script execution.
 func BuildYasqlTCPConnect(host, user, password string, port int, service string) string {
 	host = strings.TrimSpace(host)

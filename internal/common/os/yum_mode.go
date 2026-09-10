@@ -234,11 +234,11 @@ func (e *YumHTTPEndpoint) RootURL() string {
 	return root + strings.TrimSuffix(p, "/")
 }
 
-// BaseURLs 按目标 OS 生成 yum baseurl。
-// EL8+：DVD/yum.sh 布局 <root>/BaseOS/ 与 <root>/AppStream/；EL7：<root>/。
+// BaseURLs 按目标 OS 生成 yum baseurl（布局唯一看 DetectOSType 的 IsRHEL8）。
+// IsRHEL8：<root>/BaseOS/ + AppStream/；其余（IsRHEL7 / IsOpenEuler 等扁平）：<root>/。
 func (e *YumHTTPEndpoint) BaseURLs(osInfo *runner.OSInfo) (baseosURL, appstreamURL string, singleURL string) {
 	root := e.RootURL()
-	if IsRHEL8(osInfo) || (!IsRHEL7(osInfo) && ISOProfileFromOSInfo(osInfo).MajorVer >= 8) {
+	if IsRHEL8(osInfo) {
 		baseosURL = root + "/BaseOS/"
 		appstreamURL = root + "/AppStream/"
 		return baseosURL, appstreamURL, ""

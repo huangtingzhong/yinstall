@@ -6,17 +6,13 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	commonwin "github.com/yinstall/internal/common/win_os"
 	"github.com/yinstall/internal/runner"
 	"github.com/yinstall/internal/steps/clean"
 	collectsteps "github.com/yinstall/internal/steps/collect"
 	dbsteps "github.com/yinstall/internal/steps/db"
-	mysqlsteps "github.com/yinstall/internal/steps/mysql"
-	mysqlstandbysteps "github.com/yinstall/internal/steps/mysql_standby"
 	omsteps "github.com/yinstall/internal/steps/om"
 	ossteps "github.com/yinstall/internal/steps/os"
 	standbysteps "github.com/yinstall/internal/steps/standby"
-	winsteps "github.com/yinstall/internal/steps/win_os"
 	ycmsteps "github.com/yinstall/internal/steps/ycm"
 	ympsteps "github.com/yinstall/internal/steps/ymp"
 )
@@ -71,34 +67,6 @@ func PrintOSStepCatalog() {
 	fmt.Fprintln(os.Stdout, "Use global filters: -s/--include-steps, -e/--exclude-steps")
 	printStepSection("OS baseline steps", ossteps.GetAllSteps())
 	fmt.Fprintln(os.Stdout, "")
-}
-
-// PrintMySQLInstallStepCatalog prints yinstall mysql install steps.
-func PrintMySQLInstallStepCatalog(skipOS bool) {
-	fmt.Fprintln(os.Stdout, "yinstall mysql install - step catalog (typical execution order)")
-	if skipOS {
-		printStepSection("OS (only when --skip-os: connectivity)", osStepsB001Only())
-	} else {
-		printStepSection("Windows OS pre-instance (when target is Windows)", winsteps.GetPreInstanceSteps(commonwin.ProfileMySQL()))
-		printStepSection("OS baseline Linux (when target is Linux)", filterOSStepsForMySQL(ossteps.GetAllSteps()))
-		printStepSection("Windows OS post-instance (when target is Windows)", winsteps.GetPostInstanceSteps(commonwin.ProfileMySQL()))
-	}
-	printStepSection("MySQL installation", mysqlsteps.GetAllSteps())
-	fmt.Fprintln(os.Stdout, "")
-}
-
-// PrintMySQLStandbyStepCatalog prints MR-* standby steps.
-func PrintMySQLStandbyStepCatalog() {
-	fmt.Fprintln(os.Stdout, "yinstall mysql standby - step catalog")
-	printStepSection("MySQL standby (replication)", mysqlstandbysteps.GetAllSteps())
-	fmt.Fprintln(os.Stdout, "Semi-sync (MR-016) is off by default; use --enable-semi-sync to install and enable after replication.")
-	fmt.Fprintln(os.Stdout, "")
-}
-
-// PrintMySQLStepCatalog prints install + standby catalogs.
-func PrintMySQLStepCatalog(skipOS bool) {
-	PrintMySQLInstallStepCatalog(skipOS)
-	PrintMySQLStandbyStepCatalog()
 }
 
 // PrintDBStepCatalog 打印 yinstall db 的 steps（OS 前置 + DB + YAC 备 OM）。
@@ -198,7 +166,6 @@ func PrintCleanStepCatalog() {
 		clean.GetStepByID("CLEAN-YCM"),
 		clean.GetStepByID("CLEAN-YMP"),
 	})
-	printStepSection("MSSQL cleanup (--type mssql, hidden)", clean.GetMssqlCleanSteps())
 	fmt.Fprintln(os.Stdout, "Use -s/--include-steps (e.g. CLEAN-DB-003) to run a single DB cleanup phase; CLEAN-DB-002 detaches standby from cluster.")
 	fmt.Fprintln(os.Stdout, "")
 }

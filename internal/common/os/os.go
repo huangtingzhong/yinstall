@@ -77,6 +77,13 @@ func DetectOSType(osInfo *runner.OSInfo) {
 	if id == "uos" || strings.Contains(strings.ToLower(osInfo.Name), "uos") || strings.Contains(strings.ToLower(osInfo.Name), "uniontech") {
 		osInfo.IsUOS = true
 	}
+
+	// openEuler
+	if id == "openeuler" || strings.Contains(id, "euler") ||
+		strings.Contains(strings.ToLower(osInfo.Name), "openeuler") ||
+		strings.Contains(strings.ToLower(osInfo.Name), "euler") {
+		osInfo.IsOpenEuler = true
+	}
 }
 
 // detectPkgManager 检测包管理器
@@ -130,6 +137,14 @@ func IsKylin(osInfo *runner.OSInfo) bool {
 func IsUOS(osInfo *runner.OSInfo) bool {
 	if osInfo != nil {
 		return osInfo.IsUOS
+	}
+	return false
+}
+
+// IsOpenEuler 判断是否为 openEuler（由 DetectOSType 填充）
+func IsOpenEuler(osInfo *runner.OSInfo) bool {
+	if osInfo != nil {
+		return osInfo.IsOpenEuler
 	}
 	return false
 }

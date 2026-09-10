@@ -483,6 +483,7 @@ func ensureRepoFile(ctx *runner.StepContext, mountpoint, repoFile string) error 
 	ctx.LogPhase("repo-file-create-start", fmt.Sprintf("repo_file=%s", repoFile))
 
 	var repoContent string
+	// 与 HTTP BaseURLs / BuildInstallCmd 一致：仅 IsRHEL8 双仓，RHEL7/openEuler 扁平单仓
 	if IsRHEL8(ctx.OSInfo) {
 		repoContent = fmt.Sprintf(
 			"[local-baseos]\nname=DVD for RHEL - BaseOS\nbaseurl=file://%s/BaseOS\nenabled=1\ngpgcheck=0\n\n"+

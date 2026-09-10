@@ -61,10 +61,7 @@ type YACCeGenParams struct {
 
 // ReplicaPort 返回主备复制监听端口：单机 beginPort+1，YAC beginPort+2（与官方网络准备一致）。
 func ReplicaPort(beginPort int, yac bool) int {
-	if yac {
-		return beginPort + 2
-	}
-	return beginPort + 1
+	return commonos.ReplicaPort(beginPort, yac)
 }
 
 // AppendReplicaCIDRFlag 非空时在 gen 命令末尾追加 --replica-cidr（se/ce 共用）。

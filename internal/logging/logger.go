@@ -489,7 +489,7 @@ func (l *Logger) logCommandStream(prefix, label, s string) {
 }
 
 // LogCommandResult 在命令执行后记录结果到 debug 日志（每个字段独立一行）。
-// 用于未挂接流式回调的路径（如 WinRM）；已流式时请用 CommandStream.End。
+// 用于未挂接流式回调的路径（整包执行、无管道）；已流式时请用 CommandStream.End。
 func (l *Logger) LogCommandResult(host, stepID string, stdout, stderr string, exitCode int, duration time.Duration) {
 	stdout = strings.TrimRight(stdout, "\n")
 	stderr = strings.TrimRight(stderr, "\n")

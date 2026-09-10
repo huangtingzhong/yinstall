@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/yinstall/internal/runner"
 )
@@ -43,10 +44,11 @@ func localSoftwareDirExists(dir string) bool {
 //  1. 路径（含目录分隔符）：精确查找，先远程后本地，不做 baseName 拼目录搜索
 //  2. 纯文件名：在远程目标目录 → 远程 $HOME → 本地目录列表 依次搜索
 //
-// 跨平台说明（控制端可能是 Windows/Linux/macOS，目标端始终 Linux）：
+// 跨平台说明（控制端可能是 Windows/Linux/macOS，目标端可为 Linux 或 Windows）：
 //   - 本地文件查找使用 filepath（OS 原生路径分隔符）
 //   - 远程路径拼接统一使用 path（始终 '/'），避免 Windows 下生成反斜杠路径
-//   - filepath.IsAbs 在 Windows 上识别 C:\... 等盘符路径，在 Unix 上识别 /...
+//   - 远端精确路径：Linux 用 "/" 绝对路径；Windows 用盘符绝对路径（D:/...），
+//     判定不依赖控制端 GOOS（勿用 filepath.IsAbs 识别 Win 盘符）
 //   - strings.HasPrefix(filename, "/") 用于判断可能的远程 Linux 绝对路径
 func FindAndDistribute(
 	ctx *runner.StepContext,
@@ -67,7 +69,7 @@ func FindAndDistribute(
 	var localPath string
 
 	if hasDir {
-		if strings.HasPrefix(filename, "/") || (ctx.GetTargetPlatform() == "windows" && filepath.IsAbs(filename)) {
+		if IsRemoteExactPath(ctx.GetTargetPlatform(), filename) {
 			if FileExists(ctx, filename) {
 				return filename, nil
 			}
@@ -79,7 +81,7 @@ func FindAndDistribute(
 			}
 		}
 
-		if localPath == "" && !filepath.IsAbs(filename) && !strings.HasPrefix(filename, "/") {
+		if localPath == "" && !filepath.IsAbs(filename) && !strings.HasPrefix(filename, "/") && !IsWindowsAbsPath(filename) {
 			for _, dir := range localDirs {
 				candidate := filepath.Join(dir, filename)
 				if _, err := os.Stat(candidate); err == nil {
@@ -130,6 +132,30 @@ func FindAndDistribute(
 // DistributeSoftware 使用 StepContext 的 -L / -R 配置查找并分发软件包（纯文件名）。
 func DistributeSoftware(ctx *runner.StepContext, filename string) (string, error) {
 	return FindAndDistribute(ctx, filename, ctx.LocalSoftwareDirs, ctx.RemoteSoftwareDir)
+}
+
+// IsWindowsAbsPath 判断是否为 Windows 盘符绝对路径 (如 D:/data/app).
+// 反斜杠会规范化; 判定不依赖控制端 GOOS (与 filepath.IsAbs 不同).
+// 实现放在本包以避免 common/os <-> common/file 循环依赖; common/os 删除校验复用本函数.
+func IsWindowsAbsPath(p string) bool {
+	p = strings.ReplaceAll(strings.TrimSpace(p), `\`, `/`)
+	if len(p) < 3 || p[1] != ':' || p[2] != '/' {
+		return false
+	}
+	return unicode.IsLetter(rune(p[0]))
+}
+
+// IsRemoteExactPath reports whether filename is an absolute remote path for targetPlatform.
+// Linux/Unix: leading "/". Windows: drive-letter abs (D:/... or D:\...), independent of control-plane GOOS.
+func IsRemoteExactPath(targetPlatform, filename string) bool {
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		return false
+	}
+	if strings.HasPrefix(filename, "/") {
+		return true
+	}
+	return targetPlatform == "windows" && IsWindowsAbsPath(filename)
 }
 
 // distributeLocalFile 将已解析的本地文件分发到远端：先查 -R/$HOME，大小一致则复用，否则上传到 -R 或 $HOME。
@@ -195,7 +221,7 @@ func remoteFileNeedsReplace(ctx *runner.StepContext, remotePath, localPath strin
 // 故上传前补一次 sudo chown 到登录用户：id -un/id -gn 以非 sudo 解析，确保是真正执行 SFTP 的用户，
 // 而非 os_user 参数（多节点场景两者可能不同）。
 // best-effort：失败仅告警不中断——local 控制端 / Windows / root 登录等无需 chown 的场景不应回归。
-// 仅 Linux 生效（Windows 走 WinRM，权限模型不同）；不递归（无 -R），避免对 $HOME 误操作。
+// 仅 Linux 生效（Windows 权限模型不同）；不递归（无 -R），避免对 $HOME 误操作。
 func ensureUploadDirOwned(ctx *runner.StepContext, dir string) {
 	if isWindowsTarget(ctx) {
 		return

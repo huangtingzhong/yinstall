@@ -272,6 +272,10 @@ func buildOSYumISOParams() map[string]interface{} {
 }
 
 func buildOSParams(isYACMode bool, targetCount int) map[string]interface{} {
+	fwMode, err := commonos.NormalizeFirewallMode(osFirewallMode)
+	if err != nil {
+		fwMode = strings.TrimSpace(osFirewallMode)
+	}
 	params := map[string]interface{}{
 		"os_user":                    osUser,
 		"os_user_uid":                osUserUID,
@@ -295,7 +299,7 @@ func buildOSParams(isYACMode bool, targetCount int) map[string]interface{} {
 		"os_deps_tools_packages":     osToolsPkgs,
 		"os_ignore_install_errors":   osIgnoreInstallErrors,
 		"os_zstd_source_tarball":     osZstdSourceTarball,
-		"os_firewall_mode":           osFirewallMode,
+		"os_firewall_mode":           fwMode,
 		"os_firewall_ports":          osFirewallPorts,
 		"os_selinux_mode":            osSELinuxMode,
 		"yac_mode":                   isYACMode,
@@ -437,7 +441,7 @@ func (a *runnerExecAdapter) SetExecuteTimeout(d time.Duration) {
 	}
 }
 
-// SSHExecutor exposes the underlying transport for WinRM vs SSH detection.
+// SSHExecutor exposes the underlying transport for type assertions when needed.
 func (a *runnerExecAdapter) SSHExecutor() ssh.Executor {
 	if a == nil {
 		return nil

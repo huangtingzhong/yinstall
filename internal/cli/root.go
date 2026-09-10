@@ -139,8 +139,6 @@ func init() {
 	// 添加子命令
 	rootCmd.AddCommand(osCmd)
 	rootCmd.AddCommand(dbCmd)
-	rootCmd.AddCommand(mysqlCmd)
-	rootCmd.AddCommand(mssqlCmd)
 	rootCmd.AddCommand(standbyCmd)
 	rootCmd.AddCommand(omCmd)
 	rootCmd.AddCommand(ycmCmd)

@@ -219,7 +219,7 @@ func isLocalHost(host string) bool {
 type OutputLineHandler func(stream, line string)
 
 // BindOutputLineHandler 若 e 支持则挂接行回调；返回 clear 与是否挂接成功。
-// WinRM 等整包执行器返回 attached=false，调用方应事后写 LogCommandResult。
+// 整包执行器（无行回调）返回 attached=false，调用方应事后写 LogCommandResult。
 func BindOutputLineHandler(e Executor, h OutputLineHandler) (clear func(), attached bool) {
 	type setter interface {
 		SetOutputLineHandler(OutputLineHandler)

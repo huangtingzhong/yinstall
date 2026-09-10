@@ -7,8 +7,6 @@ import (
 
 const (
 	DefaultHostnamePrefixYashan = "yashandb"
-	DefaultHostnamePrefixMySQL  = "mysql"
-	DefaultHostnamePrefixSQL    = "sql"
 )
 
 // ParseHostnames splits comma-separated hostname values.

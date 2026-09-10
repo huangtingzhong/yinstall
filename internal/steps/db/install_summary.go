@@ -450,13 +450,8 @@ func printDBInstallSummary(ctx *runner.StepContext, hctx *runner.StepContext, st
 	if len(yasdbPIDs) == 0 {
 		_, yasdbPIDs = probeDBClusterProcess(hctx, clusterName, beginPort, "yasdb")
 	}
-	yasdbCount := len(yasdbPIDs)
-	if yasdbCount == 0 {
-		if v, ok := ctx.Results["yasdb_count"].(int); ok && v > 0 {
-			yasdbCount = v
-		}
-	}
-	serviceName, _ := commonos.DetermineServiceName(yasdbCount, beginPort)
+	// 与 C-033 一致: 按摘要主机本机 yasdb 数定 unit 名(勿用集群 PID 总数, YAC 会误探 yashan_monit_<port>)
+	serviceName, _ := commonos.DetermineServiceName(commonos.GetYasdbProcessCount(hctx), beginPort)
 
 	notice := func(msg string) {
 		ctx.Logger.ConsoleNotice(stepID, msg)

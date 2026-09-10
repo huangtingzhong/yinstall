@@ -13,7 +13,7 @@ import (
 // collectMissingDependencyPackages 返回尚未安装的 DB 依赖包名列表；YAC 模式下若 multipath 未装则返回其包名（单字符串）。
 func collectMissingDependencyPackages(ctx *runner.StepContext) (missingDB []string, missingMultipath string) {
 	pkgManager := commonos.GetPkgManager(ctx.OSInfo)
-	dbPackages := ctx.GetParamString("os_deps_db_packages", "libzstd zlib lz4 openssl openssl-devel libaio tar unzip")
+	dbPackages := resolveOSDepsDBPackages(ctx)
 	if dbPackages != "" {
 		missingDB = commonos.FilterUninstalledPackages(ctx, dbPackages, pkgManager)
 	}
@@ -24,6 +24,27 @@ func collectMissingDependencyPackages(ctx *runner.StepContext) (missingDB []stri
 		}
 	}
 	return
+}
+
+// resolveOSDepsDBPackages 读取 CLI 依赖列表；openEuler 源无 sshpass，自动去掉以免整批失败。
+func resolveOSDepsDBPackages(ctx *runner.StepContext) string {
+	raw := ctx.GetParamString("os_deps_db_packages", "libzstd zlib lz4 openssl openssl-devel libaio tar unzip")
+	if !commonos.IsOpenEuler(ctx.OSInfo) {
+		return raw
+	}
+	var keep []string
+	for _, p := range strings.Fields(raw) {
+		p = strings.TrimSpace(p)
+		if p == "" || strings.EqualFold(p, "sshpass") {
+			continue
+		}
+		keep = append(keep, p)
+	}
+	filtered := strings.Join(keep, " ")
+	if filtered != raw {
+		osLogPhase(ctx, "deps-filter-os", fmt.Sprintf("reason=openeuler_no_sshpass before=%q after=%q", raw, filtered))
+	}
+	return filtered
 }
 
 // areRequiredPackagesInstalled 判断是否已安装所需依赖包
@@ -232,7 +253,7 @@ func stepInstallDeps() *runner.Step {
 		Action: func(ctx *runner.StepContext) error {
 			osLogPhase(ctx, "plan", "B-015: Install Dependencies")
 
-			dbPackages := ctx.GetParamString("os_deps_db_packages", "libzstd zlib lz4 openssl openssl-devel libaio tar unzip")
+			dbPackages := resolveOSDepsDBPackages(ctx)
 			toolsPackages := ctx.GetParamString("os_deps_tools_packages", "")
 			ignoreErrors := ctx.GetParamBool("os_ignore_install_errors", false)
 			pkgManager := commonos.GetPkgManager(ctx.OSInfo)
@@ -263,7 +284,11 @@ func stepInstallDeps() *runner.Step {
 			// YAC 模式：安装 multipath 相关包
 			if isYACMode {
 				multipathPkg := getMultipathPackage(ctx.OSInfo)
-				osLogPhase(ctx, "multipath-check-start", fmt.Sprintf("package=%s", multipathPkg))
+				osID := ""
+				if ctx.OSInfo != nil {
+					osID = ctx.OSInfo.ID
+				}
+				osLogPhase(ctx, "multipath-check-start", fmt.Sprintf("package=%s os_id=%s", multipathPkg, osID))
 				if commonos.IsPackageInstalled(ctx, multipathPkg, pkgManager) {
 					osLogPhase(ctx, "multipath-skip", fmt.Sprintf("package=%s already_installed=true", multipathPkg))
 				} else {
@@ -317,7 +342,7 @@ func stepInstallDeps() *runner.Step {
 		PostCheck: func(ctx *runner.StepContext) error {
 			ignoreErrors := ctx.GetParamBool("os_ignore_install_errors", false)
 			pkgManager := commonos.GetPkgManager(ctx.OSInfo)
-			dbPackages := ctx.GetParamString("os_deps_db_packages", "libzstd zlib lz4 openssl openssl-devel libaio tar unzip")
+			dbPackages := resolveOSDepsDBPackages(ctx)
 			isYACMode := ctx.GetParamBool("yac_mode", false)
 
 			if dbPackages != "" {
@@ -377,10 +402,16 @@ func stepInstallDeps() *runner.Step {
 // - RHEL/CentOS/Oracle Linux/Rocky/Alma: device-mapper-multipath
 // - Debian/Ubuntu: multipath-tools
 // - SUSE/openSUSE: multipath-tools
+// - openEuler: multipath-tools（扁平 DVD 同名）
 // - Kylin/UOS: device-mapper-multipath (基于 RHEL)
 func getMultipathPackage(osInfo *runner.OSInfo) string {
 	if osInfo == nil {
 		return "device-mapper-multipath" // 默认
+	}
+
+	// openEuler DVD 包名为 multipath-tools（非 device-mapper-multipath）
+	if commonos.IsOpenEuler(osInfo) {
+		return "multipath-tools"
 	}
 
 	pkgManager := osInfo.PkgManager

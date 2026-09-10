@@ -264,3 +264,80 @@ func CIDRFromIP(ipStr string, prefixLen int) (string, error) {
 	}
 	return fmt.Sprintf("%s/%d", network.String(), prefixLen), nil
 }
+
+// 防火墙模式（--os-firewall-mode）
+const (
+	FirewallModeEnable  = "enable"
+	FirewallModeDisable = "disable"
+)
+
+// NormalizeFirewallMode 规范化防火墙模式：enable/disable；空与 keep/open-ports 映射为 enable。
+func NormalizeFirewallMode(s string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", FirewallModeEnable, "keep", "open-ports":
+		return FirewallModeEnable, nil
+	case FirewallModeDisable:
+		return FirewallModeDisable, nil
+	default:
+		return "", fmt.Errorf("invalid firewall mode %q (use enable or disable)", s)
+	}
+}
+
+// YasomListenPort 由 DB begin-port 推导 yasom 监听端口 (begin-13)。
+func YasomListenPort(beginPort int) int {
+	if beginPort <= 13 {
+		return 0
+	}
+	return beginPort - 13
+}
+
+// YasomAgentListenPort 由 begin-port 推导 yasagent 端口 (begin-12)。
+func YasomAgentListenPort(beginPort int) int {
+	if beginPort <= 12 {
+		return 0
+	}
+	return beginPort - 12
+}
+
+// ReplicaPort 返回主备复制监听端口：单机 beginPort+1，YAC beginPort+2（与官方网络准备一致）。
+func ReplicaPort(beginPort int, yac bool) int {
+	if yac {
+		return beginPort + 2
+	}
+	return beginPort + 1
+}
+
+// YashanFirewallTCPPorts 返回 enable 模式下自动放行的 TCP 端口集（begin/yasom/yasagent/复制口）。
+func YashanFirewallTCPPorts(beginPort int, yac bool) []int {
+	seen := make(map[int]struct{}, 4)
+	var out []int
+	add := func(p int) {
+		if p <= 0 {
+			return
+		}
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	add(beginPort)
+	add(YasomListenPort(beginPort))
+	add(YasomAgentListenPort(beginPort))
+	add(ReplicaPort(beginPort, yac))
+	return out
+}
+
+// TrustedSourcesContain 判断 firewalld trusted --list-sources 输出是否含指定 CIDR（字段精确匹配）。
+func TrustedSourcesContain(listStdout, cidr string) bool {
+	cidr = strings.TrimSpace(cidr)
+	if cidr == "" {
+		return false
+	}
+	for _, s := range strings.Fields(strings.TrimSpace(listStdout)) {
+		if s == cidr {
+			return true
+		}
+	}
+	return false
+}

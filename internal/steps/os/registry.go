@@ -73,7 +73,7 @@ func StepIDByName(name string) string {
 	return runner.StepIDByName(GetAllSteps(), name)
 }
 
-// StepSetHostname is exported for cross-package reuse (mysql write hosts).
+// StepSetHostname is exported for cross-package reuse (e.g. other domains writing hosts).
 func StepSetHostname() *runner.Step {
 	return stepSetHostname()
 }

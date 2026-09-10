@@ -15,16 +15,10 @@ import (
 	cleansteps "github.com/yinstall/internal/steps/clean"
 	collectsteps "github.com/yinstall/internal/steps/collect"
 	dbsteps "github.com/yinstall/internal/steps/db"
-	mssqlsteps "github.com/yinstall/internal/steps/mssql"
-	mssqlagsteps "github.com/yinstall/internal/steps/mssql_ag"
-	mssqlmirrorsteps "github.com/yinstall/internal/steps/mssql_mirror"
-	mysqlsteps "github.com/yinstall/internal/steps/mysql"
-	mysqlstandbysteps "github.com/yinstall/internal/steps/mysql_standby"
 	omsteps "github.com/yinstall/internal/steps/om"
 	ossteps "github.com/yinstall/internal/steps/os"
 	standbysteps "github.com/yinstall/internal/steps/standby"
 	stresssteps "github.com/yinstall/internal/steps/stressos"
-	winsteps "github.com/yinstall/internal/steps/win_os"
 	ycmsteps "github.com/yinstall/internal/steps/ycm"
 	ympsteps "github.com/yinstall/internal/steps/ymp"
 )
@@ -41,14 +35,8 @@ var domains = []domain{
 	{"om", omsteps.GetAllSteps},
 	{"ycm", ycmsteps.GetAllSteps},
 	{"ymp", ympsteps.GetAllSteps},
-	{"win_os", winsteps.GetAllSteps},
 	{"collect", collectsteps.GetAllSteps},
 	{"stressos", stresssteps.GetAllSteps},
-	{"mysql", mysqlsteps.GetAllSteps},
-	{"mysql_standby", mysqlstandbysteps.GetAllSteps},
-	{"mssql", mssqlsteps.GetAllSteps},
-	{"mssql_ag", mssqlagsteps.GetAGAddSteps},
-	{"mssql_mirror", mssqlmirrorsteps.GetMirrorAddSteps},
 	{"clean", cleansteps.GetAllSteps},
 }
 

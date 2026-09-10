@@ -289,7 +289,7 @@ func formatBytes(n int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
-// LogUploadStart records upload start (shared by SFTP/WinRM).
+// LogUploadStart records upload start (shared by SFTP and other transports).
 func LogUploadStart(uctx *UploadContext, host, localPath, remotePath string, size int64) {
 	logUploadStart(uctx, host, localPath, remotePath, size)
 }

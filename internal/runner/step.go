@@ -43,17 +43,18 @@ type Step struct {
 
 // OSInfo 操作系统信息
 type OSInfo struct {
-	Name       string // 操作系统名称，如 "Oracle Linux Server", "Red Hat Enterprise Linux", "Kylin"
-	Version    string // 版本号，如 "8.8", "7.9", "V10"
-	VersionID  string // 版本 ID，如 "8.8", "7.9"
-	ID         string // OS ID，如 "ol", "rhel", "kylin"
-	Kernel     string // 内核版本
-	Arch       string // CPU 架构，如 "x86_64", "aarch64"
-	IsRHEL7    bool   // 是否为 RHEL7 系列（包括 CentOS 7, OL 7）
-	IsRHEL8    bool   // 是否为 RHEL8 系列（包括 CentOS 8, OL 8, Rocky 8）
-	IsKylin    bool   // 是否为麒麟系统
-	IsUOS      bool   // 是否为统信 UOS
-	PkgManager string // 包管理器: yum, dnf, apt
+	Name        string // 操作系统名称，如 "Oracle Linux Server", "Red Hat Enterprise Linux", "Kylin"
+	Version     string // 版本号，如 "8.8", "7.9", "V10"
+	VersionID   string // 版本 ID，如 "8.8", "7.9"
+	ID          string // OS ID，如 "ol", "rhel", "kylin"
+	Kernel      string // 内核版本
+	Arch        string // CPU 架构，如 "x86_64", "aarch64"
+	IsRHEL7     bool   // 是否为 RHEL7 系列（包括 CentOS 7, OL 7）
+	IsRHEL8     bool   // 是否为 RHEL8 系列（包括 CentOS 8, OL 8, Rocky 8）
+	IsKylin     bool   // 是否为麒麟系统
+	IsUOS       bool   // 是否为统信 UOS
+	IsOpenEuler bool   // 是否为 openEuler
+	PkgManager  string // 包管理器: yum, dnf, apt
 }
 
 // TargetHost 表示一个目标节点，用于 YAC 等多节点场景下步骤自行决定在哪些节点执行
@@ -478,7 +479,7 @@ func underlyingSSHExecutor(exec Executor) ssh.Executor {
 }
 
 // BindCommandDebugStream 挂接 Executor 行回调；成功则流式写 debug，结束后用 stream.End。
-// 未挂接（如 WinRM）由 finish 事后写 LogCommandResult。供 Execute / collect / stressos 共用。
+// 未挂接流式回调时由 finish 事后写 LogCommandResult。供 Execute / collect / stressos 共用。
 func BindCommandDebugStream(exec Executor, logger *logging.Logger, host, stepID string) (
 	finish func(result ExecResult, err error, dur time.Duration),
 ) {
@@ -515,7 +516,7 @@ func BindCommandDebugStream(exec Executor, logger *logging.Logger, host, stepID 
 	}
 }
 
-// Execute 在上下文中执行命令并记录日志（SSH/Local 实时写 debug；WinRM 事后整包）。
+// Execute 在上下文中执行命令并记录日志（SSH/Local 实时写 debug；无流式时事后整包）。
 func (ctx *StepContext) Execute(cmd string, sudo bool) (ExecResult, error) {
 	host := ctx.Executor.Host()
 	stepID := ctx.CurrentStepID

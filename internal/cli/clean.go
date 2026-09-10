@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	commonmssql "github.com/yinstall/internal/common/mssql"
-	commonmysql "github.com/yinstall/internal/common/mysql"
 	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 	"github.com/yinstall/internal/ssh"
@@ -19,44 +17,27 @@ import (
 // NewCleanCommand 创建 clean 子命令。
 func NewCleanCommand() *cobra.Command {
 	var (
-		cleanType              string
-		yasdbHome              string
-		yasdbData              string
-		yasdbLog               string
-		clusterName            string
-		osUser                 string
-		ycmHome                string
-		ycmInstallDir          string
-		ympHome                string
-		ympUser                string
-		cleanYACDisks          string
-		cleanEnvFile           string
-		dbCleanAdminPassword   string
-		skipClusterDetach      bool
-		forceCleanPrimary      bool
-		dbCleanPrimaryIP       string
-		dbCleanPort            int
-		dbCleanStageDir        string
-		mysqlCleanPort         int
-		mysqlCleanBase         string
-		mysqlCleanPackage      string
-		mysqlCleanVersion      string
-		mysqlCleanStage        string
-		mssqlCleanPort         string
-		mssqlCleanDataRoot     string
-		mssqlCleanSQLDataDir   string
-		mssqlCleanSQLLogDir    string
-		mssqlCleanSQLBackupDir string
-		mssqlCleanProgramDir   string
-		mssqlCleanInstanceDir  string
-		mssqlCleanDatabase     string
-		mssqlCleanData         string
-		mssqlCleanLog          string
-		mssqlCleanBackup       string
-		mssqlCleanInstance     string
-		ycmCleanPort           int
-		ycmCleanServiceName    string
-		ympCleanPort           int
+		cleanType            string
+		yasdbHome            string
+		yasdbData            string
+		yasdbLog             string
+		clusterName          string
+		osUser               string
+		ycmHome              string
+		ycmInstallDir        string
+		ympHome              string
+		ympUser              string
+		cleanYACDisks        string
+		cleanEnvFile         string
+		dbCleanAdminPassword string
+		skipClusterDetach    bool
+		forceCleanPrimary    bool
+		dbCleanPrimaryIP     string
+		dbCleanPort          int
+		dbCleanStageDir      string
+		ycmCleanPort         int
+		ycmCleanServiceName  string
+		ympCleanPort         int
 	)
 
 	cmd := &cobra.Command{
@@ -84,9 +65,9 @@ Supported cleanup types:
 
 			// 校验并规范化清理类型
 			cleanType = strings.ToLower(cleanType)
-			if cleanType != "db" && cleanType != "ycm" && cleanType != "ymp" && cleanType != "mysql" && cleanType != "mssql" {
-				fmt.Fprintf(os.Stderr, "Error: invalid cleanup type: %s (must be db, ycm, ymp, mysql, or mssql)\n", cleanType)
-				return fmt.Errorf("invalid cleanup type: %s (must be db, ycm, ymp, mysql, or mssql)", cleanType)
+			if cleanType != "db" && cleanType != "ycm" && cleanType != "ymp" {
+				fmt.Fprintf(os.Stderr, "Error: invalid cleanup type: %s (must be db, ycm, or ymp)\n", cleanType)
+				return fmt.Errorf("invalid cleanup type: %s (must be db, ycm, or ymp)", cleanType)
 			}
 
 			if len(globalFlags.Targets) == 0 {
@@ -127,32 +108,6 @@ Supported cleanup types:
 				if err := validatePort("--ymp-port", ympCleanPort); err != nil {
 					return err
 				}
-			case "mysql":
-				if err := validatePort("--mysql-port", mysqlCleanPort); err != nil {
-					return err
-				}
-				if err := validateMysqlCleanStage(cleanType, mysqlCleanStage, cmd.Flags().Changed("stage")); err != nil {
-					return err
-				}
-				cleanStage, err := commonmysql.ParseStage(mysqlCleanStage)
-				if err != nil {
-					return err
-				}
-				if cleanStage == commonmysql.StageSoftware && strings.TrimSpace(mysqlCleanVersion) == "" && strings.TrimSpace(mysqlCleanPackage) == "" {
-					return fmt.Errorf("--mysql-version or --mysql-package is required when --stage is software")
-				}
-				applyMysqlPlatformDefaults(cmd, &globalFlags, &mysqlCleanBase)
-			case "mssql":
-				if _, err := commonmssql.NormalizePortParam(mssqlCleanPort); err != nil {
-					return err
-				}
-				if _, err := mssqlCleanStageFromFlag(cmd, mysqlCleanStage); err != nil {
-					return err
-				}
-				if err := applyMssqlLocalDefaults(&globalFlags); err != nil {
-					return err
-				}
-				applyMssqlRemoteSoftwareDefaults(cmd, &globalFlags)
 			}
 
 			if cleanType == "db" {
@@ -179,11 +134,7 @@ Supported cleanup types:
 			for _, target := range parsedTargets {
 				var exec ssh.Executor
 				var err error
-				if cleanType == "mssql" {
-					exec, err = createWindowsExecutor(target, globalFlags, logger, "")
-				} else {
-					exec, err = createExecutor(target, globalFlags, logger, "")
-				}
+				exec, err = createExecutor(target, globalFlags, logger, "")
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "Error: failed to create SSH executor for %s: %v\n", target, err)
 					return fmt.Errorf("failed to create SSH executor for %s: %w", target, err)
@@ -204,10 +155,6 @@ Supported cleanup types:
 				steps = []*runner.Step{clean.GetStepByID("CLEAN-YCM")}
 			case "ymp":
 				steps = []*runner.Step{clean.GetStepByID("CLEAN-YMP")}
-			case "mysql":
-				steps = clean.GetMysqlCleanSteps()
-			case "mssql":
-				steps = clean.GetMssqlCleanSteps()
 			}
 
 			steps = filterSteps(steps, globalFlags)
@@ -253,50 +200,6 @@ Supported cleanup types:
 				if strings.TrimSpace(cleanEnvFile) != "" {
 					params["clean_env_file"] = cleanEnvFile
 				}
-			}
-			if cleanType == "mysql" {
-				params["mysql_port"] = mysqlCleanPort
-				params["mysql_base"] = mysqlCleanBase
-				params["mysql_package"] = mysqlCleanPackage
-				params["mysql_version"] = mysqlCleanVersion
-				cleanStage, err := commonmysql.ParseStage(mysqlCleanStage)
-				if err != nil {
-					return err
-				}
-				params["mysql_stage"] = cleanStage
-				mysqlUser := osUser
-				if !cmd.Flags().Changed("os-user") {
-					mysqlUser = "mysql"
-				}
-				params["os_user"] = mysqlUser
-			}
-			if cleanType == "mssql" {
-				portParam, err := commonmssql.NormalizePortParam(mssqlCleanPort)
-				if err != nil {
-					return err
-				}
-				params["mssql_port"] = portParam
-				cleanDataRoot := mssqlFirstNonEmpty(mssqlCleanDataRoot, mssqlCleanDatabase)
-				cleanDataDir := mssqlFirstNonEmpty(mssqlCleanSQLDataDir, mssqlCleanData)
-				cleanLogDir := mssqlFirstNonEmpty(mssqlCleanSQLLogDir, mssqlCleanLog)
-				cleanBackupDir := mssqlFirstNonEmpty(mssqlCleanSQLBackupDir, mssqlCleanBackup)
-				params["mssql_data_root"] = cleanDataRoot
-				params["mssql_database"] = cleanDataRoot
-				params["mssql_data_dir"] = cleanDataDir
-				params["mssql_data"] = cleanDataDir
-				params["mssql_log_dir"] = cleanLogDir
-				params["mssql_log"] = cleanLogDir
-				params["mssql_backup_dir"] = cleanBackupDir
-				params["mssql_backup"] = cleanBackupDir
-				params["mssql_program_dir"] = strings.TrimSpace(mssqlCleanProgramDir)
-				params["mssql_instance_dir"] = strings.TrimSpace(mssqlCleanInstanceDir)
-				params["mssql_instance"] = mssqlCleanInstance
-				params["windows_transport"] = "auto"
-				cleanStage, err := mssqlCleanStageFromFlag(cmd, mysqlCleanStage)
-				if err != nil {
-					return err
-				}
-				params["mssql_stage"] = cleanStage
 			}
 
 			defer func() {
@@ -352,37 +255,6 @@ Supported cleanup types:
 	cmd.Flags().IntVar(&ympCleanPort, "ymp-port", 8090, "YMP web port: when not default (8090) and --ymp-home unchanged, infer /opt/ymp_<port>")
 	cmd.Flags().StringVar(&ympUser, "ymp-user", "ymp", "YMP user name (for YMP cleanup, default: ymp)")
 
-	cmd.Flags().IntVar(&mysqlCleanPort, "mysql-port", 3306, "MySQL port (for MySQL cleanup)")
-	cmd.Flags().StringVar(&mysqlCleanBase, "mysql-base", "/mysql/app/mysql", "MySQL base directory (for MySQL cleanup)")
-	cmd.Flags().StringVar(&mysqlCleanPackage, "mysql-package", "", "MySQL package path used to infer version for cleanup layout")
-	cmd.Flags().StringVar(&mysqlCleanVersion, "mysql-version", "", "MySQL version for cleanup layout (optional if --mysql-package set)")
-	cmd.Flags().StringVar(&mysqlCleanStage, "stage", commonmysql.DefaultCleanStage(), "Cleanup stage: mysql instance/i|software/s|all/a; mssql all/a|software/s (default all, keeps ISO under -R)")
-	for _, name := range []string{"mysql-port", "mysql-base", "mysql-package", "mysql-version", "stage"} {
-		if f := cmd.Flags().Lookup(name); f != nil {
-			f.Hidden = true
-		}
-	}
-	cmd.Flags().StringVar(&mssqlCleanPort, "mssql-port", commonmssql.PortAuto, "MSSQL port (auto or 1-65535; for MSSQL cleanup)")
-	cmd.Flags().StringVar(&mssqlCleanDataRoot, "mssql-data-root", "", "Database files root (for MSSQL cleanup)")
-	cmd.Flags().StringVar(&mssqlCleanSQLDataDir, "mssql-data-dir", "", "User database directory to clean")
-	cmd.Flags().StringVar(&mssqlCleanSQLLogDir, "mssql-log-dir", "", "Transaction log directory to clean")
-	cmd.Flags().StringVar(&mssqlCleanSQLBackupDir, "mssql-backup-dir", "", "Backup directory to clean")
-	cmd.Flags().StringVar(&mssqlCleanProgramDir, "mssql-program-dir", "", "SQL program root to clean")
-	cmd.Flags().StringVar(&mssqlCleanInstanceDir, "mssql-instance-dir", "", "SQL instance program directory to clean")
-	cmd.Flags().StringVar(&mssqlCleanDatabase, "database", "", "Deprecated: use --mssql-data-root")
-	cmd.Flags().StringVar(&mssqlCleanData, "data", "", "Deprecated: use --mssql-data-dir")
-	cmd.Flags().StringVar(&mssqlCleanLog, "log", "", "Deprecated: use --mssql-log-dir")
-	cmd.Flags().StringVar(&mssqlCleanBackup, "backup", "", "Deprecated: use --mssql-backup-dir")
-	cmd.Flags().StringVar(&mssqlCleanInstance, "mssql-instance", commonmssql.InstanceAuto, "MSSQL instance name (auto or name); auto discovers from registry (single instance) or by --mssql-port")
-	for _, name := range []string{
-		"mssql-port", "mssql-data-root", "mssql-data-dir", "mssql-log-dir", "mssql-backup-dir",
-		"mssql-program-dir", "mssql-instance-dir",
-		"database", "data", "log", "backup", "mssql-instance",
-	} {
-		if f := cmd.Flags().Lookup(name); f != nil {
-			f.Hidden = true
-		}
-	}
 	cmd.Example = `  # Clean YashanDB on multiple nodes (default type)
   yinstall clean --targets 10.10.10.125,10.10.10.126
 
@@ -404,9 +276,7 @@ Supported cleanup types:
 }
 
 func inferCleanTargetPlatform(cleanType string, flags GlobalFlags) string {
-	if cleanType == "mssql" {
-		return "windows"
-	}
+	_ = cleanType
 	return inferTargetPlatformFromFlags(flags)
 }
 
@@ -448,13 +318,5 @@ func applyCleanPathInference(cmd *cobra.Command, cleanType string,
 		if ympPort != 8090 && !cmd.Flags().Changed("ymp-home") {
 			*ympHome = fmt.Sprintf("/opt/ymp_%d", ympPort)
 		}
-		// mysql: base/home 与端口无关；data/other 由 ResolveLayout 写入 oradata/{port}/（见 common/mysql/mysql.go）
 	}
-}
-
-func mssqlCleanStageFromFlag(cmd *cobra.Command, raw string) (string, error) {
-	if !cmd.Flags().Changed("stage") {
-		raw = commonmssql.DefaultCleanStage()
-	}
-	return commonmssql.ParseStage(raw)
 }

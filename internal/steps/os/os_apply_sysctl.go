@@ -38,9 +38,6 @@ func stepApplySysctl() *runner.Step {
 
 		PostCheck: func(ctx *runner.StepContext) error {
 			want := "0"
-			if ctx.GetParamString("os_sysctl_profile", "") == "mysql" {
-				want = "1"
-			}
 			result, _ := ctx.Execute("sysctl -n vm.swappiness 2>/dev/null", false)
 			got := ""
 			if result != nil {

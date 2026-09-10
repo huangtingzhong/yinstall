@@ -4,16 +4,9 @@ import (
 	"fmt"
 	"path"
 	"strings"
-	"unicode"
-)
 
-// isWindowsAbsPath reports whether p is a Windows drive path (e.g. D:/mysql/app).
-func isWindowsAbsPath(p string) bool {
-	if len(p) < 3 || p[1] != ':' || p[2] != '/' {
-		return false
-	}
-	return unicode.IsLetter(rune(p[0]))
-}
+	commonfile "github.com/yinstall/internal/common/file"
+)
 
 func validateWindowsDeletePath(raw string) error {
 	if len(raw) == 3 { // D:/
@@ -31,7 +24,7 @@ func validateWindowsDeletePath(raw string) error {
 		}
 	}
 	if len(parts) < 2 {
-		return fmt.Errorf("path must be at least two levels deep (e.g. D:/mysql/app), got %q", raw)
+		return fmt.Errorf("path must be at least two levels deep (e.g. D:/data/app), got %q", raw)
 	}
 	return nil
 }
@@ -40,7 +33,7 @@ func validateWindowsDeletePath(raw string) error {
 // 不做安装根目录白名单；删除范围由调用方在 rm 前 test -d/-f 确认目标存在，以及业务层路径约束（如必须在 db_data_path 下）保证。
 //
 // 拒绝：空路径、根目录、相对路径、含 ".." 、shell/通配元字符、仅单段路径（如 /data、/tmp，避免误删整盘挂载点）。
-// Windows 绝对路径（如 D:/mysql/app/mysql）同样接受，至少两级目录深度。
+// Windows 绝对路径（如 D:/data/yashan/yasdb_home）同样接受，至少两级目录深度。
 func ValidateDeletePath(p string) error {
 	p = strings.TrimSpace(p)
 	if p == "" {
@@ -53,7 +46,7 @@ func ValidateDeletePath(p string) error {
 	if strings.ContainsAny(raw, "*?[{}$`|;&<>() \t\n\\'\"!#~") {
 		return fmt.Errorf("path must not contain shell or glob metacharacters")
 	}
-	if isWindowsAbsPath(raw) {
+	if commonfile.IsWindowsAbsPath(raw) {
 		return validateWindowsDeletePath(raw)
 	}
 	cleaned := path.Clean(raw)
@@ -85,7 +78,7 @@ func CleanDeletePath(p string) (string, error) {
 		return "", err
 	}
 	raw := strings.ReplaceAll(strings.TrimSpace(p), `\`, `/`)
-	if isWindowsAbsPath(raw) {
+	if commonfile.IsWindowsAbsPath(raw) {
 		return raw, nil
 	}
 	return path.Clean(raw), nil
@@ -96,7 +89,7 @@ func CleanDeletePath(p string) (string, error) {
 func DeletePathUnder(child, parent string) bool {
 	childRaw := strings.ReplaceAll(strings.TrimSpace(child), `\`, `/`)
 	parentRaw := strings.ReplaceAll(strings.TrimSpace(parent), `\`, `/`)
-	if isWindowsAbsPath(childRaw) && isWindowsAbsPath(parentRaw) {
+	if commonfile.IsWindowsAbsPath(childRaw) && commonfile.IsWindowsAbsPath(parentRaw) {
 		if strings.EqualFold(childRaw, parentRaw) {
 			return true
 		}

@@ -110,6 +110,7 @@ func FilterUninstalledPackages(ctx *runner.StepContext, packages, pkgManager str
 
 // BuildInstallCmd builds the install command based on package manager and yum mode.
 // yumMode: "" = system repos; YumModeLocal = local ISO repo; YumModeHTTP = custom HTTP repo.
+// isRHEL8：与 BaseURLs / ensureRepoFile 一致；仅 RHEL8 族双仓，openEuler/RHEL7 等单仓。
 func BuildInstallCmd(pkgManager, yumMode, packages string, isRHEL8 bool) string {
 	if IsLocalYumMode(yumMode) {
 		if isRHEL8 {
