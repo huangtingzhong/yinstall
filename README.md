@@ -61,7 +61,7 @@ chmod +x yinstall
    - `./pkg/`
    - 当前目录 `.`
    - `$HOME`、`~/Downloads/yashan`、`~/Downloads/oracle`（若存在）
-3. 一键安装（含 OS 基线 + 单机库；SYS 默认密码 `Yashan1!`）：
+3. 一键安装（含 OS 基线 + 单机库；默认产品用户 `yashan` 密码 `aaBB11@@33$$`，SYS 密码 `Yashan1!`）：
 
 ```bash
 ./yinstall db
