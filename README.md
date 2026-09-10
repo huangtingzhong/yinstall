@@ -86,10 +86,10 @@ chmod +x yinstall
 ./yinstall db -t 10.10.10.130 -u root -P 'your-ssh-password'
 ```
 
-已配好密钥时可省略 `-P`：
+已配好 SSH 免密时可省略 `-P`：
 
 ```bash
-./yinstall db -t 10.10.10.130 -u root --ssh-auth key
+./yinstall db -t 10.10.10.130 -u root
 ```
 
 YAC 双节点示例：
