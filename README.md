@@ -64,6 +64,24 @@ chmod +x yinstall
 
 默认：产品用户 `yashan` 密码 `aaBB11@@33$$`，SYS 密码 `Yashan1!`。步骤列表：`./yinstall db -l`；完整参数：`./yinstall db -h`。
 
+### 操作系统依赖源（yum / ISO）
+
+装 OS 基线时需要能装依赖包（`--skip-os` 时不用管）。任选其一：
+
+| 方式 | 说明 | 示例 |
+|------|------|------|
+| 系统源（默认） | 目标机已有可用 yum/dnf | `./yinstall db` |
+| HTTP yum | 指定内网/HTTP 仓库（建议带 ISO 目录名） | `--os-yum-mode=10.10.10.148:9090/OracleLinux-R8-U8-aarch64-dvd` |
+| 本地 ISO | 光驱或 ISO 文件 | `--os-yum-mode=local`（可选 `--os-iso-device=/path/to.iso`，默认 `auto`） |
+
+```bash
+# HTTP yum（远程示例）
+./yinstall db -t 10.10.10.130 -u root --os-yum-mode=10.10.10.148:9090/OracleLinux-R8-U8-aarch64-dvd
+
+# 本地 ISO
+./yinstall db --os-yum-mode=local
+```
+
 ### 本地安装
 
 在**待安装的 Linux 本机**上以 root（或具备 sudo 的用户）执行，无需 `-t`：
