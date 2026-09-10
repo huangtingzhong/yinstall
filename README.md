@@ -1,6 +1,6 @@
 # yinstall（yasinstaller）
 
-面向 YashanDB 生态的 **自动化安装与运维编排 CLI**。可在目标 Linux **本机直接安装**，也可从控制端（macOS/Linux）经 SSH 在远端执行 OS 基线、数据库安装、主备扩容、YCM/YMP 部署、环境清理、诊断采集与 OS 压测。
+面向 YashanDB 生态的 **自动化安装与运维编排 CLI**。可在目标 **Linux 本机**直接安装，也可从控制端（**Windows / macOS / Linux**）经 SSH 在远端 Linux 上执行 OS 基线、数据库安装、主备扩容、YCM/YMP 部署、环境清理、诊断采集与 OS 压测。目标机为 Linux；本仓库不覆盖 Windows 靶机上的 YashanDB 安装。
 
 **开源仓库**：[https://github.com/huangtingzhong/yinstall](https://github.com/huangtingzhong/yinstall)
 
@@ -80,7 +80,7 @@ chmod +x yinstall
 
 ### 远程安装
 
-在控制端（macOS/Linux）经 SSH 安装到目标机（安装包仍放在控制端上述目录，工具会上传）：
+在控制端（Windows / macOS / Linux）经 SSH 安装到 **Linux** 目标机（安装包仍放在控制端上述目录，工具会上传）：
 
 ```bash
 ./yinstall db -t 10.10.10.130 -u root -P 'your-ssh-password'
