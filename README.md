@@ -104,9 +104,9 @@ YAC 双节点示例：
 
 | 方式 | 说明 | 示例 |
 |------|------|------|
-| 系统源（默认） | 目标机已有可用 yum/dnf | `./yinstall db` |
-| HTTP yum | 指定内网/HTTP 仓库（建议带 ISO 目录名） | `--os-yum-mode=10.10.10.148:9090/OracleLinux-R8-U8-aarch64-dvd` |
-| 本地 ISO | 光驱或 ISO 文件 | `--os-yum-mode=local`（可选 `--os-iso-device=/path/to.iso`，默认 `auto`） |
+| 默认（空） | 先用系统 yum/dnf；装失败且能探测到匹配光驱/ISO 时自动回退 | `./yinstall db` |
+| HTTP yum | 指定内网/HTTP 仓库（建议带 ISO 目录名）；失败仍可回退本地介质 | `--os-yum-mode=10.10.10.148:9090/OracleLinux-R8-U8-aarch64-dvd` |
+| 本地 ISO | 强制只用光驱/ISO（`--os-iso-device` 默认 `auto`） | `--os-yum-mode=local` |
 
 ```bash
 # HTTP yum（远程示例）
