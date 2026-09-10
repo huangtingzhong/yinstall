@@ -53,15 +53,20 @@ chmod +x yinstall
 
 ## 快速开始
 
-在**待安装的 Linux 本机**上以 root（或具备 sudo 的用户）执行，无需 `-t` SSH。
+先从上方 [`build/`](https://github.com/huangtingzhong/yinstall/tree/main/build) 下载对应架构的 `yinstall`，`chmod +x`。
 
-1. 从上方 [`build/`](https://github.com/huangtingzhong/yinstall/tree/main/build) 下载对应架构的 `yinstall`，`chmod +x`。
-2. 将 YashanDB 安装包（如 `yashandb-*-linux-*.tar.gz`）放到下列任一目录（工具会自动找最新包）：
-   - `./software/`（推荐）
-   - `./pkg/`
-   - 当前目录 `.`
-   - `$HOME`、`~/Downloads/yashan`、`~/Downloads/oracle`（若存在）
-3. 一键安装（含 OS 基线 + 单机库；默认产品用户 `yashan` 密码 `aaBB11@@33$$`，SYS 密码 `Yashan1!`）：
+将 YashanDB 安装包（如 `yashandb-*-linux-*.tar.gz`）放到控制端下列任一目录（工具会自动找最新包）：
+
+- `./software/`（推荐）
+- `./pkg/`
+- 当前目录 `.`
+- `$HOME`、`~/Downloads/yashan`、`~/Downloads/oracle`（若存在）
+
+默认：产品用户 `yashan` 密码 `aaBB11@@33$$`，SYS 密码 `Yashan1!`。步骤列表：`./yinstall db -l`；完整参数：`./yinstall db -h`。
+
+### 本地安装
+
+在**待安装的 Linux 本机**上以 root（或具备 sudo 的用户）执行，无需 `-t`：
 
 ```bash
 ./yinstall db
@@ -73,7 +78,25 @@ chmod +x yinstall
 ./yinstall db --skip-os
 ```
 
-先看将执行的步骤：`./yinstall db -l`。完整参数：`./yinstall db -h`。
+### 远程安装
+
+在控制端（macOS/Linux）经 SSH 安装到目标机（安装包仍放在控制端上述目录，工具会上传）：
+
+```bash
+./yinstall db -t 10.10.10.130 -u root -P 'your-ssh-password'
+```
+
+已配好密钥时可省略 `-P`：
+
+```bash
+./yinstall db -t 10.10.10.130 -u root --ssh-auth key
+```
+
+YAC 双节点示例：
+
+```bash
+./yinstall db -t 10.10.10.125,10.10.10.126 -u root -P 'your-ssh-password' --yac
+```
 
 ---
 
