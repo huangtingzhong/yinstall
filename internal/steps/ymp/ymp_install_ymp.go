@@ -51,10 +51,7 @@ func stepInstallYmp() *runner.Step {
 			dbPackage := ctx.GetParamString("ymp_db_package", "")
 			if dbPackage == "" {
 				ctx.Logger.Info("ymp_db_package not specified, searching for latest YashanDB package...")
-				remoteDir := ctx.RemoteSoftwareDir
-				if remoteDir == "" {
-					remoteDir = "/data/yashan/soft"
-				}
+				remoteDir := commonos.EffectiveRemoteSoftwareDir(ctx)
 				latestPkg, err := commonfile.FindLatestDBPackage(ctx, ctx.LocalSoftwareDirs, remoteDir)
 				if err != nil {
 					return fmt.Errorf("ymp_db_package not specified and auto-search failed: %w", err)
@@ -127,7 +124,7 @@ func stepInstallYmp() *runner.Step {
 				ctx,
 				dbPackage,
 				ctx.LocalSoftwareDirs,
-				ctx.RemoteSoftwareDir,
+				commonos.EffectiveRemoteSoftwareDir(ctx),
 			)
 			if err != nil {
 				return fmt.Errorf("DB package not found: %w", err)

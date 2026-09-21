@@ -154,7 +154,7 @@ func resolveScriptPath(ctx *runner.StepContext, scriptPath string) (string, erro
 			ctx,
 			localPath,
 			ctx.LocalSoftwareDirs,
-			ctx.RemoteSoftwareDir,
+			commonos.EffectiveRemoteSoftwareDir(ctx),
 		)
 		if err != nil {
 			return "", fmt.Errorf("failed to upload local file: %w", err)
@@ -175,7 +175,7 @@ func resolveScriptPath(ctx *runner.StepContext, scriptPath string) (string, erro
 			ctx,
 			scriptPath,
 			ctx.LocalSoftwareDirs,
-			ctx.RemoteSoftwareDir,
+			commonos.EffectiveRemoteSoftwareDir(ctx),
 		)
 		if err != nil {
 			return "", fmt.Errorf("file not found on remote or local: %s", scriptPath)
@@ -191,7 +191,7 @@ func resolveScriptPath(ctx *runner.StepContext, scriptPath string) (string, erro
 			ctx,
 			scriptPath,
 			ctx.LocalSoftwareDirs,
-			ctx.RemoteSoftwareDir,
+			commonos.EffectiveRemoteSoftwareDir(ctx),
 		)
 		if err != nil {
 			return "", fmt.Errorf("failed to upload local file: %w", err)
@@ -206,7 +206,7 @@ func resolveScriptPath(ctx *runner.StepContext, scriptPath string) (string, erro
 		ctx,
 		scriptPath,
 		ctx.LocalSoftwareDirs,
-		ctx.RemoteSoftwareDir,
+		commonos.EffectiveRemoteSoftwareDir(ctx),
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to find and upload SQL script: %w", err)

@@ -66,7 +66,7 @@ func stepInstallJdk() *runner.Step {
 					ctx,
 					jdkPackage,
 					ctx.LocalSoftwareDirs,
-					ctx.RemoteSoftwareDir,
+					commonos.EffectiveRemoteSoftwareDir(ctx),
 				)
 				if err != nil {
 					return fmt.Errorf("JDK package not found: %w", err)

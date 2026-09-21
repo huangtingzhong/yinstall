@@ -78,7 +78,7 @@ func newStandbyStepContext(ex runner.Executor, logger *logging.Logger, params ma
 		Precheck:          flags.Precheck,
 		Results:           make(map[string]interface{}),
 		LocalSoftwareDirs: flags.LocalSoftwareDirs,
-		RemoteSoftwareDir: flags.RemoteSoftwareDir,
+		RemoteSoftwareDir: stepRemoteSoftwareDir(flags, params),
 		ForceAll:          flags.ForceAll,
 		ForceSteps:        flags.ForceSteps,
 		ForceDeleteUser:   flags.ForceDeleteUser,

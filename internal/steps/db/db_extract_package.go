@@ -26,10 +26,7 @@ func stepExtractPackage() *runner.Step {
 			if pkgPath == "" {
 				// 尝试自动查找最新版本的数据库软件包
 				ctx.Logger.Info("db_package not specified, searching for latest yashandb package...")
-				remoteDir := ctx.RemoteSoftwareDir
-				if remoteDir == "" {
-					remoteDir = "/data/yashan/soft"
-				}
+				remoteDir := commonos.EffectiveRemoteSoftwareDir(ctx)
 
 				latestPkg, err := file.FindLatestDBPackage(ctx, ctx.LocalSoftwareDirs, remoteDir)
 				if err != nil {
@@ -58,10 +55,7 @@ func stepExtractPackage() *runner.Step {
 			stageDir := ctx.GetParamString("db_stage_dir", "/home/yashan/install")
 			user := ctx.GetParamString("os_user", "yashan")
 			group := ctx.GetParamString("os_group", "yashan")
-			remoteDir := ctx.RemoteSoftwareDir
-			if remoteDir == "" {
-				remoteDir = "/data/yashan/soft"
-			}
+			remoteDir := commonos.EffectiveRemoteSoftwareDir(ctx)
 
 			// 只在首节点（ctx.Executor）执行解压
 			ctx.Logger.Info("Extracting package on first node: %s", ctx.Executor.Host())

@@ -12,7 +12,10 @@ import (
 // DefaultOSTimezone Linux IANA 默认时区（--os-timezone 为空时使用）。
 const DefaultOSTimezone = "Asia/Shanghai"
 
-var reYashanTimeZoneOffset = regexp.MustCompile(`^([+-])(0[0-9]|1[0-5]):([0-5][0-9])$`)
+var (
+	reYashanTimeZoneOffset    = regexp.MustCompile(`^([+-])(0[0-9]|1[0-5]):([0-5][0-9])$`)
+	reTimedatectlTimeZoneLine = regexp.MustCompile(`(?i)time\s*zone:\s*(\S+)`)
+)
 
 // ResolveOSTimezone 解析 OS 时区 CLI；空则 DefaultOSTimezone。
 func ResolveOSTimezone(raw string) string {
@@ -64,21 +67,40 @@ func IANAToYashanTimeZone(iana string) (string, error) {
 	return fmt.Sprintf("%s%02d:%02d", sign, hours, mins), nil
 }
 
-// ReadHostIANATimezone 读取目标机 timedatectl 报告的 IANA 时区（无 fallback；失败时由调用方要求用户设置 --db-timezone）。
+// ParseTimedatectlTimezoneOutput 从 timedatectl status 行解析 IANA 时区（EL7/EL8 通用 "Time zone: ..."）。
+func ParseTimedatectlTimezoneOutput(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("timedatectl timezone output is empty")
+	}
+	if m := reTimedatectlTimeZoneLine.FindStringSubmatch(raw); len(m) == 2 {
+		tz := strings.TrimSuffix(strings.TrimSpace(m[1]), "(")
+		tz = strings.TrimSpace(tz)
+		if tz == "" {
+			return "", fmt.Errorf("timedatectl timezone name is empty")
+		}
+		return tz, nil
+	}
+	// 兼容仅输出裸 IANA 的情况
+	if !strings.Contains(raw, " ") && !strings.Contains(raw, ":") {
+		return raw, nil
+	}
+	return "", fmt.Errorf("cannot parse timedatectl timezone from %q", raw)
+}
+
+// ReadHostIANATimezone 读取目标机 IANA 时区（统一用 timedatectl status 行；兼容 EL7 systemd 219，无版本分支）。
+// 失败时由调用方要求用户设置 --db-timezone。
 func ReadHostIANATimezone(ctx *runner.StepContext) (string, error) {
 	if ctx == nil {
 		return "", fmt.Errorf("step context is nil")
 	}
-	result, err := ctx.Execute("timedatectl show --property=Timezone --value 2>/dev/null", false)
+	// EL7/EL8 均输出 "Time zone: <IANA> (...)"；不使用需 systemd>=239 的 show --value。
+	result, err := ctx.Execute("timedatectl 2>/dev/null | grep -F 'Time zone'", false)
 	if err != nil {
 		return "", fmt.Errorf("read host timezone: %w", err)
 	}
 	if result == nil || result.GetExitCode() != 0 {
 		return "", fmt.Errorf("timedatectl timezone query failed")
 	}
-	tz := strings.TrimSpace(result.GetStdout())
-	if tz == "" {
-		return "", fmt.Errorf("timedatectl returned empty timezone")
-	}
-	return tz, nil
+	return ParseTimedatectlTimezoneOutput(result.GetStdout())
 }

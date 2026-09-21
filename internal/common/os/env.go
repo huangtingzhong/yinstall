@@ -84,6 +84,77 @@ func ConventionUserHome(user string) string {
 	return fmt.Sprintf("/home/%s", user)
 }
 
+// remoteSoftwareSubdir 远程软件目录在用户家目录下的子路径名（勿写死整路径）。
+const remoteSoftwareSubdir = "soft"
+
+// DefaultRemoteSoftwareDirUnderHome 返回 <home>/soft。
+func DefaultRemoteSoftwareDirUnderHome(homeDir string) string {
+	homeDir = strings.TrimSpace(homeDir)
+	if homeDir == "" {
+		return ""
+	}
+	return path.Join(homeDir, remoteSoftwareSubdir)
+}
+
+// ConventionRemoteSoftwareDir CLI/未建连占位：<ConventionUserHome>/soft。
+func ConventionRemoteSoftwareDir(user string) string {
+	return DefaultRemoteSoftwareDirUnderHome(ConventionUserHome(user))
+}
+
+// IsConventionRemoteSoftwareDir 判断路径是否仍为占位 <home>/soft。
+func IsConventionRemoteSoftwareDir(dir, user string) bool {
+	return strings.TrimSpace(dir) == ConventionRemoteSoftwareDir(user)
+}
+
+// ResolveRemoteSoftwareDirExplicit 显式 -R 优先，否则 ConventionRemoteSoftwareDir(user)。
+func ResolveRemoteSoftwareDirExplicit(explicit, user string) string {
+	if s := strings.TrimSpace(explicit); s != "" {
+		return s
+	}
+	return ConventionRemoteSoftwareDir(user)
+}
+
+// ProductUserFromCtx 从步骤 Params 解析产品用户（os_user → primary_os_user → ymp_user）。
+func ProductUserFromCtx(ctx *runner.StepContext) string {
+	if ctx == nil {
+		return "yashan"
+	}
+	if u := strings.TrimSpace(ctx.GetParamString("os_user", "")); u != "" {
+		return u
+	}
+	if u := strings.TrimSpace(ctx.GetParamString("primary_os_user", "")); u != "" {
+		return u
+	}
+	if u := strings.TrimSpace(ctx.GetParamString("ymp_user", "")); u != "" {
+		return u
+	}
+	return "yashan"
+}
+
+// EffectiveRemoteSoftwareDir 解析远端软件目录：非占位显式路径优先；空或占位则 getent 家目录+/soft，失败回退 Convention。
+func EffectiveRemoteSoftwareDir(ctx *runner.StepContext) string {
+	user := ProductUserFromCtx(ctx)
+	explicit := ""
+	if ctx != nil {
+		explicit = strings.TrimSpace(ctx.RemoteSoftwareDir)
+	}
+	if explicit != "" && !IsConventionRemoteSoftwareDir(explicit, user) {
+		return explicit
+	}
+	if ctx != nil && ctx.Executor != nil {
+		if home, err := GetUserHomeDir(ctx, user); err == nil {
+			if resolved := DefaultRemoteSoftwareDirUnderHome(home); resolved != "" {
+				ctx.RemoteSoftwareDir = resolved
+				return resolved
+			}
+		}
+	}
+	if explicit != "" {
+		return explicit
+	}
+	return ConventionRemoteSoftwareDir(user)
+}
+
 // DefaultStageDirUnderHome 返回 <home>/install 或 <home>/install_<port>。
 func DefaultStageDirUnderHome(homeDir string, port int) string {
 	if port == 0 {

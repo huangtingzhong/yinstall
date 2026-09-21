@@ -8,7 +8,7 @@
 //  a. 依次探测 /dev/cdrom、/dev/sr0：临时挂载并读取 .treeinfo/.discinfo，版本/架构与目标 OS 一致则直接使用
 //  b. 指定块设备路径：同上版本校验
 //  c. 指定文件名 → FindAndDistribute；找不到或版本不一致则回退智能搜索
-//  d. 在 remoteDir / $HOME / /data/yashan/soft / localDirs 中按 OS profile 选择最佳 *.iso
+//  d. 在 EffectiveRemoteSoftwareDir / SSH $HOME / localDirs 中按 OS profile 选择最佳 *.iso
 
 package os
 
@@ -209,7 +209,7 @@ func resolveISOPath(ctx *runner.StepContext, device string, profile ISOProfile) 
 	}
 
 	ctx.LogPhase("iso-search-file", fmt.Sprintf("filename=%s", device))
-	isoPath, err := commonfile.FindAndDistribute(ctx, device, ctx.LocalSoftwareDirs, ctx.RemoteSoftwareDir)
+	isoPath, err := commonfile.FindAndDistribute(ctx, device, ctx.LocalSoftwareDirs, EffectiveRemoteSoftwareDir(ctx))
 	if err == nil {
 		if matched, err := validateISOFileMatchesProfile(ctx, isoPath, profile); err != nil {
 			return "", err
@@ -375,7 +375,7 @@ func resolveISOFileForProfile(ctx *runner.StepContext, profile ISOProfile, exclu
 			if c.remotePath != "" {
 				chosenPath = c.remotePath
 			} else {
-				uploaded, err := commonfile.FindAndDistribute(ctx, bestName, ctx.LocalSoftwareDirs, ctx.RemoteSoftwareDir)
+				uploaded, err := commonfile.FindAndDistribute(ctx, bestName, ctx.LocalSoftwareDirs, EffectiveRemoteSoftwareDir(ctx))
 				if err != nil {
 					return "", fmt.Errorf("failed to distribute selected ISO %s: %w", bestName, err)
 				}
@@ -452,25 +452,20 @@ func deviceHasMedia(ctx *runner.StepContext, device string) bool {
 }
 
 func remoteISOSearchDirs(ctx *runner.StepContext) []string {
-	remoteDir := ctx.RemoteSoftwareDir
+	remoteDir := EffectiveRemoteSoftwareDir(ctx)
 
 	homeDir := "/root"
 	if r, _ := ctx.Execute("echo $HOME", false); r != nil && strings.TrimSpace(r.GetStdout()) != "" {
 		homeDir = strings.TrimSpace(r.GetStdout())
 	}
 
-	const defaultSoftDir = "/data/yashan/soft"
 	if remoteDir != "" {
-		if remoteDir == homeDir || remoteDir == defaultSoftDir {
+		if remoteDir == homeDir {
 			return []string{remoteDir}
 		}
-		return []string{remoteDir, homeDir, defaultSoftDir}
+		return []string{remoteDir, homeDir}
 	}
-
-	if homeDir == defaultSoftDir {
-		return []string{homeDir}
-	}
-	return []string{homeDir, defaultSoftDir}
+	return []string{homeDir}
 }
 
 func ensureRepoFile(ctx *runner.StepContext, mountpoint, repoFile string) error {

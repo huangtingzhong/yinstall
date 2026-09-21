@@ -69,7 +69,7 @@ func isoTestCtx(t *testing.T, exec *isoStubExecutor, params map[string]interface
 		Results:           map[string]interface{}{},
 		OSInfo:            osInfo,
 		LocalSoftwareDirs: nil,
-		RemoteSoftwareDir: "/data/yashan/soft",
+		RemoteSoftwareDir: ConventionRemoteSoftwareDir("yashan"),
 	}
 }
 
@@ -165,7 +165,7 @@ func TestEnsureLocalISORepo_autoUsesMatchingBlockDevice(t *testing.T) {
 }
 
 func TestResolveISOPath_autoFallsBackToRemoteISO(t *testing.T) {
-	remoteISO := "/data/yashan/soft/OracleLinux-R8-U8-aarch64-dvd.iso"
+	remoteISO := ConventionRemoteSoftwareDir("yashan") + "/OracleLinux-R8-U8-aarch64-dvd.iso"
 	exec := &isoStubExecutor{
 		handler: func(cmd string) *isoStubResult {
 			switch {
@@ -173,7 +173,7 @@ func TestResolveISOPath_autoFallsBackToRemoteISO(t *testing.T) {
 				return &isoStubResult{exit: 1}
 			case cmd == "echo $HOME":
 				return &isoStubResult{stdout: "/root", exit: 0}
-			case strings.Contains(cmd, "ls -1 /data/yashan/soft/*.iso"):
+			case strings.Contains(cmd, "ls -1 "+ConventionRemoteSoftwareDir("yashan")+"/*.iso"):
 				return &isoStubResult{stdout: remoteISO, exit: 0}
 			case strings.Contains(cmd, "mount -o loop "+remoteISO+" "+ISOProbeMountpoint):
 				return &isoStubResult{exit: 0}
@@ -199,7 +199,7 @@ func TestResolveISOPath_autoFallsBackToRemoteISO(t *testing.T) {
 }
 
 func TestResolveISOPath_blockDeviceMismatchFallsBack(t *testing.T) {
-	remoteISO := "/data/yashan/soft/OracleLinux-R8-U8-aarch64-dvd.iso"
+	remoteISO := ConventionRemoteSoftwareDir("yashan") + "/OracleLinux-R8-U8-aarch64-dvd.iso"
 	lastLoopISO := ""
 	exec := &isoStubExecutor{
 		handler: func(cmd string) *isoStubResult {
@@ -223,7 +223,7 @@ func TestResolveISOPath_blockDeviceMismatchFallsBack(t *testing.T) {
 				return &isoStubResult{exit: 0}
 			case cmd == "echo $HOME":
 				return &isoStubResult{stdout: "/root", exit: 0}
-			case strings.Contains(cmd, "ls -1 /data/yashan/soft/*.iso"):
+			case strings.Contains(cmd, "ls -1 "+ConventionRemoteSoftwareDir("yashan")+"/*.iso"):
 				return &isoStubResult{stdout: remoteISO, exit: 0}
 			default:
 				return &isoStubResult{exit: 0}
@@ -275,7 +275,7 @@ func TestRemoteISOSearchDirs(t *testing.T) {
 	ctx.RemoteSoftwareDir = "/opt/soft"
 
 	dirs := remoteISOSearchDirs(ctx)
-	if len(dirs) != 3 || dirs[0] != "/opt/soft" || dirs[1] != "/home/yashan" || dirs[2] != "/data/yashan/soft" {
+	if len(dirs) != 2 || dirs[0] != "/opt/soft" || dirs[1] != "/home/yashan" {
 		t.Fatalf("unexpected dirs: %v", dirs)
 	}
 }
@@ -381,8 +381,8 @@ func TestListISOCandidates_localAndRemote(t *testing.T) {
 			switch {
 			case cmd == "echo $HOME":
 				return &isoStubResult{stdout: "/root", exit: 0}
-			case strings.Contains(cmd, "ls -1 /data/yashan/soft/*.iso"):
-				return &isoStubResult{stdout: "/data/yashan/soft/CentOS-7-x86_64-DVD.iso", exit: 0}
+			case strings.Contains(cmd, "ls -1 "+ConventionRemoteSoftwareDir("yashan")+"/*.iso"):
+				return &isoStubResult{stdout: ConventionRemoteSoftwareDir("yashan") + "/CentOS-7-x86_64-DVD.iso", exit: 0}
 			default:
 				return &isoStubResult{exit: 0}
 			}
@@ -410,7 +410,7 @@ func TestResolveISOFileForProfile_usesLocalFindAndDistribute(t *testing.T) {
 	if err := os.WriteFile(localISO, []byte("fake"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	wantRemote := "/data/yashan/soft/" + isoName
+	wantRemote := ConventionRemoteSoftwareDir("yashan") + "/" + isoName
 	uploaded := false
 
 	inner := &isoStubExecutor{}
@@ -531,7 +531,7 @@ func TestEnsureLocalISORepoBeforeInstall_delegates(t *testing.T) {
 }
 
 func TestResolveISOPath_specifiedRemoteFileMatches(t *testing.T) {
-	remoteISO := "/data/yashan/soft/OracleLinux-R8-U8-aarch64-dvd.iso"
+	remoteISO := ConventionRemoteSoftwareDir("yashan") + "/OracleLinux-R8-U8-aarch64-dvd.iso"
 	exec := &isoStubExecutor{
 		handler: func(cmd string) *isoStubResult {
 			switch {
@@ -619,7 +619,7 @@ func TestEnsureLocalISORepo_mountFailure(t *testing.T) {
 }
 
 func TestFilepathBase(t *testing.T) {
-	if filepathBase("/data/yashan/soft/a.iso") != "a.iso" {
+	if filepathBase(ConventionRemoteSoftwareDir("yashan")+"/a.iso") != "a.iso" {
 		t.Fatal("unix path base failed")
 	}
 	if filepathBase(`C:\soft\b.iso`) != "b.iso" {
@@ -628,7 +628,7 @@ func TestFilepathBase(t *testing.T) {
 }
 
 func TestValidateISOFileMatchesProfile(t *testing.T) {
-	isoPath := "/data/yashan/soft/test.iso"
+	isoPath := ConventionRemoteSoftwareDir("yashan") + "/test.iso"
 	exec := &isoStubExecutor{
 		handler: func(cmd string) *isoStubResult {
 			switch {
@@ -651,8 +651,8 @@ func TestValidateISOFileMatchesProfile(t *testing.T) {
 }
 
 func TestResolveISOPath_specifiedFileMismatchSearchesAlternatives(t *testing.T) {
-	wrongISO := "/data/yashan/soft/OracleLinux-R8-U8-x86_64-dvd.iso"
-	goodISO := "/data/yashan/soft/OracleLinux-R8-U8-aarch64-dvd.iso"
+	wrongISO := ConventionRemoteSoftwareDir("yashan") + "/OracleLinux-R8-U8-x86_64-dvd.iso"
+	goodISO := ConventionRemoteSoftwareDir("yashan") + "/OracleLinux-R8-U8-aarch64-dvd.iso"
 	lastLoopISO := ""
 	exec := &isoStubExecutor{
 		handler: func(cmd string) *isoStubResult {
@@ -674,7 +674,7 @@ func TestResolveISOPath_specifiedFileMismatchSearchesAlternatives(t *testing.T) 
 				return &isoStubResult{stdout: "[general]\nversion = 8.8\narch = x86_64\n", exit: 0}
 			case cmd == "echo $HOME":
 				return &isoStubResult{stdout: "/root", exit: 0}
-			case strings.Contains(cmd, "ls -1 /data/yashan/soft/*.iso"):
+			case strings.Contains(cmd, "ls -1 "+ConventionRemoteSoftwareDir("yashan")+"/*.iso"):
 				return &isoStubResult{stdout: wrongISO + "\n" + goodISO, exit: 0}
 			case strings.Contains(cmd, "umount"):
 				return &isoStubResult{exit: 0}

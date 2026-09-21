@@ -642,7 +642,7 @@ func s03VerifyFIOEngines(ctx *runner.StepContext) (missing []string, err error) 
 // s03DistributeSourcePackage 将源码包分发到远端（-R 优先，否则 $HOME）：先查找，必要时上传。
 func s03DistributeSourcePackage(ctx *runner.StepContext, localSrcPath string) (string, error) {
 	name := filepath.Base(localSrcPath)
-	remotePath, err := commonfile.FindAndDistribute(ctx, name, ctx.LocalSoftwareDirs, ctx.RemoteSoftwareDir)
+	remotePath, err := commonfile.FindAndDistribute(ctx, name, ctx.LocalSoftwareDirs, commonos.EffectiveRemoteSoftwareDir(ctx))
 	if err != nil {
 		return "", err
 	}

@@ -8,6 +8,7 @@ import (
 	"path"
 
 	commonfile "github.com/yinstall/internal/common/file"
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -24,10 +25,7 @@ func stepExtractYmp() *runner.Step {
 			if ympPackage == "" {
 				// 尝试自动查找最新版本的 YMP 软件包
 				ctx.Logger.Info("ymp_package not specified, searching for latest yashan-migrate-platform package...")
-				remoteDir := ctx.RemoteSoftwareDir
-				if remoteDir == "" {
-					remoteDir = "/data/yashan/soft"
-				}
+				remoteDir := commonos.EffectiveRemoteSoftwareDir(ctx)
 				latestPkg, err := commonfile.FindLatestYMPPackage(ctx, ctx.LocalSoftwareDirs, remoteDir)
 				if err != nil {
 					return fmt.Errorf("ymp_package not specified and auto-search failed: %w", err)
@@ -50,7 +48,7 @@ func stepExtractYmp() *runner.Step {
 				ctx,
 				ympPackage,
 				ctx.LocalSoftwareDirs,
-				ctx.RemoteSoftwareDir,
+				commonos.EffectiveRemoteSoftwareDir(ctx),
 			)
 			if err != nil {
 				return fmt.Errorf("YMP package not found: %w", err)

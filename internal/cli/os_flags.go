@@ -102,12 +102,9 @@ func registerOSBaselineFlags(cmd *cobra.Command, cfg registerOSFlagsConfig) {
 	cmd.Flags().StringVar(&osKernelArgs, "os-kernel-args", "transparent_hugepage=never elevator=deadline LANG=en_US.UTF-8", prefix+cfg.whenSkipOSFalse("Kernel boot arguments"))
 	cmd.Flags().BoolVar(&osHugepagesEnable, "os-hugepages-enable", false, prefix+cfg.whenSkipOSFalse("Enable huge pages configuration (memory size based on db-memory-percent)"))
 	registerOSYumISOFlags(cmd, cfg)
-	depsDefault := "libzstd zlib lz4 openssl openssl-devel libaio tar unzip sshpass"
-	toolsDefault := "tar zip bind-utils sysstat telnet iotop openssh-clients net-tools unzip libvncserver tigervnc-server device-mapper-multipath dstat lsof psmisc redhat-lsb-core parted xhost strace showmount expect tcl sysfsutils gdisk rsync lvm2 qperf chrony tmux bpftrace perf"
-	if cfg.forDB {
-		// DB install must extract .tar.gz on target; keep tools empty but tar/unzip are in os-deps-db-packages above.
-		toolsDefault = ""
-	}
+	// deps：硬依赖整批安装；tools：逐装失败可跳过（含 sshpass，避免无源发行版拖死整批）
+	depsDefault := "libzstd zlib lz4 openssl openssl-devel libaio tar unzip"
+	toolsDefault := "tar zip bind-utils sysstat telnet iotop openssh-clients net-tools unzip libvncserver tigervnc-server device-mapper-multipath dstat lsof psmisc redhat-lsb-core parted xhost strace showmount expect tcl sysfsutils gdisk rsync lvm2 qperf chrony tmux bpftrace perf sshpass"
 	cmd.Flags().StringVar(&osDepsPkgs, "os-deps-db-packages", depsDefault, prefix+cfg.whenSkipOSFalse("DB dependency packages"))
 	cmd.Flags().StringVar(&osToolsPkgs, "os-deps-tools-packages", toolsDefault, prefix+cfg.whenSkipOSFalse("Common tools packages (empty to skip)"))
 	cmd.Flags().BoolVar(&osIgnoreInstallErrors, "os-ignore-install-errors", false, prefix+cfg.whenSkipOSFalse("Ignore package installation errors and continue (only show warnings)"))

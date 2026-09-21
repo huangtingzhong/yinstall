@@ -26,25 +26,9 @@ func collectMissingDependencyPackages(ctx *runner.StepContext) (missingDB []stri
 	return
 }
 
-// resolveOSDepsDBPackages 读取 CLI 依赖列表；openEuler 源无 sshpass，自动去掉以免整批失败。
+// resolveOSDepsDBPackages 读取 CLI 硬依赖列表（sshpass 等可选工具在 os_deps_tools_packages）。
 func resolveOSDepsDBPackages(ctx *runner.StepContext) string {
-	raw := ctx.GetParamString("os_deps_db_packages", "libzstd zlib lz4 openssl openssl-devel libaio tar unzip")
-	if !commonos.IsOpenEuler(ctx.OSInfo) {
-		return raw
-	}
-	var keep []string
-	for _, p := range strings.Fields(raw) {
-		p = strings.TrimSpace(p)
-		if p == "" || strings.EqualFold(p, "sshpass") {
-			continue
-		}
-		keep = append(keep, p)
-	}
-	filtered := strings.Join(keep, " ")
-	if filtered != raw {
-		osLogPhase(ctx, "deps-filter-os", fmt.Sprintf("reason=openeuler_no_sshpass before=%q after=%q", raw, filtered))
-	}
-	return filtered
+	return ctx.GetParamString("os_deps_db_packages", "libzstd zlib lz4 openssl openssl-devel libaio tar unzip")
 }
 
 // areRequiredPackagesInstalled 判断是否已安装所需依赖包
@@ -138,12 +122,12 @@ func b015SliceRemove(list []string, s string) []string {
 // b015TryInstallLibzstdFromSourceEL7 在 RHEL7/OL7/CentOS7 等无 libzstd RPM 时，从 zstd 源码包编译安装。
 func b015TryInstallLibzstdFromSourceEL7(ctx *runner.StepContext) error {
 	explicit := ctx.GetParamString("os_zstd_source_tarball", "")
-	nameOrPath, err := commonfile.FindZstdSourceTarball(ctx, ctx.LocalSoftwareDirs, ctx.RemoteSoftwareDir, explicit)
+	nameOrPath, err := commonfile.FindZstdSourceTarball(ctx, ctx.LocalSoftwareDirs, commonos.EffectiveRemoteSoftwareDir(ctx), explicit)
 	if err != nil {
 		return fmt.Errorf("zstd source tarball not found (EL7 repos often lack libzstd RPM); place zstd-1.5.7.tar.gz under --local-software-dirs or remote --remote-software-dir: %w", err)
 	}
 
-	remoteTar, err := commonfile.FindAndDistribute(ctx, nameOrPath, ctx.LocalSoftwareDirs, ctx.RemoteSoftwareDir)
+	remoteTar, err := commonfile.FindAndDistribute(ctx, nameOrPath, ctx.LocalSoftwareDirs, commonos.EffectiveRemoteSoftwareDir(ctx))
 	if err != nil {
 		return fmt.Errorf("failed to distribute zstd source tarball: %w", err)
 	}

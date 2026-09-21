@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	commonfile "github.com/yinstall/internal/common/file"
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
 )
 
@@ -22,10 +23,7 @@ func stepExtractInstantclient() *runner.Step {
 			pkg := ctx.GetParamString("ymp_instantclient_basic", "")
 			if pkg == "" {
 				ctx.Logger.Info("ymp_instantclient_basic not specified, searching for latest instantclient-basic package...")
-				remoteDir := ctx.RemoteSoftwareDir
-				if remoteDir == "" {
-					remoteDir = "/data/yashan/soft"
-				}
+				remoteDir := commonos.EffectiveRemoteSoftwareDir(ctx)
 				latestPkg, err := commonfile.FindLatestInstantclientBasicPackage(ctx, ctx.LocalSoftwareDirs, remoteDir)
 				if err != nil {
 					return fmt.Errorf("ymp_instantclient_basic not specified and auto-search failed: %w", err)
@@ -48,7 +46,7 @@ func stepExtractInstantclient() *runner.Step {
 				ctx,
 				pkg,
 				ctx.LocalSoftwareDirs,
-				ctx.RemoteSoftwareDir,
+				commonos.EffectiveRemoteSoftwareDir(ctx),
 			)
 			if err != nil {
 				return fmt.Errorf("instantclient basic package not found: %w", err)

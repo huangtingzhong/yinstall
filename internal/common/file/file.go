@@ -283,14 +283,12 @@ func IsISOFile(path string) bool {
 }
 
 // remoteSearchDirs 返回自动发现时需要扫描的远端目录列表（去重）。
-// 顺序为：[remoteDir（若为空则默认 /data/yashan/soft）, SSH 登录用户 $HOME]。
+// 顺序为：[remoteDir（若非空）, SSH 登录用户 $HOME]。
+// remoteDir 应由调用方解析（如 commonos.EffectiveRemoteSoftwareDir）；空则仅扫 $HOME。
 // 即使用户通过 --remote-software-dir 指定了远端目录，仍会额外扫描 SSH 用户家目录下的包。
 func remoteSearchDirs(ctx *runner.StepContext, remoteDir string) []string {
 	homeDir := RemoteHomeDir(ctx)
-
-	if remoteDir == "" {
-		remoteDir = "/data/yashan/soft"
-	}
+	remoteDir = strings.TrimSpace(remoteDir)
 
 	seen := make(map[string]bool)
 	var dirs []string

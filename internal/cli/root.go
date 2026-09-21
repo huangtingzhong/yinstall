@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/logging"
 )
 
@@ -129,7 +130,7 @@ func init() {
 	if f := rootCmd.PersistentFlags().Lookup("local-software-dirs"); f != nil {
 		f.DefValue = "[]"
 	}
-	rootCmd.PersistentFlags().StringVarP(&remoteSoftwareDir, "remote-software-dir", "R", "/data/yashan/soft", "Remote software dir for upload/lookup (also searches SSH login user $HOME)")
+	rootCmd.PersistentFlags().StringVarP(&remoteSoftwareDir, "remote-software-dir", "R", "", "Remote software dir for upload/lookup (default: <os-user home>/soft; also searches SSH login user $HOME)")
 
 	rootCmd.PersistentFlags().StringVarP(&outputDir, "output", "o", "",
 		"Local output directory for collect/stress archives and install post-success archive (default: ./output/<kind>/<timestamp>)")
@@ -280,6 +281,21 @@ func GetGlobalFlags() GlobalFlags {
 		ArchiveOnSuccess:  archiveOnSuccess,
 		OmIP:              strings.TrimSpace(globalOmIP),
 	}
+}
+
+// stepRemoteSoftwareDir 解析步骤用远端软件目录：显式 -R 优先，否则 <产品用户家目录占位>/soft。
+func stepRemoteSoftwareDir(flags GlobalFlags, params map[string]interface{}) string {
+	user := "yashan"
+	if params != nil {
+		if u, ok := params["os_user"].(string); ok && strings.TrimSpace(u) != "" {
+			user = strings.TrimSpace(u)
+		} else if u, ok := params["primary_os_user"].(string); ok && strings.TrimSpace(u) != "" {
+			user = strings.TrimSpace(u)
+		} else if u, ok := params["ymp_user"].(string); ok && strings.TrimSpace(u) != "" {
+			user = strings.TrimSpace(u)
+		}
+	}
+	return commonos.ResolveRemoteSoftwareDirExplicit(flags.RemoteSoftwareDir, user)
 }
 
 // ResolveGlobalOmIP 返回全局 -M/--om；若为空则依次尝试 extra（如 --om-current、targets[0]）。

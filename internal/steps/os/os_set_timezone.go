@@ -2,7 +2,6 @@ package os
 
 import (
 	"fmt"
-	"strings"
 
 	commonos "github.com/yinstall/internal/common/os"
 	"github.com/yinstall/internal/runner"
@@ -20,8 +19,7 @@ func stepSetTimezone() *runner.Step {
 			osLogPhase(ctx, "plan", "B-007: Set Timezone")
 			timezone := commonos.ResolveOSTimezone(ctx.GetParamString("os_timezone", ""))
 			if !ctx.IsForceStep() {
-				cur, _ := ctx.Execute("timedatectl show --property=Timezone --value 2>/dev/null || true", false)
-				if cur != nil && strings.TrimSpace(cur.GetStdout()) == timezone {
+				if cur, err := commonos.ReadHostIANATimezone(ctx); err == nil && cur == timezone {
 					ctx.Logger.Info("Timezone already %s, skipping (use -f %s to force)", timezone, ctx.CurrentStepID)
 					osLogPhase(ctx, "skip", "already_configured=timezone")
 					return nil
@@ -34,9 +32,12 @@ func stepSetTimezone() *runner.Step {
 
 		PostCheck: func(ctx *runner.StepContext) error {
 			timezone := commonos.ResolveOSTimezone(ctx.GetParamString("os_timezone", ""))
-			result, _ := ctx.Execute("timedatectl show --property=Timezone --value 2>/dev/null || timedatectl | grep 'Time zone'", false)
-			if !strings.Contains(result.GetStdout(), timezone) {
-				return fmt.Errorf("timezone not set correctly, expected %s", timezone)
+			got, err := commonos.ReadHostIANATimezone(ctx)
+			if err != nil {
+				return fmt.Errorf("timezone not set correctly, expected %s: %w", timezone, err)
+			}
+			if got != timezone {
+				return fmt.Errorf("timezone not set correctly, expected %s, got %s", timezone, got)
 			}
 			return nil
 		},

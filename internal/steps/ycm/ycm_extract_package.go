@@ -55,10 +55,7 @@ func stepExtractPackage() *runner.Step {
 			if pkgPath == "" {
 				// 尝试自动查找最新版本的 YCM 软件包
 				ctx.Logger.Info("ycm_package not specified, searching for latest yashandb-cloud-manager package...")
-				remoteDir := ctx.RemoteSoftwareDir
-				if remoteDir == "" {
-					remoteDir = "/data/yashan/soft"
-				}
+				remoteDir := commonos.EffectiveRemoteSoftwareDir(ctx)
 
 				latestPkg, err := file.FindLatestYCMPackage(ctx, ctx.LocalSoftwareDirs, remoteDir)
 				if err != nil {
@@ -82,10 +79,7 @@ func stepExtractPackage() *runner.Step {
 			ycmLogPhase(ctx, "plan", "G-003: Extract YCM Package")
 			pkgPath := ctx.GetParamString("ycm_package", "")
 			installDir := ctx.GetParamString("ycm_install_dir", "/opt")
-			remoteDir := ctx.RemoteSoftwareDir
-			if remoteDir == "" {
-				remoteDir = "/data/yashan/soft"
-			}
+			remoteDir := commonos.EffectiveRemoteSoftwareDir(ctx)
 
 			ctx.Logger.Info("Looking for YCM package: %s", pkgPath)
 			ctx.Logger.Info("Install directory: %s", installDir)
