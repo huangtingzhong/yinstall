@@ -753,8 +753,10 @@ func runCmdWithStream(cmd *exec.Cmd, h OutputLineHandler) (stdout, stderr string
 		_ = pumpOutputStream(stderrPipe, &stderrBuf, "stderr", h)
 	}()
 
-	waitErr := cmd.Wait()
+	// 必须先读到 EOF 再 Wait. os/exec.Wait 会关闭 StdoutPipe/StderrPipe;
+	// 若先 Wait, 短命令(如 getent)的输出会在读协程进入 Read 前被丢掉, 退出码仍为 0.
 	wg.Wait()
+	waitErr := cmd.Wait()
 	return stdoutBuf.String(), stderrBuf.String(), exitCodeFromCmdWait(waitErr), func() error {
 		if waitErr == nil {
 			return nil
