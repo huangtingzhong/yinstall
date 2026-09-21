@@ -1,4 +1,4 @@
-.PHONY: all clean build-all build-linux build-windows build-darwin build-current help check-debug-logging check-test-layout check-steps
+.PHONY: all clean build-all build-linux build-windows build-darwin build-current help check-debug-logging check-test-layout check-steps release
 
 # Project information
 BINARY_NAME=yinstall
@@ -27,6 +27,7 @@ help:
 	@echo "  make build-windows  - Build for Windows (amd64, arm64)"
 	@echo "  make build-darwin   - Build for macOS (amd64, arm64)"
 	@echo "  make build-current  - Build for current platform only"
+	@echo "  make release        - Local GitHub release (build.sh + gh; see ./release.sh)"
 	@echo "  make clean          - Remove build directory"
 	@echo "  make check-debug-logging - Static check for install-step debug patterns"
 	@echo "  make check-test-layout   - Fail if *_test.go outside test/go/ (except legacy allowlist)"
@@ -42,6 +43,10 @@ check-test-layout:
 
 check-steps:
 	@bash scripts/check-steps.sh
+
+# 本机发版：./build.sh 压缩后 gh release create（不依赖提交 build/）
+release:
+	@bash ./release.sh
 
 update-version:
 	@echo "Updating version information..."

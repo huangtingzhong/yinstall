@@ -257,6 +257,13 @@ EXAMPLES:
 OUTPUT: ${BUILD_DIR}/
         ${BINARY_NAME}_<os>_<arch>[.exe]
 
+GITHUB RELEASE (local Mac, preferred):
+    ./release.sh
+    # or: make release
+    Runs SKIP_DEPLOY_LINUX_ARM64=1 ./build.sh --clean --all, then
+    gh release create <Version> with the six compressed binaries.
+    Options: --tag TAG  --skip-build  --generate-notes  --dry-run
+
 POST-BUILD (linux/arm64):
     After a successful linux/arm64 build, if ${DEPLOY_LINUX_ARM64_HOST} is reachable
     via passwordless SSH, upload to:
