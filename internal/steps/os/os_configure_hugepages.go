@@ -91,7 +91,7 @@ func stepConfigureHugepages() *runner.Step {
 			}
 
 			// 写入 sysctl 配置 hugepages
-			sysctlFile := "/etc/sysctl.d/yashandb-hugepages.conf"
+			sysctlFile := "/etc/sysctl.d/99-yashandb-hugepages.conf"
 			sysctlContent := fmt.Sprintf("# YashanDB Huge Pages Configuration\nvm.nr_hugepages = %d\n", nrHugepages)
 
 			if !ctx.IsForceStep() && hugepagesAlreadyConfigured(ctx, sysctlFile, sysctlContent, nrHugepages) {
@@ -106,6 +106,7 @@ func stepConfigureHugepages() *runner.Step {
 			}
 
 			ctx.Logger.Info("Hugepages sysctl config written to %s", sysctlFile)
+			_, _ = ctx.Execute("rm -f /etc/sysctl.d/yashandb-hugepages.conf", true)
 
 			// 应用 sysctl
 			if _, err := ctx.ExecuteWithCheck("sysctl -p "+sysctlFile, true); err != nil {

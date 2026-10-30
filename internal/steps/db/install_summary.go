@@ -162,6 +162,19 @@ func formatDBYasqlExample(ctx *runner.StepContext, connectHost, dbName string, p
 	return "yasql " + commonsql.BuildYasqlTCPConnect(connectHost, "sys", pwd, port, dbName)
 }
 
+// formatDBMysqlExample 生成 MySQL 协议客户端示例（连 mysql_addr 口，begin+2 / YAC begin+3）。
+func formatDBMysqlExample(ctx *runner.StepContext, connectHost string, mysqlPort int) string {
+	host := strings.TrimSpace(connectHost)
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	pwd := strings.TrimSpace(ctx.GetParamString("db_admin_password", ""))
+	if pwd == "" {
+		return fmt.Sprintf("mysql -h %s -P %d -u sys -p", host, mysqlPort)
+	}
+	return fmt.Sprintf("mysql -h %s -P %d -u sys -p%s", host, mysqlPort, commonos.ShellSingleQuote(pwd))
+}
+
 func resolveDBEnvFileForSummary(ctx, hctx *runner.StepContext) (string, error) {
 	if v, ok := ctx.Results["env_file"].(string); ok && strings.TrimSpace(v) != "" {
 		return strings.TrimSpace(v), nil
@@ -498,6 +511,12 @@ func printDBInstallSummary(ctx *runner.StepContext, hctx *runner.StepContext, st
 	notice(fmt.Sprintf("  host=%s  port=%d  dbname=%s  login=sys", connectHost, beginPort, clusterName))
 	notice(fmt.Sprintf("  password=%s", DisplaySysPassword(hctx)))
 	notice(fmt.Sprintf("  yasql_example=%s", formatDBYasqlExample(hctx, connectHost, clusterName, beginPort)))
+	dbMode := strings.ToLower(strings.TrimSpace(hctx.GetParamString("db_mode", "")))
+	if dbMode == "mysql" {
+		mysqlPort := commonos.MysqlListenPort(beginPort, isYAC)
+		notice(fmt.Sprintf("  mysql_port=%d", mysqlPort))
+		notice(fmt.Sprintf("  mysql_example=%s", formatDBMysqlExample(hctx, connectHost, mysqlPort)))
+	}
 	if envFile != "" {
 		notice(fmt.Sprintf("  sysdba_local=source %s && yasql / as sysdba", envFile))
 	}
@@ -545,6 +564,11 @@ func printDBInstallSummary(ctx *runner.StepContext, hctx *runner.StepContext, st
 	}
 	portOK := probeDBPortListening(hctx, beginPort)
 	notice(fmt.Sprintf("  Port %d: %s", beginPort, SummaryOKLabel(portOK)))
+	if dbMode == "mysql" {
+		mysqlPort := commonos.MysqlListenPort(beginPort, isYAC)
+		mysqlOK := probeDBPortListening(hctx, mysqlPort)
+		notice(fmt.Sprintf("  Port %d (mysql): %s", mysqlPort, SummaryOKLabel(mysqlOK)))
+	}
 
 	if isYAC && strings.TrimSpace(groupStatusOut) != "" {
 		notice("[Cluster Resources]")

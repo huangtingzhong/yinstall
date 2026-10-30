@@ -1,0 +1,38 @@
+# 本地专用，不入远程仓库（规则同步在 .git/info/exclude）
+# =============================================================================
+# yinstall — 仅同步源码与少量根目录文档；本地日志、docs、Agent 规范不入库
+# =============================================================================
+
+# build/ 入库供 GitHub 直接下载预编译二进制
+output/
+logs/
+docs/
+test/
+CLAUDE.md
+.cursor/
+*.mdc
+tmp/
+scripts/
+*.log
+output_*.txt
+sql_*.txt
+*.trc
+.DS_Store
+**/.DS_Store
+._*
+**/._*
+.env
+.env.*
+*.env
+.vscode/
+.idea/
+.claude/
+# Agent Skill 唯一维护点: ~/.claude/skills/yinstall-agent/（勿在本仓库恢复 skills/）
+*_install_cmd.txt
+ymp_install_cmd.txt
+*.md
+!README.md
+!CHANGELOG.md
+!requirements.md
+!HUAWEI_MULTIPATH_SUPPORT.md
+!SSH_AUTH_IMPROVEMENT.md

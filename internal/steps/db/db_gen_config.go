@@ -34,12 +34,13 @@ func stepGenConfig() *runner.Step {
 				return err
 			}
 			reportConfigWillOverwrite(ctx, stageDir, clusterName)
+			reportConfigDerivedPorts(ctx, stageDir, clusterName)
 			// 只读 shm 门禁提前到 PreCheck，避免 --precheck 漏检
 			return checkKernelShmMeetsDBRequirements(ctx)
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			dbLogPhase(ctx, "plan", "C-014: Generate Config")
+			dbLogPhase(ctx, "plan", "Generate Config")
 			if err := checkKernelShmMeetsDBRequirements(ctx); err != nil {
 				return err
 			}
@@ -81,7 +82,7 @@ func stepGenConfig() *runner.Step {
 			}
 
 			ctx.Logger.Info("Config files generated: hosts.toml, %s.toml", clusterName)
-			return nil
+			return verifyClusterTomlDerivedPorts(ctx, clusterPath)
 		},
 	}
 }
@@ -106,9 +107,95 @@ func reportConfigWillOverwrite(ctx *runner.StepContext, stageDir, clusterName st
 		Severity:    runner.PrecheckSeverityInfo,
 		Code:        "PC.DB.CONFIG_WILL_OVERWRITE",
 		Message:     fmt.Sprintf("existing config will be regenerated/overwritten on apply: %s", strings.Join(existing, ", ")),
-		Remediation: "back up these files if you need the current content; or skip C-014 if configs are already correct",
+		Remediation: "back up these files if you need the current content; or skip Generate Config if configs are already correct",
 	})
 	ctx.Logger.Info("Existing config detected (will overwrite on apply): %v", existing)
+}
+
+// reportConfigDerivedPorts 在 PreCheck 报告随 begin-port 派生的口（mysql / replica），便于 --precheck 核对。
+func reportConfigDerivedPorts(ctx *runner.StepContext, stageDir, clusterName string) {
+	beginPort := ctx.GetParamInt("db_begin_port", 1688)
+	yac := ctx.GetParamBool("yac_mode", false)
+	dbMode := strings.ToLower(strings.TrimSpace(ctx.GetParamString("db_mode", "")))
+	replicaCIDR := strings.TrimSpace(ctx.GetParamString("db_replica_cidr", ""))
+
+	if dbMode == "mysql" {
+		want := commonos.MysqlListenPort(beginPort, yac)
+		dbLogPhase(ctx, "plan-mysql-addr", fmt.Sprintf("begin=%d yac=%v want_mysql_port=%d (offset +%d)", beginPort, yac, want, want-beginPort))
+		ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+			StepName:    "Generate Config",
+			Host:        ctx.Executor.Host(),
+			Severity:    runner.PrecheckSeverityInfo,
+			Code:        "PC.DB.MYSQL_ADDR_PORT_PLAN",
+			Message:     fmt.Sprintf("db_mode=mysql: mysql_addr listen port will be %d (begin_port=%d)", want, beginPort),
+			Remediation: "override only by changing --db-port; yasboot se gen --mode mysql and post-gen ensure use the same offset",
+		})
+		clusterPath := path.Join(stageDir, clusterName+".toml")
+		if res, _ := ctx.Execute(fmt.Sprintf("test -f %s", commonos.ShellSingleQuote(clusterPath)), false); res != nil && res.GetExitCode() == 0 {
+			if content, err := readRemoteTextFile(ctx, clusterPath); err == nil && !MysqlAddrPortsAlreadyCorrect(content, want) {
+				// Warn：--precheck 下 Info 不打终端（runner 设计），错口需可见
+				ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+					StepName:    "Generate Config",
+					Host:        ctx.Executor.Host(),
+					Severity:    runner.PrecheckSeverityWarn,
+					Code:        "PC.DB.MYSQL_ADDR_PORT_MISMATCH",
+					Message:     fmt.Sprintf("existing %s mysql_addr port != %d; apply will rewrite to match begin_port", clusterPath, want),
+					Remediation: "apply Generate Config, or manually set mysql_addr host:port to the expected port",
+				})
+			}
+		}
+	}
+
+	if replicaCIDR != "" {
+		want := ReplicaPort(beginPort, yac)
+		dbLogPhase(ctx, "plan-replica-addr", fmt.Sprintf("begin=%d yac=%v want_replica_port=%d cidr=%s", beginPort, yac, want, replicaCIDR))
+		ctx.ReportPrecheckIssue(runner.PrecheckIssue{
+			StepName:    "Generate Config",
+			Host:        ctx.Executor.Host(),
+			Severity:    runner.PrecheckSeverityInfo,
+			Code:        "PC.DB.REPLICATION_ADDR_PORT_PLAN",
+			Message:     fmt.Sprintf("db_replica_cidr=%s: REPLICATION_ADDR will be :%d (begin_port=%d)", replicaCIDR, want, beginPort),
+			Remediation: "port follows begin-port offset (SE +1 / YAC +2); change --db-port to shift",
+		})
+	}
+}
+
+// verifyClusterTomlDerivedPorts PostCheck：mysql / replica 派生口与 begin-port 一致（复用 AlreadyCorrect）。
+func verifyClusterTomlDerivedPorts(ctx *runner.StepContext, clusterPath string) error {
+	beginPort := ctx.GetParamInt("db_begin_port", 1688)
+	yac := ctx.GetParamBool("yac_mode", false)
+	dbMode := strings.ToLower(strings.TrimSpace(ctx.GetParamString("db_mode", "")))
+	replicaCIDR := strings.TrimSpace(ctx.GetParamString("db_replica_cidr", ""))
+	if dbMode != "mysql" && replicaCIDR == "" {
+		return nil
+	}
+
+	dbLogPhase(ctx, "verify-derived-ports-start", fmt.Sprintf("path=%s mysql=%v replica_cidr=%v", clusterPath, dbMode == "mysql", replicaCIDR != ""))
+	content, err := readRemoteTextFile(ctx, clusterPath)
+	if err != nil {
+		dbLogPhase(ctx, "verify-derived-ports-fail", runner.TruncateForLog(err.Error(), 120))
+		return err
+	}
+	if dbMode == "mysql" {
+		want := commonos.MysqlListenPort(beginPort, yac)
+		if !MysqlAddrPortsAlreadyCorrect(content, want) {
+			err := fmt.Errorf("mysql_addr port want %d in %s after gen", want, clusterPath)
+			dbLogPhase(ctx, "verify-derived-ports-fail", runner.TruncateForLog(err.Error(), 120))
+			return err
+		}
+		ctx.Logger.Info("PostCheck mysql_addr port=%d OK (%s)", want, clusterPath)
+	}
+	if replicaCIDR != "" {
+		want := ReplicaPort(beginPort, yac)
+		if !ReplicationAddrAlreadyCorrect(content, want) {
+			err := fmt.Errorf("REPLICATION_ADDR want :%d in %s after gen (db_replica_cidr=%s)", want, clusterPath, replicaCIDR)
+			dbLogPhase(ctx, "verify-derived-ports-fail", runner.TruncateForLog(err.Error(), 120))
+			return err
+		}
+		ctx.Logger.Info("PostCheck REPLICATION_ADDR=:%d OK (%s)", want, clusterPath)
+	}
+	dbLogPhase(ctx, "verify-derived-ports-done", "ok")
+	return nil
 }
 
 // checkKernelShmMeetsDBRequirements 校验 kernel.shmmax / kernel.shmall 是否满足与 OS 步骤 B-008
@@ -223,6 +310,9 @@ func genStandaloneConfig(ctx *runner.StepContext, yasbootPath, clusterName, user
 	ctx.Logger.Info("  Log path: %s", logPath)
 	ctx.Logger.Info("  Begin port: %d", beginPort)
 	ctx.Logger.Info("  Memory limit: %d%%", memoryPercent)
+	if dbMode == "mysql" {
+		ctx.Logger.Info("  db_mode: mysql; expected mysql_addr port %d (begin+2)", commonos.MysqlListenPort(beginPort, false))
+	}
 	replicaCIDR := strings.TrimSpace(ctx.GetParamString("db_replica_cidr", ""))
 	if replicaCIDR == "" {
 		ctx.Logger.Info("  db_replica_cidr: (empty, yasboot-default/public); expected replication port %d", ReplicaPort(beginPort, false))
@@ -272,18 +362,34 @@ func genStandaloneConfig(ctx *runner.StepContext, yasbootPath, clusterName, user
 		dbLogPhase(ctx, "config-gen-fail", runner.TruncateForLog(err.Error(), 120))
 		return fmt.Errorf("failed to generate config: %w", err)
 	}
+	configPath := path.Join(stageDir, clusterName+".toml")
 	if replicaCIDR != "" {
-		configPath := path.Join(stageDir, clusterName+".toml")
 		port := ReplicaPort(beginPort, false)
+		dbLogPhase(ctx, "replica-addr-start", fmt.Sprintf("path=%s want_port=%d", configPath, port))
 		changed, err := ensureReplicationAddrInClusterTOML(ctx, configPath, port)
 		if err != nil {
-			dbLogPhase(ctx, "config-gen-fail", runner.TruncateForLog(err.Error(), 120))
+			dbLogPhase(ctx, "replica-addr-fail", runner.TruncateForLog(err.Error(), 120))
 			return fmt.Errorf("ensure REPLICATION_ADDR in cluster toml: %w", err)
 		}
 		if changed {
 			ctx.Logger.Info("Ensured REPLICATION_ADDR=:%d in %s (db_replica_cidr=%s)", port, configPath, replicaCIDR)
+			dbLogPhase(ctx, "replica-addr-done", fmt.Sprintf("rewritten port=%d", port))
 		} else {
 			ctx.Logger.Info("REPLICATION_ADDR=:%d already set in %s, skip rewrite (db_replica_cidr=%s)", port, configPath, replicaCIDR)
+			dbLogPhase(ctx, "replica-addr-skip", fmt.Sprintf("already_correct port=%d", port))
+		}
+	}
+	if dbMode == "mysql" {
+		port := commonos.MysqlListenPort(beginPort, false)
+		changed, err := ensureMysqlAddrPortInClusterTOML(ctx, configPath, beginPort, false)
+		if err != nil {
+			dbLogPhase(ctx, "config-gen-fail", runner.TruncateForLog(err.Error(), 120))
+			return fmt.Errorf("ensure mysql_addr port after gen: %w", err)
+		}
+		if changed {
+			ctx.Logger.Info("Ensured mysql_addr port=%d in %s (begin_port=%d)", port, configPath, beginPort)
+		} else {
+			ctx.Logger.Info("mysql_addr port=%d already correct in %s (begin_port=%d)", port, configPath, beginPort)
 		}
 	}
 	dbLogPhase(ctx, "config-gen-done", "standalone")
@@ -404,15 +510,18 @@ func genYACConfig(ctx *runner.StepContext, yasbootPath, clusterName, user, passw
 	if replicaCIDR != "" {
 		configPath := path.Join(stageDir, clusterName+".toml")
 		port := ReplicaPort(beginPort, true)
+		dbLogPhase(ctx, "replica-addr-start", fmt.Sprintf("path=%s want_port=%d", configPath, port))
 		changed, err := ensureReplicationAddrInClusterTOML(ctx, configPath, port)
 		if err != nil {
-			dbLogPhase(ctx, "config-gen-fail", runner.TruncateForLog(err.Error(), 120))
+			dbLogPhase(ctx, "replica-addr-fail", runner.TruncateForLog(err.Error(), 120))
 			return fmt.Errorf("ensure REPLICATION_ADDR in cluster toml: %w", err)
 		}
 		if changed {
 			ctx.Logger.Info("Ensured REPLICATION_ADDR=:%d in %s (db_replica_cidr=%s)", port, configPath, replicaCIDR)
+			dbLogPhase(ctx, "replica-addr-done", fmt.Sprintf("rewritten port=%d", port))
 		} else {
 			ctx.Logger.Info("REPLICATION_ADDR=:%d already set in %s, skip rewrite (db_replica_cidr=%s)", port, configPath, replicaCIDR)
+			dbLogPhase(ctx, "replica-addr-skip", fmt.Sprintf("already_correct port=%d", port))
 		}
 	}
 	dbLogPhase(ctx, "config-gen-done", "yac")

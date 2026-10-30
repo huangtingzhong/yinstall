@@ -224,6 +224,10 @@ func runOMMigrateCmd(cmd *cobra.Command, args []string) error {
 	omCmdCurrent = cur
 	if entryOm == "" {
 		globalOmIP = cur
+		// 发现到的 OM 写回 flag, 供 --config 回写
+		if f := cmd.Flag("om"); f != nil {
+			f.Changed = true
+		}
 	}
 
 	if omSkipOS {

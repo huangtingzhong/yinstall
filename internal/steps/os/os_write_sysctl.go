@@ -9,16 +9,15 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// stepWriteSysctl 写入 sysctl 内核参数配置
+// stepWriteSysctl 写入 sysctl 内核参数到 /etc/sysctl.conf 托管块
 func stepWriteSysctl() *runner.Step {
 	return &runner.Step{
 		Name:        "Write Sysctl Config",
-		Description: "Write kernel parameters configuration file",
+		Description: "Write kernel parameters into /etc/sysctl.conf managed block",
 		Tags:        []string{"os", "kernel"},
 		Optional:    false,
 
 		PreCheck: func(ctx *runner.StepContext) error {
-			// 只读检查与共享内存等尺寸计算
 			memKB, err := readMemTotalKB(ctx)
 			if err != nil {
 				return err
@@ -42,8 +41,8 @@ func stepWriteSysctl() *runner.Step {
 		},
 
 		Action: func(ctx *runner.StepContext) error {
-			osLogPhase(ctx, "plan", "B-008: Write Sysctl Config")
-			configFile := ctx.GetParamString("os_sysctl_file", "/etc/sysctl.d/yashandb.conf")
+			osLogPhase(ctx, "plan", "Write Sysctl Config")
+			confFile := ctx.GetParamString("os_sysctl_file", commonos.DefaultSysctlConfFile)
 
 			memKB, _ := ctx.Results["os_sysctl_mem_kb"].(int64)
 			pageSize, _ := ctx.Results["os_sysctl_page_size"].(int64)
@@ -51,7 +50,6 @@ func stepWriteSysctl() *runner.Step {
 			shmall, _ := ctx.Results["os_sysctl_shmall"].(int64)
 			shmmni, _ := ctx.Results["os_sysctl_shmmni"].(int64)
 			if shmmax == 0 || shmall == 0 || shmmni == 0 {
-				// 若 PreCheck 结果缺失则在此重算
 				var err error
 				memKB, err = readMemTotalKB(ctx)
 				if err != nil {
@@ -67,59 +65,52 @@ func stepWriteSysctl() *runner.Step {
 
 			ctx.Logger.Info("Sysctl shared memory: MemTotal=%d kB, page_size=%d, use_max_ram_only=%v, db_memory_percent=%d -> shmmax=%d shmmall=%d shmmni=%d",
 				memKB, pageSize, useMaxRAM, dbPct, shmmax, shmall, shmmni)
+			ctx.Logger.Info("Sysctl persist target: %s (managed block)", confFile)
 
-			var config string
-			config = fmt.Sprintf(`# YashanDB kernel parameters
-vm.swappiness = 0
-vm.oom-kill = 0
-vm.zone_reclaim_mode = 0
-kernel.numa_balancing = 0
-net.ipv4.ip_local_port_range = 32768 60999
-vm.max_map_count = 2000000
-net.core.somaxconn = 32768
-kernel.shmall = %d
-kernel.shmmni = %d
-kernel.shmmax = %d
-fs.aio-max-nr = 6194304
-vm.dirty_ratio = 20
-vm.dirty_background_ratio = 3
-vm.dirty_writeback_centisecs = 100
-vm.dirty_expire_centisecs = 500
-vm.min_free_kbytes = 524288
-net.core.netdev_max_backlog = 30000
-net.core.netdev_budget = 600
-`, shmall, shmmni, shmmax)
-
-			osLogPhase(ctx, "op-start", fmt.Sprintf("file=%s shmmax=%d", configFile, shmmax))
-			if !ctx.IsForceStep() {
-				existing, _ := ctx.Execute(fmt.Sprintf("cat %s 2>/dev/null || true", configFile), false)
-				cur := ""
-				if existing != nil {
-					cur = existing.GetStdout()
-				}
-				if commonos.TextContentEqual(cur, config) {
-					ctx.Logger.Info("Sysctl config %s already configured, skipping write", configFile)
-					osLogPhase(ctx, "skip", "already_configured=sysctl_file")
-					ctx.SetResult("os_sysctl_changed", false)
-					return nil
-				}
+			defaults := commonos.YashanSysctlDefaults(shmmax, shmall, shmmni)
+			osLogPhase(ctx, "filter-keys-start", fmt.Sprintf("candidates=%d", len(defaults)))
+			kept, skipped := commonos.FilterYashanSysctlKeysOnHost(ctx, defaults)
+			if len(skipped) > 0 {
+				osLogPhase(ctx, "filter-keys-skip", fmt.Sprintf("missing=%s", strings.Join(skipped, ",")))
+				ctx.Logger.Info("Sysctl keys skipped (not present on host): %s", strings.Join(skipped, ", "))
 			}
-			cmd := fmt.Sprintf("cat > %s << 'EOF'\n%sEOF", configFile, config)
-			_, err := ctx.ExecuteWithCheck(cmd, true)
+			osLogPhase(ctx, "filter-keys-done", fmt.Sprintf("kept=%d skipped=%d", len(kept), len(skipped)))
+			if len(kept) == 0 {
+				return fmt.Errorf("no sysctl keys available on this host after existence filter")
+			}
+			ctx.SetResult("os_sysctl_written_keys", kept)
+
+			osLogPhase(ctx, "conf-block-start", confFile)
+			confChanged, err := commonos.EnsureManagedSysctlConfBlock(ctx, confFile, kept)
 			if err != nil {
-				osLogPhase(ctx, "op-fail", runner.TruncateForLog(err.Error(), 80))
+				osLogPhase(ctx, "conf-block-fail", runner.TruncateForLog(err.Error(), 80))
 				return err
 			}
-			ctx.SetResult("os_sysctl_changed", true)
-			osLogPhase(ctx, "op-done", configFile)
+			if ctx.IsForceStep() {
+				confChanged = true
+			}
+			if confChanged {
+				osLogPhase(ctx, "conf-block-done", "rewritten")
+			} else {
+				osLogPhase(ctx, "conf-block-skip", "already_correct")
+				ctx.Logger.Info("Sysctl managed block in %s already configured, skipping write", confFile)
+			}
+
+			// 删除历史 drop-in，避免与 conf 双轨
+			osLogPhase(ctx, "dropin-cleanup-start", "remove legacy yashan sysctl drop-ins")
+			commonos.RemoveYashanSysctlDropIns(ctx)
+			osLogPhase(ctx, "dropin-cleanup-done", "ok")
+
+			ctx.SetResult("os_sysctl_changed", confChanged)
 			return nil
 		},
 
 		PostCheck: func(ctx *runner.StepContext) error {
-			configFile := ctx.GetParamString("os_sysctl_file", "/etc/sysctl.d/yashandb.conf")
-			result, _ := ctx.Execute(fmt.Sprintf("test -f %s && echo exists", configFile), false)
-			if !strings.Contains(result.GetStdout(), "exists") {
-				return fmt.Errorf("sysctl config file not created")
+			confFile := ctx.GetParamString("os_sysctl_file", commonos.DefaultSysctlConfFile)
+			result, _ := ctx.Execute(fmt.Sprintf("grep -Fq %s %s && echo exists",
+				commonos.ShellSingleQuote(commonos.SysctlManagedBeginMarker), commonos.ShellSingleQuote(confFile)), false)
+			if result == nil || !strings.Contains(result.GetStdout(), "exists") {
+				return fmt.Errorf("sysctl managed block not found in %s", confFile)
 			}
 			return nil
 		},

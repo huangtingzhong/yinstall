@@ -96,7 +96,7 @@ func registerOSBaselineFlags(cmd *cobra.Command, cfg registerOSFlagsConfig) {
 	cmd.Flags().StringVar(&osTimezone, "os-timezone", "", prefix+cfg.whenSkipOSFalse("System timezone (empty=Asia/Shanghai)"))
 	cmd.Flags().StringVar(&osNTPServer, "os-ntp-server", "", prefix+cfg.whenSkipOSFalse("NTP server address (empty to skip NTP configuration)"))
 	cmd.Flags().StringVar(&osHostname, "os-hostname", "", prefix+cfg.whenSkipOSFalse("Hostname prefix or comma-separated list for B-023 (empty=auto: replace only localhost/system default names, keep existing custom names)"))
-	cmd.Flags().StringVar(&osSysctlFile, "os-sysctl-file", "/etc/sysctl.d/yashandb.conf", prefix+cfg.whenSkipOSFalse("Sysctl config file path"))
+	cmd.Flags().StringVar(&osSysctlFile, "os-sysctl-file", "/etc/sysctl.conf", prefix+cfg.whenSkipOSFalse("Sysctl config file (yinstall managed block; default /etc/sysctl.conf)"))
 	cmd.Flags().StringVar(&osLimitsFile, "os-limits-file", "/etc/security/limits.conf", prefix+cfg.whenSkipOSFalse("Limits config file path"))
 	cmd.Flags().BoolVar(&osKernelArgsEnable, "os-kernel-args-enable", true, prefix+cfg.whenSkipOSFalse("Enable kernel args configuration"))
 	cmd.Flags().StringVar(&osKernelArgs, "os-kernel-args", "transparent_hugepage=never elevator=deadline LANG=en_US.UTF-8", prefix+cfg.whenSkipOSFalse("Kernel boot arguments"))
@@ -110,7 +110,7 @@ func registerOSBaselineFlags(cmd *cobra.Command, cfg registerOSFlagsConfig) {
 	cmd.Flags().BoolVar(&osIgnoreInstallErrors, "os-ignore-install-errors", false, prefix+cfg.whenSkipOSFalse("Ignore package installation errors and continue (only show warnings)"))
 	cmd.Flags().StringVar(&osZstdSourceTarball, "os-zstd-source-tarball", "", prefix+cfg.whenSkipOSFalse("Explicit zstd source tarball (zstd-x.y.z.tar.gz); empty=auto-discover (EL7 libzstd fallback)"))
 	cmd.Flags().StringVar(&osFirewallMode, "os-firewall-mode", "enable", prefix+cfg.whenSkipOSFalse("Firewall mode: enable/disable (enable: if firewalld active, open Yashan ports unless yac_public_network already trusted; never start firewalld)"))
-	cmd.Flags().StringVar(&osFirewallPorts, "os-firewall-ports", "", prefix+cfg.whenSkipOSFalse("TCP ports when mode=enable and firewalld active; empty=auto set (begin/yasom/yasagent/replica)"))
+	cmd.Flags().StringVar(&osFirewallPorts, "os-firewall-ports", "", prefix+cfg.whenSkipOSFalse("TCP ports when mode=enable and firewalld active; empty=auto set (begin/yasom/yasagent/replica; +mysql listen when db_mode=mysql)"))
 	cmd.Flags().StringVar(&osSELinuxMode, "os-selinux-mode", "keep", prefix+cfg.whenSkipOSFalse("SELinux mode: keep/permissive/disabled"))
 }
 

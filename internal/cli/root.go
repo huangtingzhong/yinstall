@@ -47,6 +47,11 @@ var (
 
 	// 当前 OM (yasom) 地址；短参 -M，长参 --om（已移除旧别名 --om-ip）
 	globalOmIP string
+
+	// 参数配置文件 (--config/-c)；无路径时不读不写
+	configFilePath     string
+	configFileOriginal map[string]interface{}
+	configWritebackCmd *cobra.Command // PersistentPreRun 记录的叶命令, 供 Execute 收尾回写
 )
 
 // AppVersion 在运行时可被 cmd/yinstall/main.go 的 init() 通过构建时注入的 Version 变量覆盖
@@ -67,9 +72,34 @@ A CLI tool for automating YashanDB installation, including:
   - Standby database setup
   - YCM/YMP installation
 
-Use  yinstall <command> -l  to print the step catalog (IDs, order, descriptions) for that command.`,
+Use  yinstall <command> -l  to print the step catalog (IDs, order, descriptions) for that command.
+Optional --config/-c loads a flat YAML parameter file (keys = long flag names; see examples/yinstall.example.yaml).
+CLI flags override the file; on exit the same file is overwritten with effective flag values (except with -l).`,
 	Version: AppVersion,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		configFileOriginal = nil
+		configWritebackCmd = cmd
+		configDebugLogPath = ""
+		clearConfigProcessLog()
+		if path := strings.TrimSpace(configFilePath); path != "" {
+			logConfigProcess("config load| path=%s cmd=%s", path, cmd.Name())
+			m, err := LoadConfigFileMap(path)
+			if err != nil {
+				logConfigProcess("config load| action=error err=%v", err)
+				return err
+			}
+			configFileOriginal = copyConfigMap(m)
+			keys := sortedConfigKeys(m)
+			logConfigProcess("config load| action=ok key_count=%d keys=%s", len(keys), strings.Join(keys, ","))
+			warn := func(format string, a ...interface{}) {
+				fmt.Fprintf(os.Stderr, "WARNING: "+format+"\n", a...)
+			}
+			if err := ApplyConfigMapToCommand(cmd, m, warn); err != nil {
+				logConfigProcess("config apply| action=error err=%v", err)
+				return err
+			}
+			logConfigProcess("config apply| action=done")
+		}
 		if err := validatePort("--ssh-port", sshPort); err != nil {
 			return err
 		}
@@ -81,7 +111,58 @@ Use  yinstall <command> -l  to print the step catalog (IDs, order, descriptions)
 }
 
 func Execute() error {
-	return rootCmd.Execute()
+	// cobra 在 RunE 失败时不会跑 PersistentPostRun; 在此统一回写以满足「失败也覆盖」。
+	runErr := rootCmd.Execute()
+	if wbErr := flushConfigWriteback(); wbErr != nil {
+		if runErr != nil {
+			return fmt.Errorf("%v; config writeback: %w", runErr, wbErr)
+		}
+		return wbErr
+	}
+	return runErr
+}
+
+// flushConfigWriteback 将生效 flags 合并写回 --config 文件.
+func flushConfigWriteback() error {
+	path := strings.TrimSpace(configFilePath)
+	if path == "" || configFileOriginal == nil || configWritebackCmd == nil {
+		return nil
+	}
+	if !configWritebackCmd.HasParent() {
+		return nil
+	}
+	configProcessMu.Lock()
+	auditFrom := len(configProcessLog)
+	configProcessMu.Unlock()
+	if listSteps {
+		logConfigProcess("config writeback| path=%s action=skip reason=list-steps", path)
+		appendConfigProcessLogToDebugFile(auditFrom)
+		return nil
+	}
+	includeKeys := make(map[string]bool, len(configFileOriginal))
+	for k := range configFileOriginal {
+		includeKeys[k] = true
+	}
+	flagVals := CollectCommandFlagValues(configWritebackCmd, includeKeys)
+	merged := MergeConfigForWrite(configFileOriginal, flagVals)
+	logConfigProcess("config writeback| path=%s action=start collected=%d merged=%d", path, len(flagVals), len(merged))
+	for _, k := range sortedConfigKeys(flagVals) {
+		logConfigProcess("config writeback| set key=%s value=%s", k, formatConfigValue(flagVals[k]))
+	}
+	for _, k := range sortedConfigKeys(merged) {
+		if _, ok := flagVals[k]; ok {
+			continue
+		}
+		logConfigProcess("config writeback| keep key=%s value=%s", k, formatConfigValue(merged[k]))
+	}
+	if err := WriteConfigFileAtomic(path, merged); err != nil {
+		logConfigProcess("config writeback| action=error err=%v", err)
+		appendConfigProcessLogToDebugFile(auditFrom)
+		return fmt.Errorf("write config file %s: %w", path, err)
+	}
+	logConfigProcess("config writeback| action=done path=%s", path)
+	appendConfigProcessLogToDebugFile(auditFrom)
+	return nil
 }
 
 // newSessionLogger 创建 session/debug 日志，并将完整启动命令行写入 debug 日志。
@@ -91,6 +172,7 @@ func newSessionLogger(runID, logDir string) (*logging.Logger, error) {
 		return nil, err
 	}
 	logger.LogInvocationCommandLine(os.Args)
+	flushConfigProcessLogToLogger(logger)
 	return logger, nil
 }
 
@@ -100,8 +182,19 @@ func SetAppVersion(version string) {
 	rootCmd.Version = version
 }
 
+// copyConfigMap 浅拷贝配置 map, 避免灌参过程改动原始快照.
+func copyConfigMap(m map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
 func init() {
 	// 全局参数
+	rootCmd.PersistentFlags().StringVarP(&configFilePath, "config", "c", "",
+		"YAML parameter file (flat keys = long flag names); CLI flags override file; on exit overwrites this file with effective values (see examples/yinstall.example.yaml)")
 	rootCmd.PersistentFlags().StringVar(&runID, "run-id", "", "Run ID (auto-generated if not specified)")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Skip each step's Action and PostCheck after PreCheck (connectivity/SSH and out-of-band checks may still run)")
 	rootCmd.PersistentFlags().BoolVar(&precheck, "precheck", false, "Only run checks, no changes")

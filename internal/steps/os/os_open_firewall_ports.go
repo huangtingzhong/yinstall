@@ -32,6 +32,12 @@ func stepOpenFirewallPorts() *runner.Step {
 			if result == nil || strings.TrimSpace(result.GetStdout()) != "active" {
 				return fmt.Errorf("firewalld is not active, skipping port open (will not start firewalld)")
 			}
+			// 只读端口计划：失败不阻断 Optional PreCheck（避免误 skip），仅打 debug
+			if want, err := resolveFirewallWantPorts(ctx); err != nil {
+				osLogPhase(ctx, "plan-ports", fmt.Sprintf("unavailable err=%s", runner.TruncateForLog(err.Error(), 80)))
+			} else {
+				osLogPhase(ctx, "plan-ports", fmt.Sprintf("want=%v", want))
+			}
 			return nil
 		},
 
@@ -159,7 +165,8 @@ func resolveFirewallWantPorts(ctx *runner.StepContext) ([]string, error) {
 	}
 	begin := ctx.GetParamInt("db_begin_port", 1688)
 	yac := ctx.GetParamBool("yac_mode", false)
-	ports := commonos.YashanFirewallTCPPorts(begin, yac)
+	mysqlMode := strings.EqualFold(strings.TrimSpace(ctx.GetParamString("db_mode", "")), "mysql")
+	ports := commonos.YashanFirewallTCPPorts(begin, yac, mysqlMode)
 	if len(ports) == 0 {
 		return nil, fmt.Errorf("auto firewall port set is empty (begin_port=%d)", begin)
 	}
@@ -167,7 +174,8 @@ func resolveFirewallWantPorts(ctx *runner.StepContext) ([]string, error) {
 	for _, p := range ports {
 		want = append(want, strconv.Itoa(p)+"/tcp")
 	}
-	ctx.Logger.Info("Firewall auto port set: %v (begin=%d yac=%v)", want, begin, yac)
+	osLogPhase(ctx, "auto-ports", fmt.Sprintf("begin=%d yac=%v mysql=%v want=%v", begin, yac, mysqlMode, want))
+	ctx.Logger.Info("Firewall auto port set: %v (begin=%d yac=%v mysql=%v)", want, begin, yac, mysqlMode)
 	return want, nil
 }
 

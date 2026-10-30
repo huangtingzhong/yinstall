@@ -307,9 +307,23 @@ func ReplicaPort(beginPort int, yac bool) int {
 	return beginPort + 1
 }
 
-// YashanFirewallTCPPorts 返回 enable 模式下自动放行的 TCP 端口集（begin/yasom/yasagent/复制口）。
-func YashanFirewallTCPPorts(beginPort int, yac bool) []int {
-	seen := make(map[int]struct{}, 4)
+// MysqlListenPort 返回 mysql 模式协议监听端口（yashandb.toml mysql_addr），与官方「网络准备」默认偏移一致：
+// 单机/单机主备 begin+2（1688→1690）；共享集群 begin+3（1688→1691，因 begin+2 为 YAC 复制口）。
+// 同机多实例改 --begin-port/--db-port 时，MySQL 客户端口应随此公式变化（yasboot se gen --mode mysql 亦按此生成）。
+func MysqlListenPort(beginPort int, yac bool) int {
+	if beginPort <= 0 {
+		return 0
+	}
+	if yac {
+		return beginPort + 3
+	}
+	return beginPort + 2
+}
+
+// YashanFirewallTCPPorts 返回 enable 模式下自动放行的 TCP 端口集（begin/yasom/yasagent/复制口；
+// mysqlMode 时追加 MysqlListenPort）。
+func YashanFirewallTCPPorts(beginPort int, yac bool, mysqlMode bool) []int {
+	seen := make(map[int]struct{}, 5)
 	var out []int
 	add := func(p int) {
 		if p <= 0 {
@@ -325,6 +339,9 @@ func YashanFirewallTCPPorts(beginPort int, yac bool) []int {
 	add(YasomListenPort(beginPort))
 	add(YasomAgentListenPort(beginPort))
 	add(ReplicaPort(beginPort, yac))
+	if mysqlMode {
+		add(MysqlListenPort(beginPort, yac))
+	}
 	return out
 }
 

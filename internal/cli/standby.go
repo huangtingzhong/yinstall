@@ -153,6 +153,11 @@ func tryFillBeginPortFromPrimary(cmd *cobra.Command, ex ssh.Executor, logger *lo
 		return fmt.Errorf("omit --db-port: failed to derive port from primary LISTEN_ADDR (v$parameter): %w", err)
 	}
 	if p, ok := params["db_begin_port"].(int); ok {
+		// 同步到 flag 绑定变量并标记 Changed, 供 --config 回写
+		standbyBeginPort = p
+		if f := cmd.Flag("db-port"); f != nil {
+			f.Changed = true
+		}
 		logger.Info("Database begin port: %d (from primary LISTEN_ADDR)", p)
 	}
 	return nil
@@ -177,6 +182,11 @@ func tryFillInterCIDRFromPrimary(cmd *cobra.Command, ex ssh.Executor, logger *lo
 		return fmt.Errorf("omit --yac-inter-cidr: failed to derive inter CIDR from primary LISTEN_ADDR: %w", err)
 	}
 	if v, ok := params["yac_inter_cidr"].(string); ok && v != "" {
+		// 同步到 flag 绑定变量并标记 Changed, 供 --config 回写
+		yacInterCIDR = v
+		if f := cmd.Flag("yac-inter-cidr"); f != nil {
+			f.Changed = true
+		}
 		logger.Info("YAC inter CIDR: %s (from primary LISTEN_ADDR; note: business-network derived — see FillInterCIDRFromPrimaryListenAddr)", v)
 	}
 	return nil

@@ -108,7 +108,7 @@ func init() {
 	dbCmd.Flags().StringVar(&dbCharacterSet, "db-character-set", "utf8", "Character set: UTF8, GBK, ASCII, GB18030, BINARY, UTF8MB3 (case-insensitive; LATIN1/UTF8MB4 not supported on 23.5.x)")
 	dbCmd.Flags().StringVar(&dbTimezone, "db-timezone", "", "Database TIME_ZONE in yashandb.toml (e.g. +08:00 or IANA); empty=read OS timezone via timedatectl (required if timedatectl unavailable)")
 	dbCmd.Flags().BoolVar(&dbUseNativeType, "db-use-native-type", false, "Set USE_NATIVE_TYPE in cluster TOML (native column types when true) (default: false)")
-	dbCmd.Flags().StringVar(&dbMode, "db-mode", "", "Standalone only: empty (default) or mysql (passes --mode mysql to yasboot package se gen; not supported for YAC/ce gen)")
+	dbCmd.Flags().StringVar(&dbMode, "db-mode", "", "Standalone only: empty (default) or mysql (passes --mode mysql to yasboot package se gen; mysql_addr=begin+2 e.g. 1688→1690; not supported for YAC/ce gen)")
 	dbCmd.Flags().StringVar(&dbSysPassword, "db-sys-password", dbsteps.DefaultSysPassword, "Database SYS password")
 	dbCmd.Flags().StringVar(&dbInstallPath, "db-home-path", "/data/yashan/yasdb_home", "Software installation path (auto-appends _<port> for non-default ports, e.g., yasdb_home_2688)")
 	dbCmd.Flags().StringVar(&dbDataPath, "db-data-path", "/data/yashan/yasdb_data", "Data directory path (auto-appends _<port> for non-default ports, e.g., yasdb_data_2688)")
