@@ -6,6 +6,14 @@
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [26.10.0] - 2026-10-30
+
+### Added
+
 - CalVer 版本号 `YY.MM.PATCH`（发版自动递增，日常构建为 `…+dev`）
 - `scripts/creds.sh`：GitLab API token 存 macOS 钥匙串，供 `build.sh --release` 使用
 - 发版流程与 CHANGELOG 联动（本版说明进 tag / Release，历史留在本文件）
