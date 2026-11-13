@@ -7,7 +7,7 @@ import (
 	"github.com/yinstall/internal/runner"
 )
 
-// StillMissingPackages 返回 packages 中仍未安装的包名列表。
+// StillMissingPackages 返回 packages（逻辑名）中仍未满足的包名列表。
 func StillMissingPackages(ctx *runner.StepContext, packages, pkgManager string) []string {
 	var still []string
 	for _, pkg := range strings.Fields(packages) {
@@ -106,7 +106,8 @@ func installViaHTTP(ctx *runner.StepContext, pkgManager, packages string, isRHEL
 	return cmd, runInstallCmd(ctx, cmd)
 }
 
-func tryLocalMediaFallback(ctx *runner.StepContext, pkgManager, pkgs string, isRHEL8 bool, trigger string) error {
+// tryLocalMediaFallback 用 installPkgs 执行本地介质安装，用 logicalPkgs 做能力满足验收。
+func tryLocalMediaFallback(ctx *runner.StepContext, pkgManager, installPkgs, logicalPkgs string, isRHEL8 bool, trigger string) error {
 	available, mediaReason := localMediaAvailability(ctx, true)
 	if !available {
 		ctx.LogPhase("fallback-unavailable", fmt.Sprintf("trigger=%s media_reason=%s", trigger, mediaReason))
@@ -116,16 +117,16 @@ func tryLocalMediaFallback(ctx *runner.StepContext, pkgManager, pkgs string, isR
 		"trigger=%s media=%s action=retry_local_media",
 		trigger, mediaReason,
 	))
-	ctx.LogPhase("local-install-start", fmt.Sprintf("packages=%s via=fallback", pkgs))
-	localCmd, localAttempt := installViaLocalMedia(ctx, pkgManager, pkgs, isRHEL8)
-	stillAfter := StillMissingPackages(ctx, pkgs, pkgManager)
+	ctx.LogPhase("local-install-start", fmt.Sprintf("packages=%s via=fallback", installPkgs))
+	localCmd, localAttempt := installViaLocalMedia(ctx, pkgManager, installPkgs, isRHEL8)
+	stillAfter := StillMissingPackages(ctx, logicalPkgs, pkgManager)
 	if localAttempt.err == nil && localAttempt.exitCode == 0 && len(stillAfter) == 0 {
-		ctx.LogPhase("local-install-done", fmt.Sprintf("packages=%s via=fallback", pkgs))
-		ctx.LogPhase("fallback-done", fmt.Sprintf("packages=%s result=installed_via_local_media", pkgs))
+		ctx.LogPhase("local-install-done", fmt.Sprintf("packages=%s via=fallback", logicalPkgs))
+		ctx.LogPhase("fallback-done", fmt.Sprintf("packages=%s result=installed_via_local_media", logicalPkgs))
 		return nil
 	}
 	logInstallAttemptPhase(ctx, "local-install-fail", localCmd, localAttempt, stillAfter)
-	ctx.LogPhase("fallback-fail", fmt.Sprintf("packages=%s still_missing=%s", pkgs, strings.Join(stillAfter, ",")))
+	ctx.LogPhase("fallback-fail", fmt.Sprintf("packages=%s still_missing=%s", logicalPkgs, strings.Join(stillAfter, ",")))
 	return finalizeInstallError(ctx, "local media fallback install", localAttempt, stillAfter)
 }
 
@@ -157,9 +158,10 @@ func finalizeInstallError(ctx *runner.StepContext, prefix string, attempt instal
 	return nil
 }
 
-// InstallPackages 安装 packages（空格分隔）。
+// InstallPackages 安装 packages（空格分隔的逻辑名）。
 // 空 os_yum_mode：先系统源；失败且有 ISO 时 fallback。
 // local：直接本地介质。http（IP/URL）：写自定义 repo 后安装，失败可再 fallback ISO。
+// 安装前按 OSInfo Resolve 为真实包名；满足判定仍按逻辑名（含 RPM Provides）。
 func InstallPackages(ctx *runner.StepContext, packages string) error {
 	packages = strings.TrimSpace(packages)
 	if packages == "" {
@@ -176,33 +178,48 @@ func InstallPackages(ctx *runner.StepContext, packages string) error {
 	ignore := ctx.GetParamBool("os_ignore_install_errors", false)
 	isRHEL8 := IsRHEL8(ctx.OSInfo)
 
+	logicalPkgs, installPkgs := ExpandLogicalInstallPackages(ctx.OSInfo, packages)
+	if installPkgs == "" {
+		return nil
+	}
+	logicalJoined := strings.Join(logicalPkgs, " ")
+
 	ctx.LogPhase("pkg-install-plan", fmt.Sprintf(
-		"yum_mode_raw=%q yum_mode=%q pkg_mgr=%s packages=%s rhel8=%v ignore_errors=%v",
-		rawMode, mode, pkgManager, packages, isRHEL8, ignore,
+		"yum_mode_raw=%q yum_mode=%q pkg_mgr=%s logical=%s install_as=%s rhel8=%v ignore_errors=%v",
+		rawMode, mode, pkgManager, logicalJoined, installPkgs, isRHEL8, ignore,
 	))
 
 	if pkgManager == "apt" {
 		if IsHTTPYumMode(mode) {
 			return fmt.Errorf("os-yum-mode HTTP endpoint is not supported with apt; use system apt sources or switch to yum/dnf hosts")
 		}
-		ctx.LogPhase("system-install-start", fmt.Sprintf("pkg_mgr=apt packages=%s", packages))
-		cmd, attempt := installViaSystem(ctx, pkgManager, packages, isRHEL8)
-		still := StillMissingPackages(ctx, packages, pkgManager)
+		ctx.LogPhase("system-install-start", fmt.Sprintf("pkg_mgr=apt packages=%s", installPkgs))
+		cmd, attempt := installViaSystem(ctx, pkgManager, installPkgs, isRHEL8)
+		still := StillMissingPackages(ctx, logicalJoined, pkgManager)
 		if len(still) == 0 && attempt.err == nil && attempt.exitCode == 0 {
-			ctx.LogPhase("system-install-done", fmt.Sprintf("packages=%s", packages))
+			ctx.LogPhase("system-install-done", fmt.Sprintf("packages=%s", logicalJoined))
 		} else {
 			logInstallAttemptPhase(ctx, "system-install-fail", cmd, attempt, still)
 		}
 		return finalizeInstallError(ctx, "apt install", attempt, still)
 	}
 
-	installOne := func(pkgs string) error {
+	// logical：验收用逻辑名；内部再 Expand 得到 install 名
+	installOne := func(logical string) error {
+		_, install := ExpandLogicalInstallPackages(ctx.OSInfo, logical)
+		if install == "" {
+			return nil
+		}
+		if install != strings.Join(strings.Fields(logical), " ") {
+			ctx.LogPhase("pkg-resolve", fmt.Sprintf("logical=%s install_as=%s", logical, install))
+		}
+
 		if IsHTTPYumMode(mode) {
-			ctx.LogPhase("http-install-start", fmt.Sprintf("packages=%s", pkgs))
-			cmd, attempt := installViaHTTP(ctx, pkgManager, pkgs, isRHEL8)
-			still := StillMissingPackages(ctx, pkgs, pkgManager)
+			ctx.LogPhase("http-install-start", fmt.Sprintf("packages=%s", install))
+			cmd, attempt := installViaHTTP(ctx, pkgManager, install, isRHEL8)
+			still := StillMissingPackages(ctx, logical, pkgManager)
 			if attempt.err == nil && attempt.exitCode == 0 && len(still) == 0 {
-				ctx.LogPhase("http-install-done", fmt.Sprintf("packages=%s", pkgs))
+				ctx.LogPhase("http-install-done", fmt.Sprintf("packages=%s", logical))
 				return nil
 			}
 			logInstallAttemptPhase(ctx, "http-install-fail", cmd, attempt, still)
@@ -210,7 +227,7 @@ func InstallPackages(ctx *runner.StepContext, packages string) error {
 				return finalizeInstallError(ctx, "HTTP yum install", attempt, still)
 			}
 			trigger := fallbackTriggerReason(attempt, still)
-			if err := tryLocalMediaFallback(ctx, pkgManager, pkgs, isRHEL8, trigger); err != nil {
+			if err := tryLocalMediaFallback(ctx, pkgManager, install, logical, isRHEL8, trigger); err != nil {
 				if len(still) > 0 {
 					return fmt.Errorf("HTTP yum install failed and %w; still missing: %s", err, strings.Join(still, ", "))
 				}
@@ -220,22 +237,22 @@ func InstallPackages(ctx *runner.StepContext, packages string) error {
 		}
 
 		if IsLocalYumMode(mode) {
-			ctx.LogPhase("local-install-start", fmt.Sprintf("packages=%s", pkgs))
-			cmd, attempt := installViaLocalMedia(ctx, pkgManager, pkgs, isRHEL8)
-			still := StillMissingPackages(ctx, pkgs, pkgManager)
+			ctx.LogPhase("local-install-start", fmt.Sprintf("packages=%s", install))
+			cmd, attempt := installViaLocalMedia(ctx, pkgManager, install, isRHEL8)
+			still := StillMissingPackages(ctx, logical, pkgManager)
 			if attempt.err == nil && attempt.exitCode == 0 && len(still) == 0 {
-				ctx.LogPhase("local-install-done", fmt.Sprintf("packages=%s", pkgs))
+				ctx.LogPhase("local-install-done", fmt.Sprintf("packages=%s", logical))
 				return nil
 			}
 			logInstallAttemptPhase(ctx, "local-install-fail", cmd, attempt, still)
 			return finalizeInstallError(ctx, "local media install", attempt, still)
 		}
 
-		ctx.LogPhase("system-install-start", fmt.Sprintf("packages=%s", pkgs))
-		cmd, attempt := installViaSystem(ctx, pkgManager, pkgs, isRHEL8)
-		still := StillMissingPackages(ctx, pkgs, pkgManager)
+		ctx.LogPhase("system-install-start", fmt.Sprintf("packages=%s", install))
+		cmd, attempt := installViaSystem(ctx, pkgManager, install, isRHEL8)
+		still := StillMissingPackages(ctx, logical, pkgManager)
 		if attempt.err == nil && attempt.exitCode == 0 && len(still) == 0 {
-			ctx.LogPhase("system-install-done", fmt.Sprintf("packages=%s", pkgs))
+			ctx.LogPhase("system-install-done", fmt.Sprintf("packages=%s", logical))
 			return nil
 		}
 		logInstallAttemptPhase(ctx, "system-install-fail", cmd, attempt, still)
@@ -246,7 +263,7 @@ func InstallPackages(ctx *runner.StepContext, packages string) error {
 		}
 
 		trigger := fallbackTriggerReason(attempt, still)
-		if err := tryLocalMediaFallback(ctx, pkgManager, pkgs, isRHEL8, trigger); err != nil {
+		if err := tryLocalMediaFallback(ctx, pkgManager, install, logical, isRHEL8, trigger); err != nil {
 			msg := "system repo install failed and " + err.Error()
 			if len(still) > 0 {
 				msg = fmt.Sprintf("%s; still missing: %s", msg, strings.Join(still, ", "))
@@ -265,11 +282,7 @@ func InstallPackages(ctx *runner.StepContext, packages string) error {
 
 	if ignore {
 		var failed []string
-		for _, pkg := range strings.Fields(packages) {
-			pkg = strings.TrimSpace(pkg)
-			if pkg == "" {
-				continue
-			}
+		for _, pkg := range logicalPkgs {
 			ctx.LogPhase("pkg-install-one-start", fmt.Sprintf("package=%s ignore_errors=true", pkg))
 			if err := installOne(pkg); err != nil {
 				failed = append(failed, pkg)
@@ -279,23 +292,23 @@ func InstallPackages(ctx *runner.StepContext, packages string) error {
 				ctx.LogPhase("pkg-install-one-done", fmt.Sprintf("package=%s", pkg))
 			}
 		}
-		still := StillMissingPackages(ctx, packages, pkgManager)
+		still := StillMissingPackages(ctx, logicalJoined, pkgManager)
 		for _, p := range still {
 			if !containsString(failed, p) {
 				ctx.Logger.Warn("Package still missing after install attempts: %s (--os-ignore-install-errors)", p)
 				ctx.LogPhase("pkg-install-one-fail", fmt.Sprintf("package=%s reason=still_missing_after_attempts", p))
 			}
 		}
-		ctx.LogPhase("pkg-install-done", fmt.Sprintf("packages=%s ignore_errors=true still_missing=%d", packages, len(still)))
+		ctx.LogPhase("pkg-install-done", fmt.Sprintf("packages=%s ignore_errors=true still_missing=%d", logicalJoined, len(still)))
 		return nil
 	}
 
-	err := installOne(packages)
+	err := installOne(logicalJoined)
 	if err != nil {
-		ctx.LogPhase("pkg-install-fail", fmt.Sprintf("packages=%s err=%s", packages, runner.TruncateForLog(err.Error(), 160)))
+		ctx.LogPhase("pkg-install-fail", fmt.Sprintf("packages=%s err=%s", logicalJoined, runner.TruncateForLog(err.Error(), 160)))
 		return err
 	}
-	ctx.LogPhase("pkg-install-done", fmt.Sprintf("packages=%s", packages))
+	ctx.LogPhase("pkg-install-done", fmt.Sprintf("packages=%s", logicalJoined))
 	return nil
 }
 

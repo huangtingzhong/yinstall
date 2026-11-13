@@ -1,6 +1,7 @@
 package os
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,6 +86,23 @@ version = 8.8
 arch = aarch64
 `
 
+func expectedLocalRepoRHEL8(mountpoint string) string {
+	return fmt.Sprintf(
+		"[local-baseos]\nname=DVD for RHEL - BaseOS\nbaseurl=file://%s/BaseOS\nenabled=1\ngpgcheck=0\n\n"+
+			"[local-appstream]\nname=DVD for RHEL - AppStream\nbaseurl=file://%s/AppStream\nenabled=1\ngpgcheck=0\n",
+		mountpoint, mountpoint)
+}
+
+func expectedLocalRepoFlat(mountpoint string) string {
+	return fmt.Sprintf(
+		"[local]\nname=Enterprise Linux DVD\nbaseurl=file://%s\ngpgcheck=0\nenabled=1\n",
+		mountpoint)
+}
+
+func isCatLocalRepo(cmd string) bool {
+	return strings.Contains(cmd, "cat") && strings.Contains(cmd, "local.repo")
+}
+
 func TestEnsureLocalISORepo_skipsWhenNotLocalISO(t *testing.T) {
 	ctx := isoTestCtx(t, &isoStubExecutor{}, map[string]interface{}{
 		"os_yum_mode": "none",
@@ -95,12 +113,17 @@ func TestEnsureLocalISORepo_skipsWhenNotLocalISO(t *testing.T) {
 }
 
 func TestEnsureLocalISORepo_skipsWhenAlreadyMountedAndRepoExists(t *testing.T) {
+	want := expectedLocalRepoRHEL8("/media")
+	var sawPrintf bool
 	exec := &isoStubExecutor{
 		handler: func(cmd string) *isoStubResult {
 			switch {
 			case strings.Contains(cmd, "mountpoint -q /media"):
 				return &isoStubResult{exit: 0}
-			case strings.Contains(cmd, "test -f /etc/yum.repos.d/local.repo"):
+			case isCatLocalRepo(cmd):
+				return &isoStubResult{stdout: want, exit: 0}
+			case strings.Contains(cmd, "printf"):
+				sawPrintf = true
 				return &isoStubResult{exit: 0}
 			default:
 				return &isoStubResult{exit: 0}
@@ -112,6 +135,9 @@ func TestEnsureLocalISORepo_skipsWhenAlreadyMountedAndRepoExists(t *testing.T) {
 	}, ol88Aarch64OSInfo())
 	if err := EnsureLocalISORepo(ctx); err != nil {
 		t.Fatal(err)
+	}
+	if sawPrintf {
+		t.Fatal("expected yum-repo content skip without printf rewrite")
 	}
 }
 
@@ -138,8 +164,8 @@ func TestEnsureLocalISORepo_autoUsesMatchingBlockDevice(t *testing.T) {
 			case strings.Contains(cmd, "mount -t iso9660 /dev/cdrom /media"):
 				mounted = true
 				return &isoStubResult{exit: 0}
-			case strings.Contains(cmd, "test -f /etc/yum.repos.d/local.repo"):
-				return &isoStubResult{exit: 1}
+			case isCatLocalRepo(cmd):
+				return &isoStubResult{stdout: "", exit: 0}
 			case strings.Contains(cmd, "printf"):
 				return &isoStubResult{exit: 0}
 			case strings.Contains(cmd, "mkdir -p"):
@@ -325,8 +351,8 @@ func TestEnsureRepoFile_rhel8Creates(t *testing.T) {
 	exec := &isoStubExecutor{
 		handler: func(cmd string) *isoStubResult {
 			switch {
-			case strings.Contains(cmd, "test -f /etc/yum.repos.d/local.repo"):
-				return &isoStubResult{exit: 1}
+			case isCatLocalRepo(cmd):
+				return &isoStubResult{stdout: "", exit: 0}
 			case strings.Contains(cmd, "printf"):
 				written = cmd
 				return &isoStubResult{exit: 0}
@@ -349,8 +375,8 @@ func TestEnsureRepoFile_rhel7Creates(t *testing.T) {
 	exec := &isoStubExecutor{
 		handler: func(cmd string) *isoStubResult {
 			switch {
-			case strings.Contains(cmd, "test -f"):
-				return &isoStubResult{exit: 1}
+			case isCatLocalRepo(cmd):
+				return &isoStubResult{stdout: "", exit: 0}
 			case strings.Contains(cmd, "printf"):
 				written = cmd
 				return &isoStubResult{exit: 0}
@@ -366,6 +392,81 @@ func TestEnsureRepoFile_rhel7Creates(t *testing.T) {
 	}
 	if !strings.Contains(written, "[local]") || strings.Contains(written, "local-baseos") {
 		t.Fatalf("expected rhel7 single repo, got: %s", written)
+	}
+}
+
+func TestEnsureRepoFile_skipsWhenContentMatches(t *testing.T) {
+	want := expectedLocalRepoRHEL8("/media")
+	var sawPrintf bool
+	exec := &isoStubExecutor{
+		handler: func(cmd string) *isoStubResult {
+			switch {
+			case isCatLocalRepo(cmd):
+				return &isoStubResult{stdout: want, exit: 0}
+			case strings.Contains(cmd, "printf"):
+				sawPrintf = true
+				return &isoStubResult{exit: 0}
+			default:
+				return &isoStubResult{exit: 0}
+			}
+		},
+	}
+	ctx := isoTestCtx(t, exec, nil, ol88Aarch64OSInfo())
+	if err := ensureRepoFile(ctx, "/media", "/etc/yum.repos.d/local.repo"); err != nil {
+		t.Fatal(err)
+	}
+	if sawPrintf {
+		t.Fatal("expected skip when repo content already matches")
+	}
+}
+
+func TestEnsureRepoFile_rewritesWhenContentDiffers(t *testing.T) {
+	var written string
+	exec := &isoStubExecutor{
+		handler: func(cmd string) *isoStubResult {
+			switch {
+			case isCatLocalRepo(cmd):
+				return &isoStubResult{stdout: "[local]\nstale=1\n", exit: 0}
+			case strings.Contains(cmd, "printf"):
+				written = cmd
+				return &isoStubResult{exit: 0}
+			default:
+				return &isoStubResult{exit: 0}
+			}
+		},
+	}
+	ctx := isoTestCtx(t, exec, nil, ol88Aarch64OSInfo())
+	if err := ensureRepoFile(ctx, "/media", "/etc/yum.repos.d/local.repo"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(written, "local-baseos") {
+		t.Fatalf("expected rewrite to rhel8 dual repo, got: %s", written)
+	}
+}
+
+func TestEnsureRepoFile_flatContentMatchSkips(t *testing.T) {
+	want := expectedLocalRepoFlat("/media")
+	var sawPrintf bool
+	exec := &isoStubExecutor{
+		handler: func(cmd string) *isoStubResult {
+			switch {
+			case isCatLocalRepo(cmd):
+				return &isoStubResult{stdout: want, exit: 0}
+			case strings.Contains(cmd, "printf"):
+				sawPrintf = true
+				return &isoStubResult{exit: 0}
+			default:
+				return &isoStubResult{exit: 0}
+			}
+		},
+	}
+	osInfo := &runner.OSInfo{ID: "rhel", VersionID: "7.9", IsRHEL7: true, PkgManager: "yum"}
+	ctx := isoTestCtx(t, exec, nil, osInfo)
+	if err := ensureRepoFile(ctx, "/media", "/etc/yum.repos.d/local.repo"); err != nil {
+		t.Fatal(err)
+	}
+	if sawPrintf {
+		t.Fatal("expected skip for matching flat local repo")
 	}
 }
 
@@ -509,14 +610,15 @@ func TestMountISOAt_commands(t *testing.T) {
 
 func TestEnsureLocalISORepoBeforeInstall_delegates(t *testing.T) {
 	called := false
+	want := expectedLocalRepoRHEL8("/media")
 	exec := &isoStubExecutor{
 		handler: func(cmd string) *isoStubResult {
 			if strings.Contains(cmd, "mountpoint -q /media") {
 				called = true
 				return &isoStubResult{exit: 0}
 			}
-			if strings.Contains(cmd, "test -f") {
-				return &isoStubResult{exit: 0}
+			if isCatLocalRepo(cmd) {
+				return &isoStubResult{stdout: want, exit: 0}
 			}
 			return &isoStubResult{exit: 0}
 		},

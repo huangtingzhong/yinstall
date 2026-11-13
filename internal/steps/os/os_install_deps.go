@@ -302,14 +302,14 @@ func stepInstallDeps() *runner.Step {
 						successCount++
 						continue
 					}
-					if commonos.IsPackageInstalled(ctx, pkg, pkgManager) {
+					if commonos.IsDepPackageSatisfied(ctx, pkg, pkgManager) {
 						successCount++
 						continue
 					}
 					if err := commonos.InstallPackages(ctx, pkg); err != nil {
 						failCount++
 						osLogPhase(ctx, "tools-pkg-unavailable", fmt.Sprintf("package=%s reason=install_failed", pkg))
-					} else if commonos.IsPackageInstalled(ctx, pkg, pkgManager) {
+					} else if commonos.IsDepPackageSatisfied(ctx, pkg, pkgManager) {
 						successCount++
 					} else {
 						failCount++

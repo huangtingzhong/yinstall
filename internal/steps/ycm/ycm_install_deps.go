@@ -35,7 +35,7 @@ func stepInstallDeps() *runner.Step {
 				if pkg == "" {
 					continue
 				}
-				if !commonos.IsPackageInstalled(ctx, pkg, pkgManager) {
+				if !commonos.IsDepPackageSatisfied(ctx, pkg, pkgManager) {
 					ycmLogPhase(ctx, "deps-precheck-missing", fmt.Sprintf("package=%s", pkg))
 					allInstalled = false
 				}
@@ -82,8 +82,8 @@ func stepInstallDeps() *runner.Step {
 				if pkg == "" {
 					continue
 				}
-				if commonos.IsPackageInstalled(ctx, pkg, pkgManager) {
-					ycmLogPhase(ctx, "verify-done", fmt.Sprintf("package=%s method=rpm_dpkg", pkg))
+				if commonos.IsDepPackageSatisfied(ctx, pkg, pkgManager) {
+					ycmLogPhase(ctx, "verify-done", fmt.Sprintf("package=%s method=capability", pkg))
 				} else {
 					// libnsl 等库可能包名与 rpm 名不完全一致，用 ldconfig 补充检查
 					result, _ := ctx.Execute(fmt.Sprintf("ldconfig -p 2>/dev/null | grep -i %s", pkg), false)
