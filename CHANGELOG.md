@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- `standby --precheck`：缺尚未生成的 `*_add.toml` 时不再在 Add Standby Instance 硬失败（与 Generate Expansion Config 文案对齐 skip 匹配）
+
 ## [26.10.0] - 2026-10-30
 
 ### Added

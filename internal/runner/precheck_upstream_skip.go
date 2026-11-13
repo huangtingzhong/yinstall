@@ -26,7 +26,7 @@ func isUpstreamArtifactMissingMessage(msg string) bool {
 		"hosts.toml not found at ",
 		"cluster config not found at ",
 		"hosts_add.toml not found",
-		"_add.toml not found, run E-011",
+		"_add.toml not found",
 		"deploy config not found: ",
 		"deploy config file not found: ",
 		"ycm-init not found in any of:",
