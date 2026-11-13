@@ -14,6 +14,7 @@
 
 - 包依赖/工具安装：按逻辑名 Resolve（如 EL8/openEuler/麒麟上 `dstat`→`pcp-system-tools`），满足判定认 RPM Provides，避免假 missing 误触发 ISO 上传
 - HTTP/local yum repo 按内容幂等写入：同内容不再重复 `printf` 覆盖；内容变化或缺文件时才写
+- `standby --precheck`：缺尚未生成的 `*_add.toml` 时不再在 Add Standby Instance 硬失败（与 Generate Expansion Config 文案对齐 skip 匹配）
 
 ## [26.10.0] - 2026-10-30
 
