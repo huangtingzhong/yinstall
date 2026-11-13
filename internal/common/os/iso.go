@@ -2,7 +2,7 @@
 //
 // EnsureLocalISORepo 在 os_yum_mode=local 时确保：
 //  1. ISO 已挂载到指定挂载点
-//  2. YUM repo 文件存在（不存在则自动生成）
+//  2. YUM repo 文件内容与期望一致（同内容幂等 skip；缺失或过期则写入）
 //
 // ISO 来源查找顺序（--os-iso-device=auto 为默认）：
 //  a. 依次探测 /dev/cdrom、/dev/sr0：临时挂载并读取 .treeinfo/.discinfo，版本/架构与目标 OS 一致则直接使用
@@ -14,7 +14,6 @@ package os
 
 import (
 	"fmt"
-	"path"
 	"path/filepath"
 	"strings"
 
@@ -469,14 +468,6 @@ func remoteISOSearchDirs(ctx *runner.StepContext) []string {
 }
 
 func ensureRepoFile(ctx *runner.StepContext, mountpoint, repoFile string) error {
-	r, _ := ctx.Execute(fmt.Sprintf("test -f %s", repoFile), false)
-	if r != nil && r.GetExitCode() == 0 {
-		ctx.LogPhase("repo-file-skip", fmt.Sprintf("repo_file=%s already_exists=true", repoFile))
-		return nil
-	}
-
-	ctx.LogPhase("repo-file-create-start", fmt.Sprintf("repo_file=%s", repoFile))
-
 	var repoContent string
 	// 与 HTTP BaseURLs / BuildInstallCmd 一致：仅 IsRHEL8 双仓，RHEL7/openEuler 扁平单仓
 	if IsRHEL8(ctx.OSInfo) {
@@ -489,15 +480,5 @@ func ensureRepoFile(ctx *runner.StepContext, mountpoint, repoFile string) error 
 			"[local]\nname=Enterprise Linux DVD\nbaseurl=file://%s\ngpgcheck=0\nenabled=1\n",
 			mountpoint)
 	}
-
-	ctx.Execute(fmt.Sprintf("mkdir -p %s", path.Dir(repoFile)), true)
-
-	escaped := strings.ReplaceAll(repoContent, "'", `'\''`)
-	cmd := fmt.Sprintf("printf '%%s' '%s' > %s", escaped, repoFile)
-	if _, err := ctx.ExecuteWithCheck(cmd, true); err != nil {
-		return fmt.Errorf("failed to write repo file %s: %w", repoFile, err)
-	}
-
-	ctx.LogPhase("repo-file-create-done", fmt.Sprintf("repo_file=%s", repoFile))
-	return nil
+	return ensureYumRepoFileContent(ctx, repoFile, repoContent)
 }

@@ -8,7 +8,12 @@
 
 ### Changed
 
+- local yum repo 判定由「文件存在即跳过」改为与 HTTP 相同的内容比较（错误内容会纠正）
+
 ### Fixed
+
+- 包依赖/工具安装：按逻辑名 Resolve（如 EL8/openEuler/麒麟上 `dstat`→`pcp-system-tools`），满足判定认 RPM Provides，避免假 missing 误触发 ISO 上传
+- HTTP/local yum repo 按内容幂等写入：同内容不再重复 `printf` 覆盖；内容变化或缺文件时才写
 
 ## [26.10.0] - 2026-10-30
 

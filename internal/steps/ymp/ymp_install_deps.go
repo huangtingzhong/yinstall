@@ -29,7 +29,7 @@ func stepInstallDeps() *runner.Step {
 			pkgList := strings.Fields(packages)
 			allInstalled := true
 			for _, pkg := range pkgList {
-				if !commonos.IsPackageInstalled(ctx, pkg, pkgManager) {
+				if !commonos.IsDepPackageSatisfied(ctx, pkg, pkgManager) {
 					allInstalled = false
 					break
 				}
@@ -64,7 +64,7 @@ func stepInstallDeps() *runner.Step {
 			pkgManager := commonos.GetPkgManager(ctx.OSInfo)
 			packages := ctx.GetParamString("ymp_deps_packages", "libaio lsof")
 			for _, pkg := range strings.Fields(packages) {
-				if commonos.IsPackageInstalled(ctx, pkg, pkgManager) {
+				if commonos.IsDepPackageSatisfied(ctx, pkg, pkgManager) {
 					ympLogPhase(ctx, "verify-done", fmt.Sprintf("package=%s", pkg))
 				} else {
 					ctx.Logger.Warn("Package may not be installed: %s", pkg)

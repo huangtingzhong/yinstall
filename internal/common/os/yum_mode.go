@@ -279,7 +279,7 @@ func ResolveHTTPYumRepoFile(ctx *runner.StepContext) string {
 	return f
 }
 
-// PrepareHTTPRepo 按 OS 版本写入自定义 HTTP yum repo 文件。
+// PrepareHTTPRepo 按 OS 版本确保自定义 HTTP yum repo 文件内容正确（同内容幂等 skip）。
 func PrepareHTTPRepo(ctx *runner.StepContext) error {
 	ensureOSInfo(ctx)
 	ep := GetYumHTTPEndpoint(ctx)
@@ -291,15 +291,38 @@ func PrepareHTTPRepo(ctx *runner.StepContext) error {
 		return err
 	}
 	repoFile := ResolveHTTPYumRepoFile(ctx)
-	ctx.LogPhase("http-repo-start", fmt.Sprintf(
+	ctx.LogPhase("http-repo-plan", fmt.Sprintf(
 		"repo_file=%s root=%s",
 		repoFile, ep.RootURL(),
 	))
-	if err := writeYumRepoFile(ctx, repoFile, content); err != nil {
+	if err := ensureYumRepoFileContent(ctx, repoFile, content); err != nil {
 		ctx.LogPhase("http-repo-fail", err.Error())
 		return err
 	}
-	ctx.LogPhase("http-repo-done", fmt.Sprintf("repo_file=%s", repoFile))
+	return nil
+}
+
+// ensureYumRepoFileContent 按期望内容幂等写入 yum repo 文件；规范化后相同则 skip。
+func ensureYumRepoFileContent(ctx *runner.StepContext, repoFile, expected string) error {
+	repoFile = strings.TrimSpace(repoFile)
+	if repoFile == "" {
+		return fmt.Errorf("yum repo file path is empty")
+	}
+	var cur string
+	r, _ := ctx.Execute(fmt.Sprintf("cat %s 2>/dev/null || true", ShellSingleQuote(repoFile)), false)
+	if r != nil {
+		cur = r.GetStdout()
+	}
+	if TextContentEqual(cur, expected) {
+		ctx.LogPhase("yum-repo-skip", fmt.Sprintf("repo_file=%s reason=unchanged", repoFile))
+		return nil
+	}
+	ctx.LogPhase("yum-repo-write-start", fmt.Sprintf("repo_file=%s", repoFile))
+	if err := writeYumRepoFile(ctx, repoFile, expected); err != nil {
+		ctx.LogPhase("yum-repo-write-fail", err.Error())
+		return err
+	}
+	ctx.LogPhase("yum-repo-write-done", fmt.Sprintf("repo_file=%s", repoFile))
 	return nil
 }
 
